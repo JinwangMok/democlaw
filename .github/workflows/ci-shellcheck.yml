@@ -1,0 +1,58 @@
+name: ShellCheck
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.sh"
+      - ".github/workflows/ci-shellcheck.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.sh"
+      - ".github/workflows/ci-shellcheck.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: Lint shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+
+      - name: Find shell scripts
+        id: find-scripts
+        run: |
+          scripts=$(find . -name '*.sh' -not -path './.git/*' -not -path './.omc/*' | sort)
+          echo "Found shell scripts:"
+          echo "$scripts"
+          if [ -z "$scripts" ]; then
+            echo "No shell scripts found."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run ShellCheck
+        if: steps.find-scripts.outputs.found == 'true'
+        run: |
+          exit_code=0
+          while IFS= read -r script; do
+            echo "::group::Checking $script"
+            if shellcheck --severity=warning --shell=bash "$script"; then
+              echo "✓ $script passed"
+            else
+              echo "✗ $script failed"
+              exit_code=1
+            fi
+            echo "::endgroup::"
+          done < <(find . -name '*.sh' -not -path './.git/*' -not -path './.omc/*' | sort)
+          exit "$exit_code"

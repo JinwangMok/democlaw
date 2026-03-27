@@ -1,0 +1,207 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint shell scripts with ShellCheck
+  # ---------------------------------------------------------------------------
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+
+      - name: Find and lint shell scripts
+        run: |
+          scripts=$(find . -name '*.sh' -not -path './.git/*' -not -path './.omc/*' | sort)
+          if [ -z "$scripts" ]; then
+            echo "No shell scripts found — skipping."
+            exit 0
+          fi
+          echo "Found shell scripts:"
+          echo "$scripts"
+          echo ""
+          exit_code=0
+          while IFS= read -r script; do
+            echo "::group::Checking $script"
+            if shellcheck --severity=warning --shell=bash "$script"; then
+              echo "✓ $script passed"
+            else
+              echo "✗ $script failed"
+              exit_code=1
+            fi
+            echo "::endgroup::"
+          done <<< "$scripts"
+          exit "$exit_code"
+
+  # ---------------------------------------------------------------------------
+  # Lint Dockerfiles with hadolint
+  # ---------------------------------------------------------------------------
+  hadolint:
+    name: Hadolint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install hadolint
+        run: |
+          HADOLINT_VERSION="v2.12.0"
+          curl -sL "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+            -o /usr/local/bin/hadolint
+          chmod +x /usr/local/bin/hadolint
+          hadolint --version
+
+      - name: Find and lint Dockerfiles
+        run: |
+          dockerfiles=$(find . -name 'Dockerfile' -not -path './.git/*' -not -path './.omc/*' | sort)
+          if [ -z "$dockerfiles" ]; then
+            echo "No Dockerfiles found — skipping."
+            exit 0
+          fi
+          echo "Found Dockerfiles:"
+          echo "$dockerfiles"
+          echo ""
+          exit_code=0
+          while IFS= read -r dockerfile; do
+            echo "::group::Checking $dockerfile"
+            if hadolint "$dockerfile"; then
+              echo "✓ $dockerfile passed"
+            else
+              echo "✗ $dockerfile failed"
+              exit_code=1
+            fi
+            echo "::endgroup::"
+          done <<< "$dockerfiles"
+          exit "$exit_code"
+
+  # ---------------------------------------------------------------------------
+  # Validate .env.example and Makefile syntax
+  # ---------------------------------------------------------------------------
+  repo-hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Required files exist
+        run: |
+          status=0
+          for f in README.md LICENSE .env.example Makefile; do
+            if [ -f "$f" ]; then
+              echo "✓ $f exists"
+            else
+              echo "✗ $f is MISSING"
+              status=1
+            fi
+          done
+          exit "$status"
+
+      - name: Validate Makefile syntax
+        run: make -n help >/dev/null 2>&1
+
+      - name: Shell scripts are executable
+        run: |
+          status=0
+          while IFS= read -r script; do
+            if [ -x "$script" ]; then
+              echo "✓ $script is executable"
+            else
+              echo "✗ $script is NOT executable"
+              status=1
+            fi
+          done < <(find . -name '*.sh' -not -path './.git/*' -not -path './.omc/*' | sort)
+          exit "$status"
+
+  # ---------------------------------------------------------------------------
+  # Dry-run Docker image builds (CPU-only, no GPU tests, no push)
+  # ---------------------------------------------------------------------------
+  docker-build:
+    name: Docker build (dry-run)
+    runs-on: ubuntu-latest
+    needs: [shellcheck, hadolint]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build vLLM image (Docker)
+        run: |
+          echo "::group::Building vLLM Dockerfile with Docker"
+          docker build --no-cache --tag democlaw/vllm:ci-docker ./vllm
+          echo "::endgroup::"
+          echo "✓ vLLM image built successfully (Docker)"
+
+      - name: Build OpenClaw image (Docker)
+        run: |
+          echo "::group::Building OpenClaw Dockerfile with Docker"
+          docker build --no-cache --tag democlaw/openclaw:ci-docker ./openclaw
+          echo "::endgroup::"
+          echo "✓ OpenClaw image built successfully (Docker)"
+
+      - name: Verify images exist (no push)
+        run: |
+          docker image inspect democlaw/vllm:ci-docker > /dev/null 2>&1
+          echo "✓ democlaw/vllm:ci-docker exists locally"
+          docker image inspect democlaw/openclaw:ci-docker > /dev/null 2>&1
+          echo "✓ democlaw/openclaw:ci-docker exists locally"
+          echo ""
+          echo "Dry-run complete — images built but NOT pushed."
+
+  # ---------------------------------------------------------------------------
+  # Dry-run Podman image builds (CPU-only, no GPU tests, no push)
+  # ---------------------------------------------------------------------------
+  podman-build:
+    name: Podman build (dry-run)
+    runs-on: ubuntu-latest
+    needs: [shellcheck, hadolint]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure Podman is available
+        run: |
+          podman --version || {
+            echo "::error::Podman is not installed"
+            exit 1
+          }
+
+      - name: Build vLLM image (Podman)
+        run: |
+          echo "::group::Building vLLM Dockerfile with Podman"
+          podman build --no-cache --tag democlaw/vllm:ci-podman ./vllm
+          echo "::endgroup::"
+          echo "✓ vLLM image built successfully (Podman)"
+
+      - name: Build OpenClaw image (Podman)
+        run: |
+          echo "::group::Building OpenClaw Dockerfile with Podman"
+          podman build --no-cache --tag democlaw/openclaw:ci-podman ./openclaw
+          echo "::endgroup::"
+          echo "✓ OpenClaw image built successfully (Podman)"
+
+      - name: Verify images exist (no push)
+        run: |
+          podman image inspect democlaw/vllm:ci-podman > /dev/null 2>&1
+          echo "✓ democlaw/vllm:ci-podman exists locally"
+          podman image inspect democlaw/openclaw:ci-podman > /dev/null 2>&1
+          echo "✓ democlaw/openclaw:ci-podman exists locally"
+          echo ""
+          echo "Dry-run complete — images built but NOT pushed."
