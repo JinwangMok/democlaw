@@ -19,7 +19,7 @@
 #        • Set SKIP_MODEL_PULL=true to bypass entirely
 #   7. Launch the vLLM container with:
 #        • NVIDIA GPU passthrough (--gpus all / --device nvidia.com/gpu=all)
-#        • Qwen/Qwen3.5-9B-AWQ model (AWQ 4-bit quantization)
+#        • Qwen/Qwen2.5-7B-Instruct-AWQ model (AWQ 4-bit quantization)
 #        • OpenAI-compatible API server bound to a configurable host port
 #
 # Usage:
@@ -27,11 +27,11 @@
 #   VLLM_HOST_PORT=9000 ./scripts/run_vllm.sh        # expose API on host port 9000
 #   CONTAINER_RUNTIME=podman ./scripts/run_vllm.sh   # force podman
 #   SKIP_MODEL_PULL=true ./scripts/run_vllm.sh       # skip model download (cached)
-#   MODEL_NAME=Qwen/Qwen3.5-9B-AWQ ./scripts/run_vllm.sh
+#   MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ ./scripts/run_vllm.sh
 #
 # Key environment variables (all have sensible defaults):
 #   CONTAINER_RUNTIME       docker | podman  (auto-detected if unset)
-#   MODEL_NAME              HuggingFace model ID          (default: Qwen/Qwen3.5-9B-AWQ)
+#   MODEL_NAME              HuggingFace model ID          (default: Qwen/Qwen2.5-7B-Instruct-AWQ)
 #   QUANTIZATION            vLLM quantization method      (default: awq)
 #   DTYPE                   Weight data type              (default: float16)
 #   MAX_MODEL_LEN           Context window size (tokens)  (default: 8192)
@@ -84,7 +84,7 @@ fi
 
 # --- Model ---
 # Qwen3.5-9B AWQ 4-bit — the only model variant that fits in 8 GB VRAM.
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3.5-9B-AWQ}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
 QUANTIZATION="${QUANTIZATION:-awq}"
 DTYPE="${DTYPE:-float16}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
@@ -358,7 +358,7 @@ GPU_FLAGS=$(runtime_gpu_flags)
 #   --shm-size 1g               Shared memory for PyTorch tensor operations
 #   -p ${VLLM_HOST_PORT}:...    Publish API port on the Linux host
 #   -v ${HF_CACHE_DIR}:...      Bind-mount HuggingFace model cache
-#   -e MODEL_NAME               Qwen/Qwen3.5-9B-AWQ — AWQ 4-bit model ID
+#   -e MODEL_NAME               Qwen/Qwen2.5-7B-Instruct-AWQ — AWQ 4-bit model ID
 #   -e QUANTIZATION             awq — activates vLLM AWQ 4-bit kernel path
 #   -e VLLM_HOST                Bind address inside the container (0.0.0.0)
 #   -e VLLM_PORT                Container-internal API server port

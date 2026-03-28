@@ -99,6 +99,10 @@ echo [start] NVIDIA GPU validated.
 :: Phase 0: Build images (synchronous -- must complete before containers start)
 :: ---------------------------------------------------------------------------
 echo [start]
+set "VLLM_EXIT=0"
+set "OPENCLAW_EXIT=0"
+set "HEALTHCHECK_EXIT=0"
+
 echo [start] --- Phase 0: Building container images ----
 
 if not defined VLLM_IMAGE_TAG    set "VLLM_IMAGE_TAG=democlaw/vllm:latest"

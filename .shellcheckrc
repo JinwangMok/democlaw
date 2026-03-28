@@ -1,0 +1,37 @@
+# =============================================================================
+# .shellcheckrc — Project-wide ShellCheck configuration
+#
+# ShellCheck reads this file automatically when run from the repository root.
+# Settings here apply to all shell scripts in the project unless overridden
+# inline with `# shellcheck disable=SCXXXX` directives.
+#
+# Reference: https://www.shellcheck.net/wiki/
+# =============================================================================
+
+# Target shell: all scripts use bash (#!/usr/bin/env bash)
+shell=bash
+
+# ---------------------------------------------------------------------------
+# Source-path configuration
+#
+# ShellCheck resolves `# shellcheck source=<path>` directives relative to
+# the source-path.  Setting this to the `scripts` directory lets ShellCheck
+# follow  `# shellcheck source=lib/runtime.sh`  without needing the full
+# absolute path.  Additional paths can be appended with further source-path
+# lines.
+# ---------------------------------------------------------------------------
+source-path=scripts
+
+# ---------------------------------------------------------------------------
+# Severity: emit warnings and above (SC2xxx warnings are best-practice lint)
+# ---------------------------------------------------------------------------
+severity=warning
+
+# ---------------------------------------------------------------------------
+# Optional: exclude specific checks project-wide
+#
+# SC1091 — "Not following: <file> was not specified as input" (sourced files
+#           resolved at runtime from $SCRIPT_DIR; acceptable in orchestration
+#           scripts where the path is guaranteed to exist at runtime).
+# ---------------------------------------------------------------------------
+# disable=SC1091

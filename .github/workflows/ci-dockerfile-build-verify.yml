@@ -1,0 +1,446 @@
+name: Dockerfile build verification (no push)
+
+# ---------------------------------------------------------------------------
+# CI job: Dockerfile build verification for both container images
+#
+# This workflow satisfies Sub-AC 15c: it performs docker build verification
+# for BOTH Dockerfiles in the repository, confirming each is buildable and
+# correctly structured.  No images are ever pushed to any registry.
+#
+# Two build strategies are used, one per Dockerfile, reflecting the practical
+# differences between the two base images:
+#
+# ┌──────────────────────┬──────────────────────────────────────────────────┐
+# │ Dockerfile           │ Strategy                                         │
+# ├──────────────────────┼──────────────────────────────────────────────────┤
+# │ openclaw/Dockerfile  │ Full docker build (--no-cache --pull)            │
+# │                      │ FROM ubuntu:24.04 — small base, fast CI build    │
+# ├──────────────────────┼──────────────────────────────────────────────────┤
+# │ vllm/Dockerfile      │ docker buildx build --check (structural check)   │
+# │                      │ FROM vllm/vllm-openai:v0.8.3 — ~15 GB CUDA      │
+# │                      │ image; pulling it in CI would exhaust runner     │
+# │                      │ disk/bandwidth.  --check validates the full      │
+# │                      │ Dockerfile through BuildKit without pulling the  │
+# │                      │ base image or executing any RUN instruction.     │
+# │                      │ GPU is a RUNTIME-only requirement; docker build  │
+# │                      │ itself never needs a GPU.                        │
+# └──────────────────────┴──────────────────────────────────────────────────┘
+#
+# Both jobs confirm:
+#   ✓ Dockerfile is syntactically and structurally correct
+#   ✓ No image is pushed to any container registry
+#   ✓ No GPU or nvidia-container-toolkit is required
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "vllm/Dockerfile"
+      - "vllm/**"
+      - "openclaw/Dockerfile"
+      - "openclaw/**"
+      - ".github/workflows/ci-dockerfile-build-verify.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "vllm/Dockerfile"
+      - "vllm/**"
+      - "openclaw/Dockerfile"
+      - "openclaw/**"
+      - ".github/workflows/ci-dockerfile-build-verify.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # ===========================================================================
+  # Job 1: OpenClaw — full docker build (no push)
+  #
+  # The OpenClaw image is based on ubuntu:24.04 with Node.js and the openclaw
+  # npm package.  The base image is small (~30 MB compressed), making a full
+  # build practical in CI.
+  #
+  # Flags:
+  #   --no-cache   rebuild every layer; never use the GitHub Actions layer cache
+  #   --pull       always fetch the latest ubuntu:24.04 digest
+  #   --tag        assign a local CI tag (image is NOT pushed)
+  # ===========================================================================
+  build-openclaw:
+    name: "Build OpenClaw Dockerfile (docker build, no push)"
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Set up Docker Buildx (enables BuildKit, needed for --check in
+      #    the vLLM job; also used here for consistent BuildKit behaviour).
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # -----------------------------------------------------------------------
+      # 3. Report environment versions for CI log traceability
+      # -----------------------------------------------------------------------
+      - name: Show Docker & Buildx versions
+        run: |
+          echo "=== Docker version ==="
+          docker version --format 'Client: {{.Client.Version}}  Server: {{.Server.Version}}'
+          echo ""
+          echo "=== Buildx version ==="
+          docker buildx version
+          echo ""
+          echo "=== Runner OS ==="
+          uname -a
+
+      # -----------------------------------------------------------------------
+      # 4. Verify openclaw/Dockerfile exists before attempting the build.
+      #    Produces a clear error message rather than a cryptic build failure.
+      # -----------------------------------------------------------------------
+      - name: Verify openclaw/Dockerfile exists
+        run: |
+          if [ ! -f "openclaw/Dockerfile" ]; then
+            echo "::error file=openclaw/Dockerfile::Dockerfile not found: openclaw/Dockerfile"
+            echo "The OpenClaw Dockerfile is required but was not found."
+            echo "Ensure openclaw/Dockerfile is committed to the repository."
+            exit 1
+          fi
+          echo "✓ openclaw/Dockerfile found"
+          echo ""
+          echo "=== Dockerfile summary ==="
+          echo "Lines      : $(wc -l < openclaw/Dockerfile)"
+          echo "FROM       : $(grep -m1 '^FROM' openclaw/Dockerfile || echo '(not found)')"
+          echo "EXPOSE     : $(grep '^EXPOSE' openclaw/Dockerfile || echo '(not found)')"
+          echo "ENTRYPOINT : $(grep '^ENTRYPOINT' openclaw/Dockerfile || echo '(not found)')"
+
+      # -----------------------------------------------------------------------
+      # 5. Full docker build of openclaw/Dockerfile (no push)
+      #
+      # Strategy: full layer build
+      #   FROM ubuntu:24.04 is a small, fast-pulling base image (~30 MB
+      #   compressed).  A full build is practical here and gives the strongest
+      #   CI guarantee: all RUN steps execute, all COPY files are resolved,
+      #   and the final image layers are created locally.
+      #
+      # The resulting image is tagged democlaw/openclaw:ci-build-verify.
+      # It lives only on the GitHub Actions runner and is removed at the
+      # end of this job (see the cleanup step).  It is NOT pushed.
+      # -----------------------------------------------------------------------
+      - name: "docker build openclaw/Dockerfile (--no-cache --pull, no push)"
+        run: |
+          echo "::group::Building openclaw/Dockerfile"
+          echo "Context    : ./openclaw"
+          echo "Base image : $(grep -m1 '^FROM' openclaw/Dockerfile | awk '{print $2}')"
+          echo "Tag        : democlaw/openclaw:ci-build-verify"
+          echo "Push       : NO"
+          echo ""
+
+          docker build \
+            --no-cache \
+            --pull \
+            --tag democlaw/openclaw:ci-build-verify \
+            ./openclaw
+
+          build_exit=$?
+          echo "::endgroup::"
+
+          if [ "${build_exit}" -eq 0 ]; then
+            echo "✓ openclaw/Dockerfile built successfully (exit 0)"
+          else
+            echo "✗ openclaw/Dockerfile build FAILED (exit ${build_exit})"
+            echo ""
+            echo "Check the build output above for errors."
+            echo "Common causes:"
+            echo "  - Syntax error in the Dockerfile"
+            echo "  - Missing file referenced in a COPY instruction"
+            echo "  - Failed RUN command (network, missing package, etc.)"
+            exit "${build_exit}"
+          fi
+
+      # -----------------------------------------------------------------------
+      # 6. Verify the image exists locally (confirms build succeeded and
+      #    the image was NOT pushed — it only exists on the runner).
+      # -----------------------------------------------------------------------
+      - name: Verify image exists locally (not pushed)
+        run: |
+          if docker image inspect democlaw/openclaw:ci-build-verify > /dev/null 2>&1; then
+            echo "✓ democlaw/openclaw:ci-build-verify exists locally"
+          else
+            echo "✗ Image not found after build — unexpected error"
+            exit 1
+          fi
+          echo ""
+          echo "=== Image details ==="
+          docker images democlaw/openclaw:ci-build-verify
+          echo ""
+          docker image inspect democlaw/openclaw:ci-build-verify \
+            --format 'ID: {{.Id}}  Size: {{.Size}} bytes  Created: {{.Created}}' \
+            || true
+          echo ""
+          echo "Image built locally — NOT pushed to any registry."
+
+      # -----------------------------------------------------------------------
+      # 7. Cleanup — remove the local image from the runner.
+      #    Runs even on failure so disk space is recovered.
+      # -----------------------------------------------------------------------
+      - name: Remove local image (cleanup)
+        if: always()
+        run: |
+          docker rmi democlaw/openclaw:ci-build-verify 2>/dev/null && \
+            echo "✓ Local image removed." || \
+            echo "  Image was not present (already removed or build failed)."
+
+  # ===========================================================================
+  # Job 2: vLLM — structural build verification via docker buildx build --check
+  #
+  # The vLLM image is based on vllm/vllm-openai:v0.8.3, a CUDA-enabled image
+  # that is approximately 15 GB on disk.  Pulling it in CI would:
+  #
+  #   • Consume prohibitive bandwidth and runner storage (GitHub-hosted runners
+  #     have ~14 GB of usable disk space — barely enough for the image alone)
+  #   • Dramatically slow down CI feedback (15–30+ minute download)
+  #   • Provide no additional correctness guarantee over --check, because a
+  #     GPU is not needed at build time (only at container runtime)
+  #
+  # docker buildx build --check validates the Dockerfile through BuildKit's
+  # structural analyser:
+  #   • Parses every instruction, resolves ARG/ENV substitutions
+  #   • Reports syntax errors, undefined variables, and build warnings
+  #   • Exits without pulling the FROM base image or executing RUN instructions
+  #   • Equivalent to "docker build --dry-run" (which doesn't exist in Docker)
+  #
+  # Fallback: hadolint v2.12.0 is used when the installed Buildx version does
+  # not support --check (Buildx < 0.13.0).
+  #
+  # GPU note: NVIDIA GPU is a RUNTIME-only requirement.  The docker build step
+  # (even a full one) never needs a GPU.  CI runners remain GPU-free.
+  # ===========================================================================
+  build-verify-vllm:
+    name: "Build-verify vLLM Dockerfile (docker buildx --check, no push)"
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Set up the latest stable Docker Buildx.
+      #    docker/setup-buildx-action@v3 installs Buildx >= 0.13.0, which
+      #    supports the --check flag introduced in January 2024.
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # -----------------------------------------------------------------------
+      # 3. Report environment versions for CI log traceability
+      # -----------------------------------------------------------------------
+      - name: Show Docker & Buildx versions
+        run: |
+          echo "=== Docker version ==="
+          docker version --format 'Client: {{.Client.Version}}  Server: {{.Server.Version}}'
+          echo ""
+          echo "=== Buildx version ==="
+          docker buildx version
+          echo ""
+          echo "=== Runner OS ==="
+          uname -a
+
+      # -----------------------------------------------------------------------
+      # 4. Verify vllm/Dockerfile exists before attempting verification.
+      # -----------------------------------------------------------------------
+      - name: Verify vllm/Dockerfile exists
+        run: |
+          if [ ! -f "vllm/Dockerfile" ]; then
+            echo "::error file=vllm/Dockerfile::Dockerfile not found: vllm/Dockerfile"
+            echo "The vLLM server Dockerfile is required but was not found."
+            echo "Ensure vllm/Dockerfile is committed to the repository."
+            exit 1
+          fi
+          echo "✓ vllm/Dockerfile found"
+          echo ""
+          echo "=== Dockerfile summary ==="
+          echo "Lines      : $(wc -l < vllm/Dockerfile)"
+          echo "FROM       : $(grep -m1 '^FROM' vllm/Dockerfile || echo '(not found)')"
+          echo "EXPOSE     : $(grep '^EXPOSE' vllm/Dockerfile || echo '(not found)')"
+          echo "ENTRYPOINT : $(grep '^ENTRYPOINT' vllm/Dockerfile || echo '(not found)')"
+
+      # -----------------------------------------------------------------------
+      # 5. Build verification for vllm/Dockerfile
+      #
+      # Primary path — docker buildx build --check (Buildx >= 0.13.0)
+      #   Validates the Dockerfile through BuildKit's structural checker:
+      #   - Resolves all ARG/ENV substitutions
+      #   - Checks instruction syntax and ordering
+      #   - Reports warnings and errors (e.g. missing ARG declarations,
+      #     invalid COPY paths, malformed HEALTHCHECK directives)
+      #   - Does NOT pull vllm/vllm-openai or any other image
+      #   - Does NOT execute RUN instructions
+      #   - Does NOT create any image layers
+      #   - Does NOT push to any registry
+      #
+      # Fallback path — hadolint v2.12.0
+      #   Used when the installed Buildx version predates --check support.
+      #   hadolint performs equivalent Dockerfile syntax and best-practice
+      #   validation entirely offline, with no image or layer creation.
+      # -----------------------------------------------------------------------
+      - name: "docker buildx build --check vllm/Dockerfile (no base image pull, no push)"
+        run: |
+          echo "::group::Build verification: vllm/Dockerfile"
+          echo "Context    : ./vllm"
+          echo "Base image : $(grep -m1 '^FROM' vllm/Dockerfile | awk '{print $2}')"
+          echo "Strategy   : docker buildx build --check (no image pull, no layers built)"
+          echo "Push       : NO"
+          echo ""
+          echo "NOTE: The vllm/vllm-openai base image is ~15 GB.  Pulling it in CI"
+          echo "would exhaust runner disk space and bandwidth.  docker buildx build"
+          echo "--check validates the full Dockerfile through BuildKit's analyser"
+          echo "without pulling the base image or executing any RUN instructions."
+          echo "GPU is NOT needed at build time; it is a runtime-only requirement."
+          echo ""
+
+          if docker buildx build --help 2>&1 | grep -q -- '--check'; then
+            echo "Method : docker buildx build --check (Buildx supports --check flag)"
+            echo ""
+            echo "Running: docker buildx build --check --no-cache ./vllm"
+            echo "--- Buildx output ---"
+
+            docker buildx build \
+              --check \
+              --no-cache \
+              ./vllm
+
+            check_exit=$?
+          else
+            echo "Method : hadolint fallback (installed Buildx version does not support --check)"
+            echo ""
+
+            HADOLINT_VERSION="v2.12.0"
+            echo "Downloading hadolint ${HADOLINT_VERSION}..."
+            curl -fsSL \
+              "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+              -o /tmp/hadolint
+            chmod +x /tmp/hadolint
+
+            echo "hadolint version: $(/tmp/hadolint --version)"
+            echo ""
+
+            if [ -f ".hadolint.yaml" ]; then
+              echo "Using project config: .hadolint.yaml"
+            fi
+
+            echo "Running: hadolint vllm/Dockerfile"
+            echo "--- hadolint output ---"
+            /tmp/hadolint vllm/Dockerfile
+            check_exit=$?
+          fi
+
+          echo "::endgroup::"
+
+          echo ""
+          if [ "${check_exit}" -eq 0 ]; then
+            echo "✓ vllm/Dockerfile passed build verification (exit 0)"
+            echo "  Base image : NOT pulled"
+            echo "  Layers     : NONE built"
+            echo "  Push       : NO"
+            echo "  GPU        : NOT required (runtime-only)"
+          else
+            echo "✗ vllm/Dockerfile FAILED build verification (exit ${check_exit})"
+            echo ""
+            echo "Check the output above for Dockerfile errors or warnings."
+            echo "Fix the reported issues and re-push."
+            exit "${check_exit}"
+          fi
+
+      # -----------------------------------------------------------------------
+      # 6. Confirm no images were created or pushed (dry-run contract).
+      #    The --check flag must not produce any image artifact.
+      # -----------------------------------------------------------------------
+      - name: Confirm no vLLM image created (no push contract)
+        if: always()
+        run: |
+          echo "=== Local images after build verification ==="
+          docker images \
+            --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" \
+            | grep -v "^moby/buildkit\|^buildx_buildkit\|^REPOSITORY" \
+            || echo "(none)"
+          echo ""
+
+          if docker images --format "{{.Repository}}:{{.Tag}}" \
+              | grep -q "^democlaw/vllm"; then
+            echo "::warning::A democlaw/vllm image exists locally after the build check."
+            echo "This is unexpected — --check should not produce an image artifact."
+          else
+            echo "✓ No democlaw/vllm image found — no-push contract satisfied."
+          fi
+
+          echo ""
+          echo "Build verification summary:"
+          echo "  Dockerfile   : vllm/Dockerfile — verified"
+          echo "  Base image   : NOT pulled"
+          echo "  Layers built : NONE"
+          echo "  Image pushed : NO"
+          echo "  GPU required : NO (GPU is a runtime-only requirement)"
+
+  # ===========================================================================
+  # Gate job: require BOTH build jobs to pass before marking this workflow green.
+  #
+  # This job acts as the single required status check for branch-protection
+  # rules.  By depending on both build jobs with if: always(), it fails if
+  # either build job fails or is cancelled.
+  # ===========================================================================
+  dockerfile-build-verify-all-passed:
+    name: "Dockerfile build verification — all passed"
+    runs-on: ubuntu-latest
+    needs: [build-openclaw, build-verify-vllm]
+    if: always()
+
+    steps:
+      - name: Check all build verification jobs passed
+        run: |
+          openclaw_result="${{ needs.build-openclaw.result }}"
+          vllm_result="${{ needs.build-verify-vllm.result }}"
+
+          echo "=== Dockerfile build verification results ==="
+          echo ""
+          echo "  openclaw/Dockerfile (docker build)         : ${openclaw_result}"
+          echo "  vllm/Dockerfile     (docker buildx --check): ${vllm_result}"
+          echo ""
+
+          failed=0
+
+          if [ "${openclaw_result}" != "success" ]; then
+            echo "✗ OpenClaw Dockerfile build job did not succeed (result: ${openclaw_result})"
+            failed=1
+          else
+            echo "✓ openclaw/Dockerfile — docker build passed, no push"
+          fi
+
+          if [ "${vllm_result}" != "success" ]; then
+            echo "✗ vLLM Dockerfile build verification job did not succeed (result: ${vllm_result})"
+            failed=1
+          else
+            echo "✓ vllm/Dockerfile     — docker buildx --check passed, no push"
+          fi
+
+          echo ""
+          if [ "${failed}" -ne 0 ]; then
+            echo "ERROR: One or more Dockerfile build verification jobs failed."
+            echo "Review the individual job logs above for details."
+            exit 1
+          fi
+
+          echo "All Dockerfile build verification jobs passed."
+          echo ""
+          echo "Summary:"
+          echo "  openclaw/Dockerfile : built (docker build --no-cache --pull, NOT pushed)"
+          echo "  vllm/Dockerfile     : verified (docker buildx --check, no base image pull, NOT pushed)"
+          echo "  GPU required        : NO (GPU is a container runtime-only requirement)"

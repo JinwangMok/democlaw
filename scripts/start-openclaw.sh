@@ -40,7 +40,7 @@ OPENCLAW_HOST_PORT="${OPENCLAW_HOST_PORT:-18789}"
 #
 #   VLLM_MODEL_NAME : Model ID that OpenClaw sends in every API request.
 #                     Must match the model served by vLLM.
-#                     Default: Qwen/Qwen3.5-9B-AWQ  (AWQ 4-bit, 8 GB VRAM)
+#                     Default: Qwen/Qwen2.5-7B-Instruct-AWQ  (AWQ 4-bit, 8 GB VRAM)
 #
 #   VLLM_API_KEY    : Placeholder API key.  vLLM accepts any non-empty value
 #                     by default; use "EMPTY" as the conventional placeholder.
@@ -61,7 +61,7 @@ OPENCLAW_HOST_PORT="${OPENCLAW_HOST_PORT:-18789}"
 # ---------------------------------------------------------------------------
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm:8000/v1}"
 VLLM_API_KEY="${VLLM_API_KEY:-EMPTY}"
-VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen3.5-9B-AWQ}"
+VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
 VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-4096}"
 VLLM_TEMPERATURE="${VLLM_TEMPERATURE:-0.7}"
 
@@ -362,6 +362,32 @@ while [ "${elapsed}" -lt "${HEALTH_TIMEOUT}" ]; do
             warn "Re-run when vLLM is healthy: ./scripts/validate_connection.sh --exec"
             warn "Or check the host port     : ./scripts/validate_connection.sh --host"
         fi
+
+        # -----------------------------------------------------------------
+        # Run the OpenClaw-specific healthcheck to confirm the service is
+        # reachable and report a clear PASS / FAIL status to stdout.
+        #
+        # healthcheck_openclaw.sh polls the dashboard URL and exits 0 on
+        # HTTP 200, so it will succeed immediately here since the dashboard
+        # just responded above. The explicit PASS / FAIL message ensures the
+        # operator sees an unambiguous status line in the start log.
+        #
+        # Note: when start-openclaw.sh is invoked by start.sh, the
+        # comprehensive scripts/healthcheck.sh is also run as Phase 3 of
+        # that orchestration — running the OpenClaw-specific check here
+        # covers the standalone start-openclaw.sh use case.
+        # -----------------------------------------------------------------
+        log ""
+        log "--- Running OpenClaw healthcheck (post-launch) ---"
+        OPENCLAW_HC_EXIT=0
+        bash "${SCRIPT_DIR}/healthcheck_openclaw.sh" || OPENCLAW_HC_EXIT=$?
+        if [ "${OPENCLAW_HC_EXIT}" -eq 0 ]; then
+            log "HEALTHCHECK PASS: OpenClaw service is healthy and reachable."
+        else
+            warn "HEALTHCHECK FAIL: OpenClaw healthcheck did not pass. See output above."
+            warn "  Re-run at any time: ./scripts/healthcheck_openclaw.sh"
+        fi
+        log ""
 
         exit 0
     fi

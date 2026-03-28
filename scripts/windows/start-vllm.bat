@@ -44,7 +44,7 @@ if exist "%ENV_FILE%" (
 if not defined VLLM_CONTAINER_NAME   set "VLLM_CONTAINER_NAME=democlaw-vllm"
 if not defined DEMOCLAW_NETWORK      set "DEMOCLAW_NETWORK=democlaw-net"
 if not defined VLLM_IMAGE_TAG        set "VLLM_IMAGE_TAG=democlaw/vllm:latest"
-if not defined MODEL_NAME            set "MODEL_NAME=Qwen/Qwen3.5-9B-AWQ"
+if not defined MODEL_NAME            set "MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ"
 if not defined VLLM_HOST             set "VLLM_HOST=0.0.0.0"
 if not defined VLLM_PORT             set "VLLM_PORT=8000"
 if not defined VLLM_HOST_PORT        set "VLLM_HOST_PORT=8000"

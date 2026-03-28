@@ -1,6 +1,6 @@
 # =============================================================================
 # vLLM Server Dockerfile
-# Serves Qwen/Qwen3.5-9B-AWQ (AWQ 4-bit quantized) on NVIDIA GPU
+# Serves Qwen/Qwen2.5-7B-Instruct-AWQ (AWQ 4-bit quantized) on NVIDIA GPU
 #
 # Base image: vllm/vllm-openai — official vLLM CUDA image (CUDA 12.x / Python 3.11)
 # Includes: vLLM inference engine, autoawq, triton, torch, flash-attn, etc.
@@ -9,14 +9,53 @@
 #   - NVIDIA GPU with >= 8 GB VRAM (e.g. RTX 3070/4070, A10G, T4 16 GB)
 #   - NVIDIA driver >= 525 (CUDA 12.x compatible)
 #   - nvidia-container-toolkit (for Docker) or nvidia-ctk (for Podman/CDI)
+#
+# Build arguments (all overridable via --build-arg):
+#   VLLM_BASE_VERSION   — vLLM base image tag          (default: v0.8.3)
+#   MODEL_NAME          — default HuggingFace model ID  (default: Qwen/Qwen2.5-7B-Instruct-AWQ)
+#   MAX_MODEL_LEN       — default context length        (default: 8192)
+#   QUANTIZATION        — default quantization backend  (default: awq)
+#   DTYPE               — default computation dtype     (default: float16)
+#   VERSION             — image version label           (default: dev)
+#   BUILD_DATE          — ISO-8601 build timestamp      (default: unknown)
+#   GIT_COMMIT          — short git SHA                 (default: unknown)
 # =============================================================================
 
-FROM vllm/vllm-openai:v0.8.3
+# ---------------------------------------------------------------------------
+# Build-time arguments — all have safe defaults for direct docker/podman build
+# ---------------------------------------------------------------------------
+ARG VLLM_BASE_VERSION=v0.8.3
+ARG MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ
+ARG MAX_MODEL_LEN=8192
+ARG QUANTIZATION=awq
+ARG DTYPE=float16
+ARG VERSION=dev
+ARG BUILD_DATE=unknown
+ARG GIT_COMMIT=unknown
+
+FROM vllm/vllm-openai:${VLLM_BASE_VERSION}
+
+# Re-declare ARGs after FROM so they are visible in this build stage
+ARG MODEL_NAME
+ARG MAX_MODEL_LEN
+ARG QUANTIZATION
+ARG DTYPE
+ARG VERSION
+ARG BUILD_DATE
+ARG GIT_COMMIT
 
 LABEL maintainer="democlaw"
 LABEL description="vLLM OpenAI-compatible server for Qwen3.5-9B AWQ 4-bit"
 LABEL org.opencontainers.image.title="democlaw-vllm"
-LABEL org.opencontainers.image.description="Serves Qwen/Qwen3.5-9B-AWQ via the vLLM OpenAI-compatible API"
+LABEL org.opencontainers.image.description="Serves Qwen/Qwen2.5-7B-Instruct-AWQ via the vLLM OpenAI-compatible API"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+LABEL org.opencontainers.image.source="https://github.com/democlaw/democlaw"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.vendor="democlaw"
+LABEL democlaw.model="${MODEL_NAME}"
+LABEL democlaw.quantization="${QUANTIZATION}"
 
 # ---------------------------------------------------------------------------
 # Explicitly ensure AWQ dependencies are present.
@@ -42,13 +81,15 @@ RUN pip install --no-cache-dir "autoawq>=0.2.7"
 #                             the server requires "Authorization: Bearer <key>".
 #                             Leave empty (or set to "EMPTY") for no-auth mode.
 # ---------------------------------------------------------------------------
-ENV MODEL_NAME="Qwen/Qwen3.5-9B-AWQ" \
+# Bake ARG defaults into ENV so they surface as container environment variables.
+# All values remain overridable at runtime via  --env MODEL_NAME=...
+ENV MODEL_NAME="${MODEL_NAME}" \
     VLLM_HOST="0.0.0.0" \
     VLLM_PORT="8000" \
-    MAX_MODEL_LEN="8192" \
+    MAX_MODEL_LEN="${MAX_MODEL_LEN}" \
     GPU_MEMORY_UTILIZATION="0.90" \
-    QUANTIZATION="awq" \
-    DTYPE="float16" \
+    QUANTIZATION="${QUANTIZATION}" \
+    DTYPE="${DTYPE}" \
     HF_TOKEN="" \
     HUGGINGFACE_HUB_VERBOSITY="warning" \
     VLLM_API_KEY=""

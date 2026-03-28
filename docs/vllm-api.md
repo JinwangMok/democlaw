@@ -62,7 +62,7 @@ Expected response:
   "object": "list",
   "data": [
     {
-      "id": "Qwen/Qwen3.5-9B-AWQ",
+      "id": "Qwen/Qwen2.5-7B-Instruct-AWQ",
       "object": "model",
       "created": 1700000000,
       "owned_by": "vllm"
@@ -77,7 +77,7 @@ Expected response:
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen3.5-9B-AWQ",
+    "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user",   "content": "What is the capital of France?"}
@@ -94,7 +94,7 @@ Expected response shape:
   "id": "chatcmpl-...",
   "object": "chat.completion",
   "created": 1700000000,
-  "model": "Qwen/Qwen3.5-9B-AWQ",
+  "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
   "choices": [
     {
       "index": 0,
@@ -155,7 +155,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="Qwen/Qwen3.5-9B-AWQ",
+    model="Qwen/Qwen2.5-7B-Instruct-AWQ",
     messages=[
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user",   "content": "Explain vLLM in one sentence."},
@@ -174,7 +174,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY")
 
 with client.chat.completions.create(
-    model="Qwen/Qwen3.5-9B-AWQ",
+    model="Qwen/Qwen2.5-7B-Instruct-AWQ",
     messages=[{"role": "user", "content": "Count to 5."}],
     max_tokens=64,
     stream=True,
@@ -196,7 +196,7 @@ const client = new OpenAI({
 });
 
 const response = await client.chat.completions.create({
-  model: "Qwen/Qwen3.5-9B-AWQ",
+  model: "Qwen/Qwen2.5-7B-Instruct-AWQ",
   messages: [
     { role: "system", content: "You are a helpful assistant." },
     { role: "user",   content: "What is the capital of France?" },
@@ -285,7 +285,7 @@ curl http://localhost:8000/v1/models \
 | `HTTP 000` from `validate-api.sh` | Server not yet ready (model loading) | Wait and retry; monitor with `docker logs -f democlaw-vllm` |
 | `/v1/models` returns empty `data: []` | Model weights still loading | First run downloads ~5 GB; check logs |
 | `HTTP 401 Unauthorized` | `VLLM_API_KEY` set but request has no token | Add `-H "Authorization: Bearer <key>"` |
-| Wrong model in `/v1/models` | `MODEL_NAME` env var mismatch | Verify `MODEL_NAME=Qwen/Qwen3.5-9B-AWQ` in `.env` |
+| Wrong model in `/v1/models` | `MODEL_NAME` env var mismatch | Verify `MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ` in `.env` |
 
 For the full healthcheck output:
 

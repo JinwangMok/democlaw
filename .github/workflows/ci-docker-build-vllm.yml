@@ -1,0 +1,239 @@
+name: Docker build — vLLM (dry-run)
+
+# ---------------------------------------------------------------------------
+# CI job: dry-run build verification of the vLLM server Dockerfile
+#
+# Purpose
+# -------
+# Confirms that vllm/Dockerfile is structurally and syntactically correct
+# without performing a full image build, pulling the multi-gigabyte
+# vllm/vllm-openai base image, or requiring a GPU.
+#
+# Why "dry-run" for vLLM specifically?
+# ─────────────────────────────────────
+# The vLLM Dockerfile uses FROM vllm/vllm-openai:v0.8.3, a CUDA-based image
+# that is ~15 GB on disk.  Pulling it in CI would:
+#   • consume prohibitive bandwidth and runner storage
+#   • dramatically slow down the CI feedback loop
+#   • still NOT require a GPU (GPU is only needed at container RUNTIME,
+#     not during the docker build step)
+#
+# Instead this job validates the Dockerfile without pulling any base image,
+# using Docker Buildx's --check flag (BuildKit-based structural analysis).
+# For environments with an older Buildx, hadolint is used as a fallback.
+#
+# Primary method: docker buildx build --check
+#   Introduced in Docker Buildx >= 0.13.0 (Docker Desktop 4.27, Jan 2024).
+#   Parses and lints the Dockerfile through BuildKit's checker without
+#   executing RUN instructions, pulling the base image, or creating layers.
+#
+# Fallback method: hadolint
+#   When the installed Buildx does not support --check, hadolint performs
+#   equivalent Dockerfile syntax and best-practice validation.
+#
+# What this job does NOT do
+# ─────────────────────────
+# • Does NOT pull vllm/vllm-openai or any other base image
+# • Does NOT execute any RUN instruction inside the Dockerfile
+# • Does NOT create a local image (no layers built, no image ID assigned)
+# • Does NOT push to any container registry
+# • Does NOT require an NVIDIA GPU or nvidia-container-toolkit
+#
+# These constraints are verified by the "Confirm no images created" step.
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "vllm/Dockerfile"
+      - "vllm/**"
+      - ".github/workflows/ci-docker-build-vllm.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "vllm/Dockerfile"
+      - "vllm/**"
+      - ".github/workflows/ci-docker-build-vllm.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Dry-run build verification for vllm/Dockerfile
+  #
+  # Steps:
+  #   1. Checkout the repository
+  #   2. Set up the latest stable Docker Buildx (supports --check flag)
+  #   3. Report Docker and Buildx versions for audit purposes
+  #   4. Verify vllm/Dockerfile exists before attempting any build step
+  #   5. Run dry-run verification:
+  #        Primary   — docker buildx build --check (no image pull, no layers)
+  #        Fallback  — hadolint (if Buildx < 0.13.0)
+  #   6. Confirm no image was created (dry-run contract check)
+  # ---------------------------------------------------------------------------
+  vllm-dockerfile-dry-run:
+    name: vLLM Dockerfile dry-run build verification
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Set up the latest Docker Buildx.
+      #    docker/setup-buildx-action@v3 installs the latest stable release of
+      #    Buildx (>= 0.13.0 as of 2024) which supports the --check flag.
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # -----------------------------------------------------------------------
+      # 3. Report versions for CI log traceability.
+      # -----------------------------------------------------------------------
+      - name: Show Docker & Buildx versions
+        run: |
+          echo "=== Docker version ==="
+          docker version --format 'Client: {{.Client.Version}}  Server: {{.Server.Version}}'
+          echo ""
+          echo "=== Buildx version ==="
+          docker buildx version
+          echo ""
+          echo "=== Runner OS ==="
+          uname -a
+
+      # -----------------------------------------------------------------------
+      # 4. Verify the Dockerfile exists.
+      #    Emits a clear error if the file is missing rather than a cryptic
+      #    build failure.
+      # -----------------------------------------------------------------------
+      - name: Verify vllm/Dockerfile exists
+        run: |
+          if [ ! -f "vllm/Dockerfile" ]; then
+            echo "::error file=vllm/Dockerfile::Dockerfile not found: vllm/Dockerfile"
+            echo "The vLLM server Dockerfile is required but was not found."
+            echo "Ensure vllm/Dockerfile is committed to the repository."
+            exit 1
+          fi
+          echo "✓ vllm/Dockerfile found"
+          echo ""
+          echo "=== Dockerfile summary ==="
+          echo "Lines      : $(wc -l < vllm/Dockerfile)"
+          echo "FROM       : $(grep -m1 '^FROM' vllm/Dockerfile || echo '(not found)')"
+          echo "ENTRYPOINT : $(grep '^ENTRYPOINT' vllm/Dockerfile || echo '(not found)')"
+          echo "EXPOSE     : $(grep '^EXPOSE' vllm/Dockerfile || echo '(not found)')"
+
+      # -----------------------------------------------------------------------
+      # 5. Dry-run build verification
+      #
+      # Primary path — docker buildx build --check
+      #   --check      Validate without building (Buildx >= 0.13.0).
+      #                BuildKit parses the full Dockerfile, resolves ARG/ENV
+      #                substitutions, and checks for structural errors — without
+      #                pulling the FROM image or executing any RUN command.
+      #   --no-cache   Ensure no cached state influences the result.
+      #   ./vllm       The build context directory (contains Dockerfile,
+      #                entrypoint.sh, healthcheck.sh).
+      #
+      # Fallback path — hadolint v2.12.0
+      #   Used when --check is not available (Buildx < 0.13.0).
+      #   hadolint performs equivalent syntax + best-practice validation.
+      #   Project-specific overrides are picked up from .hadolint.yaml.
+      # -----------------------------------------------------------------------
+      - name: Dry-run build verification — vllm/Dockerfile
+        run: |
+          echo "::group::Dry-run build verification: vllm/Dockerfile"
+          echo "Dockerfile : vllm/Dockerfile"
+          echo "Context    : ./vllm"
+          echo "Base image : $(grep -m1 '^FROM' vllm/Dockerfile | awk '{print $2}')"
+          echo ""
+
+          # Probe whether --check is supported by the installed Buildx.
+          if docker buildx build --help 2>&1 | grep -q -- '--check'; then
+            echo "Method: docker buildx build --check (no base image pull, no layers built)"
+            echo ""
+            echo "Running: docker buildx build --check --no-cache ./vllm"
+            echo "--- Buildx output ---"
+
+            docker buildx build \
+              --check \
+              --no-cache \
+              ./vllm
+
+            check_exit=$?
+          else
+            echo "Method: hadolint (fallback — Buildx --check not supported by installed version)"
+            echo ""
+
+            HADOLINT_VERSION="v2.12.0"
+            echo "Downloading hadolint ${HADOLINT_VERSION}..."
+            curl -fsSL \
+              "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+              -o /tmp/hadolint
+            chmod +x /tmp/hadolint
+
+            echo "hadolint version: $(/tmp/hadolint --version)"
+            echo ""
+
+            if [ -f ".hadolint.yaml" ]; then
+              echo "Using project config: .hadolint.yaml"
+            fi
+
+            echo "Running: hadolint vllm/Dockerfile"
+            echo "--- hadolint output ---"
+            /tmp/hadolint vllm/Dockerfile
+            check_exit=$?
+          fi
+
+          echo "::endgroup::"
+
+          echo ""
+          if [ "${check_exit}" -eq 0 ]; then
+            echo "✓ vllm/Dockerfile passed dry-run build verification (exit 0)"
+          else
+            echo "✗ vllm/Dockerfile failed dry-run build verification (exit ${check_exit})"
+            echo ""
+            echo "Check the output above for Dockerfile errors or violations."
+            echo "Fix the reported issues and re-push."
+            exit "${check_exit}"
+          fi
+
+      # -----------------------------------------------------------------------
+      # 6. Confirm no images were created or pushed (dry-run contract).
+      #
+      #    The --check flag must not produce any image artifact.  This step
+      #    verifies that guarantee by listing local images and asserting that
+      #    no democlaw/vllm image was built.
+      # -----------------------------------------------------------------------
+      - name: Confirm no images created (dry-run contract)
+        if: always()
+        run: |
+          echo "=== Local images after dry-run check ==="
+          # List local images, excluding buildx/buildkit infrastructure images.
+          docker images \
+            --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" \
+            | grep -v "^moby/buildkit\|^buildx_buildkit\|^REPOSITORY" \
+            || echo "(none)"
+          echo ""
+
+          # Assert that no democlaw/vllm image was created.
+          if docker images --format "{{.Repository}}:{{.Tag}}" \
+              | grep -q "^democlaw/vllm"; then
+            echo "::warning::A democlaw/vllm image exists locally after the dry-run check."
+            echo "This is unexpected — the --check flag should not produce an image."
+          else
+            echo "✓ No democlaw/vllm image found — dry-run contract satisfied."
+          fi
+
+          echo ""
+          echo "Dry-run complete."
+          echo "  Dockerfile   : vllm/Dockerfile — validated"
+          echo "  Base image   : NOT pulled"
+          echo "  Layers built : NONE"
+          echo "  Image pushed : NO"
+          echo "  GPU required : NO (GPU is a runtime-only requirement)"

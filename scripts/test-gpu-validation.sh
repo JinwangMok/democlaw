@@ -81,7 +81,8 @@ trap "rm -rf '${TMPDIR_BASE}'" EXIT
 make_fake_smi() {
     local dir="$1"
     local smi_exit="${2:-0}"
-    local gpu_list="${3:-GPU 0: NVIDIA GeForce RTX 4090 (UUID: GPU-00000000-1234-5678-abcd-000000000000)}"
+    # Use ${3-default} (not ${3:-default}) so passing "" gives an empty GPU list
+    local gpu_list="${3-GPU 0: NVIDIA GeForce RTX 4090 (UUID: GPU-00000000-1234-5678-abcd-000000000000)}"
     local driver_ver="${4:-535.154.05}"
     local cuda_ver="${5:-12.2}"
     local vram_mib="${6:-24576}"
@@ -207,15 +208,15 @@ mkdir -p "${TMPBIN1}"
 err1=""
 exit1=0
 err1=$(
-    export PATH="${TMPBIN1}"
+    export PATH="${TMPBIN1}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     check_nvidia_smi
-) 2>&1 || exit1=$?
+) || exit1=$?
 
 if [ "${exit1}" -ne 0 ]; then
     _pass "Exits with non-zero code when nvidia-smi is absent (exit ${exit1})"
@@ -242,15 +243,15 @@ make_fake_smi "${TMPBIN2}" 1
 err2=""
 exit2=0
 err2=$(
-    export PATH="${TMPBIN2}"
+    export PATH="${TMPBIN2}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     check_nvidia_smi
-) 2>&1 || exit2=$?
+) || exit2=$?
 
 if [ "${exit2}" -ne 0 ]; then
     _pass "Exits with non-zero code when nvidia-smi cannot communicate with driver"
@@ -277,16 +278,16 @@ make_fake_smi "${TMPBIN3}" 0 ""
 err3=""
 exit3=0
 err3=$(
-    export PATH="${TMPBIN3}"
+    export PATH="${TMPBIN3}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     check_nvidia_smi
     check_gpu_hardware
-) 2>&1 || exit3=$?
+) || exit3=$?
 
 if [ "${exit3}" -ne 0 ]; then
     _pass "Exits with non-zero code when no GPU hardware detected"
@@ -317,15 +318,15 @@ make_fake_smi "${TMPBIN4}" 0 \
 err4=""
 exit4=0
 err4=$(
-    export PATH="${TMPBIN4}"
+    export PATH="${TMPBIN4}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     check_cuda_driver
-) 2>&1 || exit4=$?
+) || exit4=$?
 
 if [ "${exit4}" -ne 0 ]; then
     _pass "Exits with non-zero code when NVIDIA driver is too old"
@@ -357,15 +358,15 @@ make_fake_smi "${TMPBIN5}" 0 \
 err5=""
 exit5=0
 err5=$(
-    export PATH="${TMPBIN5}"
+    export PATH="${TMPBIN5}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     check_cuda_driver
-) 2>&1 || exit5=$?
+) || exit5=$?
 
 if [ "${exit5}" -ne 0 ]; then
     _pass "Exits with non-zero code when CUDA version is too old"
@@ -396,15 +397,15 @@ make_fake_smi "${TMPBIN6}" 0 \
 err6=""
 exit6=0
 err6=$(
-    export PATH="${TMPBIN6}"
+    export PATH="${TMPBIN6}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     check_gpu_vram
-) 2>&1 || exit6=$?
+) || exit6=$?
 
 if [ "${exit6}" -ne 0 ]; then
     _pass "Exits with non-zero code when GPU VRAM is insufficient"
@@ -435,15 +436,15 @@ make_fake_smi "${TMPBIN7}" 0 \
 err7=""
 exit7=0
 err7=$(
-    export PATH="${TMPBIN7}"
+    export PATH="${TMPBIN7}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     check_nvidia_container_runtime "docker"
-) 2>&1 || exit7=$?
+) || exit7=$?
 
 if [ "${exit7}" -ne 0 ]; then
     _pass "Exits with non-zero code when nvidia-ctk is not installed"
@@ -476,16 +477,16 @@ make_fake_docker_without_nvidia "${TMPBIN8}"
 err8=""
 exit8=0
 err8=$(
-    export PATH="${TMPBIN8}"
+    export PATH="${TMPBIN8}:/usr/bin:/bin"
     # Ensure no real /etc/docker/daemon.json is read
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     check_nvidia_container_runtime "docker"
-) 2>&1 || exit8=$?
+) || exit8=$?
 
 # Note: This test may pass (return 0) in some environments if /etc/docker/daemon.json
 # exists on the test host and references nvidia — so we use a softer assertion.
@@ -522,11 +523,11 @@ mkdir -p "${FAKE_CDI_DIR}"
 err9=""
 exit9=0
 err9=$(
-    export PATH="${TMPBIN9}"
+    export PATH="${TMPBIN9}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     # Override the CDI paths by temporarily overriding the function
@@ -535,7 +536,7 @@ err9=$(
     # _check_nvidia_podman_runtime function directly through the main check.
     # Since CI runners typically don't have /etc/cdi/nvidia.yaml, this should fail.
     check_nvidia_container_runtime "podman"
-) 2>&1 || exit9=$?
+) || exit9=$?
 
 if [ "${exit9}" -ne 0 ]; then
     _pass "Exits with non-zero code when Podman CDI spec is absent"
@@ -567,11 +568,11 @@ make_fake_docker_with_nvidia "${TMPBIN10}"
 
 exit10=0
 (
-    export PATH="${TMPBIN10}"
+    export PATH="${TMPBIN10}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"
     check_nvidia_smi
@@ -598,12 +599,12 @@ mkdir -p "${TMPBIN11}"
 call_log11=""
 exit11=0
 call_log11=$(
-    export PATH="${TMPBIN11}"
+    export PATH="${TMPBIN11}:/usr/bin:/bin"
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { echo "[gpu-warn] $*" >&2; }
     _gpu_error() {
-        echo "[gpu-error] $*" >&2
+        echo "[gpu-error] $*"
         echo "CALLED_GPU_ERROR=1"
         exit 1
     }
@@ -611,7 +612,7 @@ call_log11=$(
     source "${GPU_LIB}"
     validate_nvidia_gpu
     echo "REACHED_END=1"
-) 2>&1 || exit11=$?
+) || exit11=$?
 
 if [ "${exit11}" -ne 0 ]; then
     _pass "validate_nvidia_gpu() exits non-zero on first failure"
@@ -635,7 +636,7 @@ version_test_results=$(
     unset _GPU_LIB_LOADED 2>/dev/null || true
     _gpu_log()   { :; }
     _gpu_warn()  { :; }
-    _gpu_error() { echo "[gpu-error] $*" >&2; exit 1; }
+    _gpu_error() { echo "[gpu-error] $*"; exit 1; }
     _SKIP_GPU_VALIDATE=true
     # shellcheck source=lib/gpu.sh
     source "${GPU_LIB}"

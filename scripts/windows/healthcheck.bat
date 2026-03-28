@@ -64,7 +64,7 @@ if not defined OPENCLAW_CONTAINER_NAME set "OPENCLAW_CONTAINER_NAME=democlaw-ope
 if not defined DEMOCLAW_NETWORK        set "DEMOCLAW_NETWORK=democlaw-net"
 if not defined VLLM_HOST_PORT          set "VLLM_HOST_PORT=8000"
 if not defined OPENCLAW_HOST_PORT      set "OPENCLAW_HOST_PORT=18789"
-if not defined MODEL_NAME              set "MODEL_NAME=Qwen/Qwen3.5-9B-AWQ"
+if not defined MODEL_NAME              set "MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ"
 if not defined HEALTHCHECK_CURL_TIMEOUT set "HEALTHCHECK_CURL_TIMEOUT=10"
 
 set "VLLM_BASE_URL=http://localhost:%VLLM_HOST_PORT%"

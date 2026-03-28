@@ -7,19 +7,21 @@ on:
       - "**/*.sh"
       - "**/Dockerfile"
       - ".github/workflows/ci-validate.yml"
+      - ".shellcheckrc"
   pull_request:
     branches: [main]
     paths:
       - "**/*.sh"
       - "**/Dockerfile"
       - ".github/workflows/ci-validate.yml"
+      - ".shellcheckrc"
 
 permissions:
   contents: read
 
 jobs:
   validate-scripts:
-    name: Validate shell scripts (executable + bash -n syntax + file structure)
+    name: Validate shell scripts (executable + bash -n syntax + ShellCheck lint + file structure)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -82,7 +84,55 @@ jobs:
           fi
 
       # ------------------------------------------------------------------
-      # Step 3 — Verify required files exist in the expected directory
+      # Step 3 — Lint all shell scripts with ShellCheck.
+      #
+      # ShellCheck performs deep static analysis that goes well beyond the
+      # bash -n syntax check above:
+      #   - Unquoted variable expansions (word-splitting / globbing risks)
+      #   - Common pitfalls with IFS, arrays, subshells, and redirections
+      #   - Best-practice idioms (printf vs echo, [[ vs [, etc.)
+      #   - Correct use of source / . directives and external commands
+      #   - Unused variables, incorrect conditionals, and many more
+      #
+      # Configuration is read automatically from .shellcheckrc in the repo root:
+      #   shell=bash           — all scripts target bash
+      #   severity=warning     — warnings and above are reported/fail the step
+      #   source-path=scripts  — resolve sourced files relative to scripts/
+      #
+      # ShellCheck is pre-installed on ubuntu-latest GitHub-hosted runners
+      # (typically version 0.9.x).  No separate install step is needed.
+      # ------------------------------------------------------------------
+      - name: Lint shell scripts with ShellCheck
+        run: |
+          echo "=== ShellCheck version ==="
+          shellcheck --version
+          echo ""
+          echo "=== Linting all tracked .sh files ==="
+          failed=0
+          while IFS= read -r script; do
+            echo "::group::shellcheck $script"
+            if shellcheck "$script"; then
+              echo "✓ ShellCheck passed  $script"
+            else
+              echo "✗ ShellCheck FAILED  $script"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(git ls-files '*.sh' | sort)
+
+          if [ "$failed" -ne 0 ]; then
+            echo ""
+            echo "ERROR: One or more shell scripts failed ShellCheck linting."
+            echo "Run 'shellcheck <script>' locally to see detailed diagnostics."
+            echo "Configuration is in .shellcheckrc at the repository root."
+            exit 1
+          fi
+
+          echo ""
+          echo "All shell scripts passed ShellCheck."
+
+      # ------------------------------------------------------------------
+      # Step 4 — Verify required files exist in the expected directory
       # structure.  Each entry below corresponds to a file that must be
       # present for the project to work correctly.
       # ------------------------------------------------------------------

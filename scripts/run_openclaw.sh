@@ -18,7 +18,8 @@
 #        • OpenClaw-specific env vars (OPENCLAW_LLM_PROVIDER, OPENCLAW_LLM_*)
 #        • Shared network attachment so "vllm" hostname resolves
 #        • Dashboard port published on the host
-#   7. Wait for the OpenClaw dashboard to become available
+#   7. Post-start validation: wait for the healthcheck to pass and print
+#      a SUCCESS or FAILURE message to the user
 #
 # Usage:
 #   ./scripts/run_openclaw.sh                              # auto-detect runtime, port 18789
@@ -31,7 +32,7 @@
 #   VLLM_BASE_URL             OpenAI-compatible endpoint inside the shared network
 #                             (default: http://vllm:8000/v1)
 #   VLLM_API_KEY              API key passed to OpenClaw (default: EMPTY)
-#   VLLM_MODEL_NAME           Model ID for OpenClaw to request (default: Qwen/Qwen3.5-9B-AWQ)
+#   VLLM_MODEL_NAME           Model ID for OpenClaw to request (default: Qwen/Qwen2.5-7B-Instruct-AWQ)
 #   VLLM_MAX_TOKENS           Max response tokens            (default: 4096)
 #   VLLM_TEMPERATURE          Sampling temperature           (default: 0.7)
 #   VLLM_HEALTH_RETRIES       Max attempts to reach vLLM     (default: 60)
@@ -66,6 +67,32 @@ warn()  { echo "[run_openclaw] WARNING: $*" >&2; }
 error() { printf "[run_openclaw] ERROR: %s\n" "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
+# run_healthcheck — Invoke scripts/healthcheck.sh after the OpenClaw container
+#                  is confirmed running and the dashboard is reachable.
+#
+# Prints a clear HEALTHCHECK PASS / HEALTHCHECK FAIL line to stdout so the
+# operator knows immediately whether all services are healthy end-to-end.
+# A non-zero healthcheck exit is reported as a warning but does NOT cause
+# this script to exit non-zero — the container itself started successfully.
+# ---------------------------------------------------------------------------
+run_healthcheck() {
+    log ""
+    log "--- Running DemoClaw healthcheck (post-launch) ---"
+    local hc_exit=0
+    bash "${SCRIPT_DIR}/healthcheck.sh" || hc_exit=$?
+    if [ "${hc_exit}" -eq 0 ]; then
+        log ""
+        log "HEALTHCHECK PASS: All services are healthy."
+    else
+        warn ""
+        warn "HEALTHCHECK FAIL: One or more service checks did not pass."
+        warn "  See the report above for details."
+        warn "  Re-run at any time: ./scripts/healthcheck.sh"
+    fi
+    log ""
+}
+
+# ---------------------------------------------------------------------------
 # Load .env file if present (key=value, one per line; no export needed here)
 # Must happen BEFORE variable defaults so .env values take precedence.
 # ---------------------------------------------------------------------------
@@ -88,7 +115,7 @@ fi
 # that container-to-container traffic stays on the shared bridge network.
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm:8000/v1}"
 VLLM_API_KEY="${VLLM_API_KEY:-EMPTY}"
-VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen3.5-9B-AWQ}"
+VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
 VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-4096}"
 VLLM_TEMPERATURE="${VLLM_TEMPERATURE:-0.7}"
 
@@ -109,6 +136,9 @@ NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
 
 # --- vLLM container name for pre-flight checks ---
 VLLM_CONTAINER_NAME="${VLLM_CONTAINER_NAME:-democlaw-vllm}"
+
+# --- vLLM host port (used in post-start success banners to show host endpoint) ---
+VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
 
 # --- Dashboard availability wait (host-side, after container starts) ---
 OPENCLAW_HEALTH_TIMEOUT="${OPENCLAW_HEALTH_TIMEOUT:-120}"
@@ -310,6 +340,7 @@ log "======================================================="
     -e "VLLM_HEALTH_RETRIES=${VLLM_HEALTH_RETRIES}" \
     -e "VLLM_HEALTH_INTERVAL=${VLLM_HEALTH_INTERVAL}" \
     -e "OPENCLAW_PORT=${OPENCLAW_PORT}" \
+    -e "OPENCLAW_HOST=0.0.0.0" \
     -e "OPENAI_API_BASE=${VLLM_BASE_URL}" \
     -e "OPENAI_BASE_URL=${VLLM_BASE_URL}" \
     -e "OPENAI_API_KEY=${VLLM_API_KEY}" \
@@ -335,20 +366,48 @@ log "  ${RUNTIME} logs -f ${CONTAINER_NAME}"
 log ""
 
 # ---------------------------------------------------------------------------
-# Step 7: Wait for the OpenClaw dashboard to become available on the host
+# Step 7: Post-start validation — wait for the OpenClaw healthcheck to pass
 #
-# The container entrypoint waits for vLLM readiness before starting OpenClaw,
-# so this host-side poll accounts for both vLLM startup time and OpenClaw's
-# own initialisation.
+# Waits for the OpenClaw container to be confirmed healthy and prints a clear
+# SUCCESS or FAILURE message to the user.
+#
+# Two-layer validation strategy:
+#
+#   Layer 1 — HTTP reachability probe (fast feedback)
+#     Polls http://localhost:<OPENCLAW_HOST_PORT> every HEALTH_POLL_INTERVAL
+#     seconds.  Gives the operator quick confirmation once the Node.js server
+#     is accepting connections (typically 10–30 s after container start).
+#
+#   Layer 2 — Container healthcheck confirmation (authoritative result)
+#     Concurrently reads the container's built-in HEALTHCHECK status via
+#     `container inspect .State.Health.Status`.  The Docker/Podman runtime
+#     runs the /app/healthcheck.sh probe inside the container on a schedule
+#     (--interval=30s, --start-period=60s) and updates this status field.
+#     Possible values: "starting", "healthy", "unhealthy", or empty/"none"
+#     (when no HEALTHCHECK instruction is present in the image).
+#
+#   Decision table:
+#     hc_status = "healthy"   → SUCCESS banner, exit 0
+#     hc_status = "unhealthy" → FAILURE banner, exit 1  (even if HTTP is up,
+#                               the app-level probe detected a problem)
+#     hc_status = "none"/""   → treat HTTP-up as success (no probe configured)
+#     hc_status = "starting"  → keep waiting; healthcheck start-period not yet
+#                               elapsed (60 s per Dockerfile)
+#     timeout elapsed, HTTP up, hc_status = "starting"
+#                             → SUCCESS with advisory note (dashboard works)
+#     timeout elapsed, HTTP never responded
+#                             → FAILURE banner with diagnostic hints
 # ---------------------------------------------------------------------------
 DASHBOARD_URL="http://localhost:${OPENCLAW_HOST_PORT}"
-HEALTH_INTERVAL=3
+HEALTH_POLL_INTERVAL=3
 elapsed=0
+http_ready=false
 
 log "Waiting for OpenClaw dashboard at ${DASHBOARD_URL} (timeout: ${OPENCLAW_HEALTH_TIMEOUT}s) ..."
+log "Will validate using container healthcheck once the dashboard is reachable."
 
 while [ "${elapsed}" -lt "${OPENCLAW_HEALTH_TIMEOUT}" ]; do
-    # Check the container hasn't crashed
+    # ---- Guard: ensure the container has not crashed ----
     if ! "${RUNTIME}" container inspect "${CONTAINER_NAME}" > /dev/null 2>&1; then
         error "Container '${CONTAINER_NAME}' exited unexpectedly.
   Check logs:  ${RUNTIME} logs ${CONTAINER_NAME}"
@@ -362,42 +421,138 @@ while [ "${elapsed}" -lt "${OPENCLAW_HEALTH_TIMEOUT}" ]; do
   Check logs:  ${RUNTIME} logs ${CONTAINER_NAME}"
     fi
 
-    # Try to reach the dashboard on the published host port
-    if curl -sf -o /dev/null -w '' "${DASHBOARD_URL}" 2>/dev/null; then
-        log ""
-        log "============================================="
-        log "  OpenClaw dashboard is ready!"
-        log "  URL: ${DASHBOARD_URL}"
-        log "============================================="
-        log ""
-        log "vLLM OpenAI-compatible endpoint (from host):"
-        log "  http://localhost:${VLLM_HOST_PORT:-8000}/v1"
-        log ""
-        log "To stop both containers:"
-        log "  ./scripts/stop.sh"
-        log ""
-        exit 0
+    # ---- Layer 2: read container HEALTHCHECK status ----
+    hc_status=$("${RUNTIME}" container inspect \
+        --format '{{.State.Health.Status}}' "${CONTAINER_NAME}" 2>/dev/null \
+        || echo "none")
+
+    # Unhealthy is an immediate, authoritative failure — exit early
+    if [ "${hc_status}" = "unhealthy" ]; then
+        warn ""
+        warn "============================================="
+        warn "  FAILURE: OpenClaw healthcheck is UNHEALTHY"
+        warn "============================================="
+        warn "  Container  : ${CONTAINER_NAME}"
+        warn "  Dashboard  : ${DASHBOARD_URL}"
+        warn "  Healthcheck: ${hc_status}"
+        warn "============================================="
+        warn ""
+        warn "The container's built-in healthcheck (/app/healthcheck.sh) has failed."
+        warn "Diagnose with:"
+        warn "  ${RUNTIME} logs ${CONTAINER_NAME}"
+        warn "  ${RUNTIME} inspect --format '{{json .State.Health}}' ${CONTAINER_NAME}"
+        exit 1
     fi
 
-    sleep "${HEALTH_INTERVAL}"
-    elapsed=$((elapsed + HEALTH_INTERVAL))
+    # ---- Layer 1: HTTP reachability probe ----
+    if curl -sf -o /dev/null -w '' "${DASHBOARD_URL}" 2>/dev/null; then
+        http_ready=true
+    fi
+
+    # ---- Decision: HTTP up + healthcheck status ----
+    if [ "${http_ready}" = "true" ]; then
+        case "${hc_status}" in
+            healthy)
+                log ""
+                log "============================================="
+                log "  SUCCESS: OpenClaw is healthy and ready!"
+                log "============================================="
+                log "  Container  : ${CONTAINER_NAME}"
+                log "  Dashboard  : ${DASHBOARD_URL}"
+                log "  Healthcheck: ${hc_status}"
+                log "============================================="
+                log ""
+                log "vLLM OpenAI-compatible endpoint (from host):"
+                log "  http://localhost:${VLLM_HOST_PORT:-8000}/v1"
+                log ""
+                log "To stop both containers:"
+                log "  ./scripts/stop.sh"
+                run_healthcheck
+                exit 0
+                ;;
+            none|"")
+                # Image has no HEALTHCHECK instruction — HTTP response is sufficient
+                log ""
+                log "============================================="
+                log "  SUCCESS: OpenClaw dashboard is ready!"
+                log "============================================="
+                log "  Container  : ${CONTAINER_NAME}"
+                log "  Dashboard  : ${DASHBOARD_URL}"
+                log "  Healthcheck: not configured (HTTP 200 OK)"
+                log "============================================="
+                log ""
+                log "vLLM OpenAI-compatible endpoint (from host):"
+                log "  http://localhost:${VLLM_HOST_PORT:-8000}/v1"
+                log ""
+                log "To stop both containers:"
+                log "  ./scripts/stop.sh"
+                run_healthcheck
+                exit 0
+                ;;
+            starting)
+                # Healthcheck start-period (60 s per Dockerfile) not yet elapsed.
+                # HTTP is already responding — keep polling for the authoritative result.
+                ;;
+        esac
+    fi
+
+    sleep "${HEALTH_POLL_INTERVAL}"
+    elapsed=$((elapsed + HEALTH_POLL_INTERVAL))
 
     # Progress message every 15 seconds
     if [ $((elapsed % 15)) -eq 0 ]; then
-        log "  ... waiting for dashboard (${elapsed}/${OPENCLAW_HEALTH_TIMEOUT}s) — OpenClaw may still be waiting for vLLM"
+        http_label=$([ "${http_ready}" = "true" ] && echo "up" || echo "waiting")
+        log "  ... ${elapsed}/${OPENCLAW_HEALTH_TIMEOUT}s — http: ${http_label}, healthcheck: ${hc_status:-n/a}"
     fi
 done
 
 # ---------------------------------------------------------------------------
-# Timeout — dashboard didn't respond in time
-# The container may still be waiting for the vLLM model to finish loading.
+# Timeout reached — evaluate partial success vs full failure
+#
+# If HTTP was already responding when the timeout expired the dashboard IS
+# reachable; the healthcheck just hasn't completed its start-period yet.
+# Treat this as a soft success so the user can immediately open the browser.
+# If HTTP never responded the service is definitely not ready — report failure.
 # ---------------------------------------------------------------------------
-warn "OpenClaw dashboard did not respond within ${OPENCLAW_HEALTH_TIMEOUT}s."
-warn "The container is still running — it may be waiting for vLLM to load the model."
+hc_status_final=$("${RUNTIME}" container inspect \
+    --format '{{.State.Health.Status}}' "${CONTAINER_NAME}" 2>/dev/null \
+    || echo "unknown")
+
+if [ "${http_ready}" = "true" ]; then
+    log ""
+    log "============================================="
+    log "  SUCCESS: OpenClaw dashboard is responding."
+    log "  (Healthcheck still confirming: ${hc_status_final})"
+    log "============================================="
+    log "  Container  : ${CONTAINER_NAME}"
+    log "  Dashboard  : ${DASHBOARD_URL}"
+    log "  Healthcheck: ${hc_status_final}"
+    log "============================================="
+    log ""
+    log "The dashboard is accessible. The container healthcheck (start-period: 60 s)"
+    log "may still be running its first probe — this is normal for large model loads."
+    log "Monitor with:  ${RUNTIME} inspect --format '{{json .State.Health}}' ${CONTAINER_NAME}"
+    log ""
+    log "vLLM OpenAI-compatible endpoint (from host):"
+    log "  http://localhost:${VLLM_HOST_PORT:-8000}/v1"
+    log ""
+    log "To stop both containers:"
+    log "  ./scripts/stop.sh"
+    run_healthcheck
+    exit 0
+fi
+
+# Dashboard never responded — definitive failure
 warn ""
-warn "  Dashboard URL : ${DASHBOARD_URL}"
+warn "============================================="
+warn "  FAILURE: OpenClaw did not become ready"
+warn "  within ${OPENCLAW_HEALTH_TIMEOUT}s"
+warn "============================================="
+warn "  Dashboard  : ${DASHBOARD_URL}"
+warn "  Healthcheck: ${hc_status_final}"
 warn "  OpenClaw logs : ${RUNTIME} logs -f ${CONTAINER_NAME}"
 warn "  vLLM logs     : ${RUNTIME} logs -f ${VLLM_CONTAINER_NAME}"
+warn "============================================="
 warn ""
 warn "The Qwen3.5-9B AWQ model can take several minutes to load on first run."
 warn "Re-check the dashboard in a few minutes, or increase OPENCLAW_HEALTH_TIMEOUT:"

@@ -36,7 +36,7 @@ groups are derived from these.
 |----------|---------------|-------------|
 | `VLLM_BASE_URL` | `http://vllm:8000/v1` | Full base URL of the vLLM OpenAI-compatible API. Uses the container hostname `vllm` on the shared `democlaw-net` network. Change only if the vLLM container has a different hostname or port. |
 | `VLLM_API_KEY` | `EMPTY` | API key sent in `Authorization: Bearer` headers. vLLM accepts any non-empty string by default; set `EMPTY` or any placeholder value. |
-| `VLLM_MODEL_NAME` | `Qwen/Qwen3.5-9B-AWQ` | HuggingFace model identifier that vLLM is serving. Must match the `MODEL_NAME` passed to the vLLM container. |
+| `VLLM_MODEL_NAME` | `Qwen/Qwen2.5-7B-Instruct-AWQ` | HuggingFace model identifier that vLLM is serving. Must match the `MODEL_NAME` passed to the vLLM container. |
 | `VLLM_MAX_TOKENS` | `4096` | Maximum number of tokens per LLM response. |
 | `VLLM_TEMPERATURE` | `0.7` | Sampling temperature (`0.0` = deterministic, `1.0+` = more random). |
 
@@ -70,7 +70,7 @@ conventions (e.g. `openai`, LangChain.js, LiteLLM).
 | `OPENAI_API_BASE` | `http://vllm:8000/v1` | `VLLM_BASE_URL` | Base URL for the OpenAI-compatible endpoint. Used by older OpenAI SDK versions and many third-party libraries. |
 | `OPENAI_BASE_URL` | `http://vllm:8000/v1` | `VLLM_BASE_URL` | Same as above; used by OpenAI SDK v4+ and newer libraries. Both are set for maximum compatibility. |
 | `OPENAI_API_KEY` | `EMPTY` | `VLLM_API_KEY` | API key in the OpenAI SDK format. Set to any non-empty placeholder. |
-| `OPENAI_MODEL` | `Qwen/Qwen3.5-9B-AWQ` | `VLLM_MODEL_NAME` | Default model identifier used in API requests. |
+| `OPENAI_MODEL` | `Qwen/Qwen2.5-7B-Instruct-AWQ` | `VLLM_MODEL_NAME` | Default model identifier used in API requests. |
 
 ### OpenClaw-Specific LLM Provider Variables
 
@@ -82,7 +82,7 @@ path.
 | `OPENCLAW_LLM_PROVIDER` | `openai-compatible` | (hardcoded) | LLM provider type. Must be `openai-compatible` for vLLM. |
 | `OPENCLAW_LLM_BASE_URL` | `http://vllm:8000/v1` | `VLLM_BASE_URL` | Base URL of the OpenAI-compatible API endpoint. |
 | `OPENCLAW_LLM_API_KEY` | `EMPTY` | `VLLM_API_KEY` | API key for the LLM provider. |
-| `OPENCLAW_LLM_MODEL` | `Qwen/Qwen3.5-9B-AWQ` | `VLLM_MODEL_NAME` | Model identifier to request from the provider. |
+| `OPENCLAW_LLM_MODEL` | `Qwen/Qwen2.5-7B-Instruct-AWQ` | `VLLM_MODEL_NAME` | Model identifier to request from the provider. |
 | `OPENCLAW_LLM_MAX_TOKENS` | `4096` | `VLLM_MAX_TOKENS` | Maximum tokens per response. |
 | `OPENCLAW_LLM_TEMPERATURE` | `0.7` | `VLLM_TEMPERATURE` | Sampling temperature. |
 
@@ -119,7 +119,7 @@ environment-variable values:
     "provider": "openai-compatible",
     "baseUrl": "http://vllm:8000/v1",
     "apiKey": "EMPTY",
-    "model": "Qwen/Qwen3.5-9B-AWQ",
+    "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
     "maxTokens": 4096,
     "temperature": 0.7
   },
@@ -137,7 +137,7 @@ environment-variable values:
 | `llm.provider` | hardcoded | `"openai-compatible"` — selects the OpenAI-compatible provider |
 | `llm.baseUrl` | `VLLM_BASE_URL` | Full URL ending in `/v1`, e.g. `"http://vllm:8000/v1"` |
 | `llm.apiKey` | `VLLM_API_KEY` | Any non-empty string; vLLM default accepts `"EMPTY"` |
-| `llm.model` | `VLLM_MODEL_NAME` | HuggingFace model ID as loaded by vLLM, e.g. `"Qwen/Qwen3.5-9B-AWQ"` |
+| `llm.model` | `VLLM_MODEL_NAME` | HuggingFace model ID as loaded by vLLM, e.g. `"Qwen/Qwen2.5-7B-Instruct-AWQ"` |
 | `llm.maxTokens` | `VLLM_MAX_TOKENS` | Integer, e.g. `4096` |
 | `llm.temperature` | `VLLM_TEMPERATURE` | Float in `[0.0, 2.0]`, e.g. `0.7` |
 | `server.host` | hardcoded | `"0.0.0.0"` — bind to all interfaces |
@@ -156,7 +156,7 @@ All primary variables can be overridden in the project `.env` file (copy from
 # .env
 VLLM_BASE_URL=http://vllm:8000/v1
 VLLM_API_KEY=EMPTY
-VLLM_MODEL_NAME=Qwen/Qwen3.5-9B-AWQ
+VLLM_MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ
 VLLM_MAX_TOKENS=4096
 VLLM_TEMPERATURE=0.7
 OPENCLAW_PORT=18789
@@ -168,7 +168,7 @@ OPENCLAW_PORT=18789
 docker run \
   -e VLLM_BASE_URL=http://vllm:8000/v1 \
   -e VLLM_API_KEY=EMPTY \
-  -e VLLM_MODEL_NAME=Qwen/Qwen3.5-9B-AWQ \
+  -e VLLM_MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ \
   -e OPENCLAW_PORT=18789 \
   democlaw/openclaw:latest
 ```

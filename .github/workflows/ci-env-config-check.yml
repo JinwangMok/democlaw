@@ -1,0 +1,616 @@
+name: Orchestration Scripts — Syntax & Config Check
+
+# ---------------------------------------------------------------------------
+# CI job: orchestration script syntax validation + env/config presence check
+#
+# Sub-AC 15.4: Runs the orchestration shell scripts with a syntax-only check
+# (bash -n) and verifies required environment variables and configuration
+# files are present.
+#
+# Three jobs in this workflow:
+#
+#   1. syntax-check
+#      Runs `bash -n` on every orchestration shell script (scripts/*.sh and
+#      scripts/lib/*.sh).  bash -n parses the script without executing it and
+#      exits non-zero on any syntax error.  No GPU, no runtime, no network.
+#
+#   2. env-vars-check
+#      Verifies that .env.example is present and documents every required
+#      environment variable that the orchestration scripts consume.  Fails if
+#      any expected variable name is absent from the file.
+#
+#   3. config-files-check
+#      Verifies that all required configuration files exist and, where
+#      applicable, contain the expected keys / fields:
+#        - .env.example          (environment defaults / documentation)
+#        - openclaw/config.json  (OpenClaw LLM provider + server config)
+#        - vllm/Dockerfile       (vLLM container definition)
+#        - openclaw/Dockerfile   (OpenClaw container definition)
+#        - scripts/lib/runtime.sh  (shared runtime-detection library)
+#        - scripts/lib/gpu.sh      (shared GPU-validation library)
+#
+# None of these jobs require:
+#   - A GPU or nvidia-container-toolkit
+#   - A running container runtime (docker/podman)
+#   - Network access beyond the GitHub Actions runner
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**/*.sh"
+      - "scripts/*.sh"
+      - ".env.example"
+      - "openclaw/config.json"
+      - ".github/workflows/ci-env-config-check.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/**/*.sh"
+      - "scripts/*.sh"
+      - ".env.example"
+      - "openclaw/config.json"
+      - ".github/workflows/ci-env-config-check.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1 — Syntax-only check (bash -n) for all orchestration scripts
+  #
+  # Target scripts:
+  #   scripts/start.sh           — main orchestrator
+  #   scripts/stop.sh            — teardown
+  #   scripts/start-vllm.sh     — vLLM container launcher
+  #   scripts/start-openclaw.sh  — OpenClaw container launcher
+  #   scripts/healthcheck.sh     — comprehensive end-to-end healthcheck
+  #   scripts/healthcheck_openclaw.sh — OpenClaw-specific healthcheck
+  #   scripts/healthcheck_vllm.sh     — vLLM-specific healthcheck
+  #   scripts/validate-api.sh    — vLLM API validation
+  #   scripts/validate_connection.sh  — vLLM connection validation
+  #   scripts/check-gpu.sh       — standalone GPU/CUDA preflight
+  #   scripts/lib/runtime.sh     — shared runtime-detection library
+  #   scripts/lib/gpu.sh         — shared GPU-validation library
+  #
+  # The check runs on every tracked .sh file under scripts/ so new scripts
+  # added in future are automatically included.
+  # ---------------------------------------------------------------------------
+  syntax-check:
+    name: "Syntax check — bash -n (orchestration scripts)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Report bash version for reproducibility
+      # -----------------------------------------------------------------------
+      - name: Show bash version
+        run: bash --version | head -1
+
+      # -----------------------------------------------------------------------
+      # Discover orchestration shell scripts
+      #
+      # Uses git ls-files so only tracked files are included and the list
+      # matches exactly what is shipped in the repository.  Scoped to
+      # scripts/ (including sub-directories) and excludes Windows .bat files.
+      # -----------------------------------------------------------------------
+      - name: Discover orchestration scripts
+        id: discover
+        run: |
+          mapfile -t scripts < <(
+            git ls-files 'scripts/*.sh' 'scripts/**/*.sh' | sort
+          )
+          count="${#scripts[@]}"
+          echo "Found ${count} orchestration script(s):"
+          printf '  %s\n' "${scripts[@]}"
+          echo ""
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          if [ "${count}" -gt 0 ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Run bash -n on every discovered script
+      #
+      # bash -n reads the script and checks for syntax errors without executing
+      # any commands.  It catches:
+      #   - Unclosed brackets or braces
+      #   - Mismatched if/fi, do/done, case/esac blocks
+      #   - Malformed here-documents
+      #   - Bad variable substitutions
+      #   - Missing function closing braces
+      #
+      # Each script is tested in its own ::group:: block for clear log output.
+      # The overall job fails if ANY script has a syntax error.
+      # -----------------------------------------------------------------------
+      - name: Run bash -n syntax check on all orchestration scripts
+        if: steps.discover.outputs.found == 'true'
+        run: |
+          echo "========================================================"
+          echo "  Orchestration Script Syntax Validation (bash -n)"
+          echo "========================================================"
+          echo ""
+
+          exit_code=0
+          passed=0
+          failed=0
+          failed_scripts=()
+
+          while IFS= read -r script; do
+            echo "::group::bash -n ${script}"
+            if bash -n "${script}" 2>&1; then
+              echo "✓  ${script} — syntax OK"
+              passed=$((passed + 1))
+            else
+              echo "✗  ${script} — SYNTAX ERROR"
+              failed=$((failed + 1))
+              failed_scripts+=("${script}")
+              exit_code=1
+            fi
+            echo "::endgroup::"
+          done < <(git ls-files 'scripts/*.sh' 'scripts/**/*.sh' | sort)
+
+          echo ""
+          echo "========================================================"
+          echo "  Syntax Check Summary"
+          echo "========================================================"
+          echo "  Passed : ${passed}"
+          echo "  Failed : ${failed}"
+          echo "  Total  : $((passed + failed))"
+          echo "========================================================"
+
+          if [ "${exit_code}" -ne 0 ]; then
+            echo ""
+            echo "ERROR: The following script(s) contain bash syntax errors:"
+            printf '  - %s\n' "${failed_scripts[@]}"
+            echo ""
+            echo "Fix the syntax errors, then re-push."
+          else
+            echo ""
+            echo "All orchestration scripts passed bash -n syntax validation."
+          fi
+
+          exit "${exit_code}"
+
+      - name: No orchestration scripts found
+        if: steps.discover.outputs.found == 'false'
+        run: |
+          echo "ERROR: No orchestration shell scripts found under scripts/."
+          echo "Expected at least: scripts/start.sh, scripts/stop.sh, etc."
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Job 2 — Required environment variables check
+  #
+  # Verifies that .env.example documents every environment variable that the
+  # orchestration scripts depend on.  The check is purely textual — it scans
+  # .env.example for the presence of each variable name (as a key= line or
+  # a commented #KEY= line).  No values are required; only the keys.
+  #
+  # Required variables are grouped by category:
+  #   - Runtime selection  (CONTAINER_RUNTIME)
+  #   - Network            (DEMOCLAW_NETWORK)
+  #   - vLLM model config  (MODEL_NAME, QUANTIZATION, DTYPE, …)
+  #   - vLLM container     (VLLM_CONTAINER_NAME, VLLM_IMAGE_TAG, …)
+  #   - HuggingFace        (HF_CACHE_DIR, HF_TOKEN)
+  #   - OpenClaw container (OPENCLAW_CONTAINER_NAME, OPENCLAW_IMAGE_TAG, …)
+  #   - OpenClaw provider  (VLLM_BASE_URL, VLLM_API_KEY, VLLM_MODEL_NAME, …)
+  #   - GPU validation     (MIN_VRAM_MIB, MIN_DRIVER_VERSION, MIN_CUDA_VERSION)
+  # ---------------------------------------------------------------------------
+  env-vars-check:
+    name: "Env vars check — .env.example contains required variable keys"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Verify .env.example exists before scanning it
+      # -----------------------------------------------------------------------
+      - name: Verify .env.example is present
+        run: |
+          if [ ! -f ".env.example" ]; then
+            echo "ERROR: .env.example is missing from the repository root."
+            echo "This file is required to document all configurable environment"
+            echo "variables for operators deploying the DemoClaw stack."
+            exit 1
+          fi
+          echo "✓  .env.example found ($(wc -l < .env.example) lines)"
+
+      # -----------------------------------------------------------------------
+      # Scan .env.example for required variable keys
+      #
+      # The pattern `^#?KEY=` matches both:
+      #   KEY=value          (uncommented / active setting)
+      #   #KEY=value         (commented-out default — still documented)
+      #
+      # This tolerates the common convention of documenting all variables as
+      # commented examples with sensible defaults.
+      # -----------------------------------------------------------------------
+      - name: Verify required environment variables are documented in .env.example
+        run: |
+          echo "========================================================"
+          echo "  Required Environment Variables — .env.example Check"
+          echo "========================================================"
+          echo ""
+
+          # -------------------------------------------------------------------
+          # List of required variable names.
+          # Each entry is the bare variable name (no $ prefix, no = suffix).
+          # The check accepts both active (KEY=) and commented (#KEY=) forms.
+          # -------------------------------------------------------------------
+          required_vars=(
+            # ── Container runtime ───────────────────────────────────────────
+            "CONTAINER_RUNTIME"
+
+            # ── Shared network ───────────────────────────────────────────────
+            "DEMOCLAW_NETWORK"
+
+            # ── vLLM model configuration ─────────────────────────────────────
+            "MODEL_NAME"
+            "QUANTIZATION"
+            "DTYPE"
+            "MAX_MODEL_LEN"
+            "GPU_MEMORY_UTILIZATION"
+
+            # ── vLLM container settings ──────────────────────────────────────
+            "VLLM_CONTAINER_NAME"
+            "VLLM_IMAGE_TAG"
+            "VLLM_PORT"
+            "VLLM_HOST_PORT"
+            "VLLM_HEALTH_TIMEOUT"
+            "SKIP_MODEL_PULL"
+
+            # ── HuggingFace ──────────────────────────────────────────────────
+            "HF_CACHE_DIR"
+            "HF_TOKEN"
+
+            # ── OpenClaw container settings ──────────────────────────────────
+            "OPENCLAW_CONTAINER_NAME"
+            "OPENCLAW_IMAGE_TAG"
+            "OPENCLAW_PORT"
+            "OPENCLAW_HOST_PORT"
+            "OPENCLAW_HEALTH_TIMEOUT"
+
+            # ── OpenClaw → vLLM provider connection ──────────────────────────
+            "VLLM_BASE_URL"
+            "VLLM_API_KEY"
+            "VLLM_MODEL_NAME"
+            "VLLM_MAX_TOKENS"
+            "VLLM_TEMPERATURE"
+            "VLLM_HEALTH_RETRIES"
+            "VLLM_HEALTH_INTERVAL"
+
+            # ── GPU validation ───────────────────────────────────────────────
+            "MIN_VRAM_MIB"
+            "MIN_DRIVER_VERSION"
+            "MIN_CUDA_VERSION"
+          )
+
+          exit_code=0
+          missing=()
+
+          for var in "${required_vars[@]}"; do
+            # Accept both commented (#VAR=) and uncommented (VAR=) forms
+            if grep -qE "^#?${var}=" .env.example; then
+              echo "✓  ${var}"
+            else
+              echo "✗  MISSING: ${var}"
+              missing+=("${var}")
+              exit_code=1
+            fi
+          done
+
+          echo ""
+          echo "========================================================"
+          echo "  Summary: ${#required_vars[@]} required variables checked"
+          echo "========================================================"
+
+          if [ "${exit_code}" -ne 0 ]; then
+            echo ""
+            echo "ERROR: The following variable(s) are not documented in .env.example:"
+            printf '  - %s\n' "${missing[@]}"
+            echo ""
+            echo "Add a commented entry for each missing variable, e.g.:"
+            for var in "${missing[@]}"; do
+              echo "  #${var}=<default_value>"
+            done
+            exit 1
+          fi
+
+          echo ""
+          echo "All required environment variables are documented in .env.example."
+
+  # ---------------------------------------------------------------------------
+  # Job 3 — Required configuration files check
+  #
+  # Verifies the presence of every file that is required for the DemoClaw
+  # stack to function correctly, then performs content validation on files
+  # where the schema is well-defined (openclaw/config.json).
+  #
+  # File presence checks:
+  #   - .env.example                  — environment variable documentation
+  #   - openclaw/config.json          — OpenClaw LLM provider + server config
+  #   - vllm/Dockerfile               — vLLM server container definition
+  #   - vllm/entrypoint.sh            — vLLM container entrypoint
+  #   - vllm/healthcheck.sh           — vLLM Docker HEALTHCHECK script
+  #   - openclaw/Dockerfile           — OpenClaw container definition
+  #   - openclaw/entrypoint.sh        — OpenClaw container entrypoint
+  #   - openclaw/healthcheck.sh       — OpenClaw Docker HEALTHCHECK script
+  #   - scripts/start.sh              — main orchestration script
+  #   - scripts/stop.sh               — teardown script
+  #   - scripts/start-vllm.sh         — vLLM launcher
+  #   - scripts/start-openclaw.sh     — OpenClaw launcher
+  #   - scripts/healthcheck.sh        — comprehensive healthcheck
+  #   - scripts/healthcheck_openclaw.sh — OpenClaw healthcheck
+  #   - scripts/validate-api.sh       — API validation
+  #   - scripts/lib/runtime.sh        — shared runtime library
+  #   - scripts/lib/gpu.sh            — shared GPU library
+  #
+  # Content checks (openclaw/config.json):
+  #   - File is valid JSON
+  #   - Top-level key "llm" is present
+  #   - llm.provider is present
+  #   - llm.baseUrl is present
+  #   - llm.model is present
+  #   - Top-level key "server" is present
+  #   - server.host is present
+  #   - server.port is present
+  # ---------------------------------------------------------------------------
+  config-files-check:
+    name: "Config files check — required files present + config.json schema"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # Step 1: Verify all required files exist
+      # -----------------------------------------------------------------------
+      - name: Verify required files are present
+        run: |
+          echo "========================================================"
+          echo "  Required Files — Presence Check"
+          echo "========================================================"
+          echo ""
+
+          required_files=(
+            # ── Environment configuration ────────────────────────────────────
+            ".env.example"
+
+            # ── vLLM container ───────────────────────────────────────────────
+            "vllm/Dockerfile"
+            "vllm/entrypoint.sh"
+            "vllm/healthcheck.sh"
+
+            # ── OpenClaw container ───────────────────────────────────────────
+            "openclaw/Dockerfile"
+            "openclaw/entrypoint.sh"
+            "openclaw/healthcheck.sh"
+            "openclaw/config.json"
+
+            # ── Top-level orchestration scripts ──────────────────────────────
+            "scripts/start.sh"
+            "scripts/stop.sh"
+            "scripts/start-vllm.sh"
+            "scripts/start-openclaw.sh"
+
+            # ── Healthcheck & validation scripts ─────────────────────────────
+            "scripts/healthcheck.sh"
+            "scripts/healthcheck_openclaw.sh"
+            "scripts/validate-api.sh"
+
+            # ── Shared libraries ─────────────────────────────────────────────
+            "scripts/lib/runtime.sh"
+            "scripts/lib/gpu.sh"
+          )
+
+          exit_code=0
+          missing=()
+
+          for f in "${required_files[@]}"; do
+            if [ -f "${f}" ]; then
+              echo "✓  ${f}"
+            else
+              echo "✗  MISSING: ${f}"
+              missing+=("${f}")
+              exit_code=1
+            fi
+          done
+
+          echo ""
+          echo "========================================================"
+          echo "  Summary: ${#required_files[@]} file(s) checked"
+          echo "========================================================"
+
+          if [ "${exit_code}" -ne 0 ]; then
+            echo ""
+            echo "ERROR: The following required file(s) are missing:"
+            printf '  - %s\n' "${missing[@]}"
+            echo ""
+            echo "All files listed above must be present for the DemoClaw stack"
+            echo "to function correctly."
+            exit 1
+          fi
+
+          echo ""
+          echo "All required files are present."
+
+      # -----------------------------------------------------------------------
+      # Step 2: Validate openclaw/config.json is valid JSON
+      # -----------------------------------------------------------------------
+      - name: Validate openclaw/config.json — JSON syntax
+        run: |
+          echo "::group::JSON syntax check: openclaw/config.json"
+          if python3 -c "
+          import json, sys
+          try:
+              with open('openclaw/config.json') as f:
+                  json.load(f)
+              print('✓  openclaw/config.json is valid JSON')
+              sys.exit(0)
+          except json.JSONDecodeError as e:
+              print(f'✗  openclaw/config.json is NOT valid JSON: {e}', file=sys.stderr)
+              sys.exit(1)
+          "; then
+            echo "JSON syntax OK."
+          else
+            echo "::endgroup::"
+            echo ""
+            echo "ERROR: openclaw/config.json contains invalid JSON."
+            echo "Fix the JSON syntax, then re-push."
+            exit 1
+          fi
+          echo "::endgroup::"
+
+      # -----------------------------------------------------------------------
+      # Step 3: Validate openclaw/config.json has required schema keys
+      #
+      # Required keys (dot-notation):
+      #   llm               — top-level LLM provider config object
+      #   llm.provider      — must be "openai-compatible"
+      #   llm.baseUrl       — URL of the vLLM OpenAI-compatible endpoint
+      #   llm.model         — model identifier served by vLLM
+      #   server            — top-level server config object
+      #   server.host       — host address the OpenClaw server binds to
+      #   server.port       — TCP port the OpenClaw dashboard listens on
+      # -----------------------------------------------------------------------
+      - name: Validate openclaw/config.json — required schema keys
+        run: |
+          echo "::group::Schema key check: openclaw/config.json"
+          python3 << 'PYTHON_EOF'
+          import json, sys
+
+          config_path = "openclaw/config.json"
+
+          with open(config_path) as f:
+              cfg = json.load(f)
+
+          # Define required keys as (dot-path, description) pairs.
+          # dot-path is split on '.' to traverse nested objects.
+          required = [
+              ("llm",                 "top-level LLM provider config block"),
+              ("llm.provider",        "LLM provider type (e.g. openai-compatible)"),
+              ("llm.baseUrl",         "vLLM OpenAI-compatible API base URL"),
+              ("llm.model",           "model identifier served by vLLM"),
+              ("server",              "top-level server config block"),
+              ("server.host",         "OpenClaw server bind address"),
+              ("server.port",         "OpenClaw dashboard TCP port"),
+          ]
+
+          exit_code = 0
+          missing = []
+
+          for dot_path, description in required:
+              keys = dot_path.split(".")
+              node = cfg
+              found = True
+              for key in keys:
+                  if not isinstance(node, dict) or key not in node:
+                      found = False
+                      break
+                  node = node[key]
+
+              if found:
+                  print(f"✓  {dot_path!s:30s}  ({description})")
+              else:
+                  print(f"✗  MISSING: {dot_path!s:24s}  ({description})", file=sys.stderr)
+                  missing.append(dot_path)
+                  exit_code = 1
+
+          print()
+          print(f"Checked {len(required)} required key(s) in {config_path}.")
+
+          if exit_code != 0:
+              print()
+              print("ERROR: The following required key(s) are missing from openclaw/config.json:")
+              for k in missing:
+                  print(f"  - {k}")
+              print()
+              print("openclaw/config.json must define at minimum:")
+              print('  {')
+              print('    "llm": { "provider": "...", "baseUrl": "...", "model": "..." },')
+              print('    "server": { "host": "...", "port": <number> }')
+              print('  }')
+              sys.exit(1)
+          else:
+              print("All required schema keys are present in openclaw/config.json.")
+          PYTHON_EOF
+          echo "::endgroup::"
+
+      # -----------------------------------------------------------------------
+      # Step 4: Validate openclaw/config.json semantic values
+      #
+      # Checks that key values are semantically sensible:
+      #   - llm.provider    must equal "openai-compatible" (required for vLLM)
+      #   - llm.baseUrl     must be a non-empty string starting with http
+      #   - server.port     must be a positive integer
+      # -----------------------------------------------------------------------
+      - name: Validate openclaw/config.json — semantic value checks
+        run: |
+          echo "::group::Semantic value check: openclaw/config.json"
+          python3 << 'PYTHON_EOF'
+          import json, sys
+
+          with open("openclaw/config.json") as f:
+              cfg = json.load(f)
+
+          llm    = cfg.get("llm", {})
+          server = cfg.get("server", {})
+
+          exit_code = 0
+
+          # ── llm.provider ──────────────────────────────────────────────────
+          provider = llm.get("provider", "")
+          if provider == "openai-compatible":
+              print(f"✓  llm.provider = {provider!r}  (correct for vLLM)")
+          else:
+              print(
+                  f"✗  llm.provider = {provider!r}  "
+                  f"(expected 'openai-compatible' for vLLM integration)",
+                  file=sys.stderr,
+              )
+              exit_code = 1
+
+          # ── llm.baseUrl ───────────────────────────────────────────────────
+          base_url = llm.get("baseUrl", "")
+          if isinstance(base_url, str) and base_url.startswith("http"):
+              print(f"✓  llm.baseUrl  = {base_url!r}")
+          else:
+              print(
+                  f"✗  llm.baseUrl  = {base_url!r}  "
+                  f"(must be a non-empty string starting with 'http')",
+                  file=sys.stderr,
+              )
+              exit_code = 1
+
+          # ── server.port ───────────────────────────────────────────────────
+          port = server.get("port")
+          if isinstance(port, int) and port > 0:
+              print(f"✓  server.port  = {port}  (valid TCP port)")
+          else:
+              print(
+                  f"✗  server.port  = {port!r}  "
+                  f"(must be a positive integer, e.g. 18789)",
+                  file=sys.stderr,
+              )
+              exit_code = 1
+
+          print()
+          if exit_code != 0:
+              print("ERROR: One or more values in openclaw/config.json are invalid.")
+              print("See details above.")
+              sys.exit(1)
+          else:
+              print("All semantic value checks passed for openclaw/config.json.")
+          PYTHON_EOF
+          echo "::endgroup::"

@@ -28,7 +28,7 @@
 #                               When set (default), exit 0 only when this exact
 #                               model ID is listed.  Set to empty ("") to
 #                               accept any model.
-#                               Default: Qwen/Qwen3.5-9B-AWQ
+#                               Default: Qwen/Qwen2.5-7B-Instruct-AWQ
 #
 #   VLLM_HEALTH_TIMEOUT         Maximum total seconds to wait before giving up.
 #                               Default: 600  (model loading can take minutes)
@@ -47,7 +47,7 @@
 # Usage:
 #   ./scripts/healthcheck_vllm.sh
 #   VLLM_HOST_PORT=8001 ./scripts/healthcheck_vllm.sh
-#   MODEL_NAME=Qwen/Qwen3.5-9B-AWQ VLLM_HEALTH_TIMEOUT=900 ./scripts/healthcheck_vllm.sh
+#   MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ VLLM_HEALTH_TIMEOUT=900 ./scripts/healthcheck_vllm.sh
 #   MODEL_NAME="" ./scripts/healthcheck_vllm.sh   # accept any loaded model
 # =============================================================================
 set -euo pipefail
@@ -74,7 +74,7 @@ fi
 # ---------------------------------------------------------------------------
 VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://localhost:${VLLM_HOST_PORT}}"
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3.5-9B-AWQ}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
 
 # Model loading on an 8 GB GPU can take 3-8 minutes; default to 10 minutes.
 VLLM_HEALTH_TIMEOUT="${VLLM_HEALTH_TIMEOUT:-600}"

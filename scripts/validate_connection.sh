@@ -12,7 +12,7 @@
 #   • The vLLM server is reachable at the configured URL
 #   • The /v1/models endpoint returns a valid JSON response
 #   • At least one model is loaded and ready to serve requests
-#   • (Optional) The expected model (Qwen/Qwen3.5-9B-AWQ) is present
+#   • (Optional) The expected model (Qwen/Qwen2.5-7B-Instruct-AWQ) is present
 #
 # HOW IT CAN BE INVOKED
 # ----------------------
@@ -49,7 +49,7 @@
 #   VLLM_HOST_PORT         Host port for vLLM (used with --host flag)
 #                          default: 8000
 #   MODEL_NAME             Expected model to verify is loaded
-#                          default: Qwen/Qwen3.5-9B-AWQ
+#                          default: Qwen/Qwen2.5-7B-Instruct-AWQ
 #   VALIDATE_RETRIES       Number of retry attempts before giving up
 #                          default: 12
 #   VALIDATE_INTERVAL      Seconds to wait between retries
@@ -134,7 +134,7 @@ VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm:8000/v1}"
 VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
 
 # Expected model name
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3.5-9B-AWQ}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
 
 # Retry configuration
 VALIDATE_RETRIES="${VALIDATE_RETRIES:-12}"

@@ -1,10 +1,9 @@
 name: CI
 
+# Runs on every push and pull_request to any branch.
 on:
   push:
-    branches: [main]
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -182,6 +181,15 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Dry-run Docker image builds (CPU-only, no GPU tests, no push)
+  #
+  # vLLM Dockerfile: uses docker buildx build --check (dry-run syntax check).
+  #   The vllm/vllm-openai base image is ~15-20 GB; a full build would be
+  #   impractical in CI (disk exhaustion, multi-hour downloads).
+  #   --check validates the Dockerfile without pulling any base image,
+  #   executing RUN instructions, or creating a local image layer.
+  #   No GPU is required at build time (GPU is runtime-only for inference).
+  #
+  # OpenClaw Dockerfile: full build (ubuntu:24.04 base, fast and small).
   # ---------------------------------------------------------------------------
   docker-build:
     name: Docker build (dry-run)
@@ -194,13 +202,35 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build vLLM image (Docker)
+      # vLLM: dry-run syntax check via docker buildx build --check.
+      # Does NOT pull vllm/vllm-openai, does NOT execute RUN instructions,
+      # does NOT create a local image. No GPU required.
+      - name: Dry-run build check — vllm/Dockerfile (Docker)
         run: |
-          echo "::group::Building vLLM Dockerfile with Docker"
-          docker build --no-cache --tag democlaw/vllm:ci-docker ./vllm
+          echo "::group::Dry-run build check: vllm/Dockerfile (docker buildx build --check)"
+          echo "NOTE: vllm/vllm-openai is ~15-20 GB; full build skipped in CI."
+          echo "Validating Dockerfile syntax and structure only (no GPU required)."
+          echo ""
+          if docker buildx build --help 2>&1 | grep -q -- '--check'; then
+            echo "Method: docker buildx build --check --no-cache ./vllm"
+            docker buildx build --check --no-cache ./vllm
+            check_exit=$?
+          else
+            echo "Method: hadolint fallback (Buildx --check not available)"
+            HADOLINT_VERSION="v2.12.0"
+            curl -fsSL \
+              "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+              -o /tmp/hadolint
+            chmod +x /tmp/hadolint
+            /tmp/hadolint vllm/Dockerfile
+            check_exit=$?
+          fi
           echo "::endgroup::"
-          echo "✓ vLLM image built successfully (Docker)"
+          [ "${check_exit}" -eq 0 ] && \
+            echo "✓ vllm/Dockerfile passed dry-run build verification (Docker)" || \
+            { echo "✗ vllm/Dockerfile failed dry-run build verification"; exit "${check_exit}"; }
 
+      # OpenClaw: full build (ubuntu:24.04 base image, practical in CI).
       - name: Build OpenClaw image (Docker)
         run: |
           echo "::group::Building OpenClaw Dockerfile with Docker"
@@ -208,17 +238,23 @@ jobs:
           echo "::endgroup::"
           echo "✓ OpenClaw image built successfully (Docker)"
 
-      - name: Verify images exist (no push)
+      - name: Verify OpenClaw image exists locally (not pushed)
         run: |
-          docker image inspect democlaw/vllm:ci-docker > /dev/null 2>&1
-          echo "✓ democlaw/vllm:ci-docker exists locally"
           docker image inspect democlaw/openclaw:ci-docker > /dev/null 2>&1
           echo "✓ democlaw/openclaw:ci-docker exists locally"
           echo ""
-          echo "Dry-run complete — images built but NOT pushed."
+          echo "Dry-run complete — OpenClaw built, vLLM syntax-checked, nothing pushed."
 
   # ---------------------------------------------------------------------------
   # Dry-run Podman image builds (CPU-only, no GPU tests, no push)
+  #
+  # vLLM Dockerfile: uses hadolint for syntax/lint validation.
+  #   podman build does not support a --check / --dry-run flag equivalent.
+  #   hadolint provides the same static Dockerfile validation without
+  #   pulling vllm/vllm-openai (~15-20 GB) or executing any build step.
+  #   No GPU is required (GPU is runtime-only for inference).
+  #
+  # OpenClaw Dockerfile: full podman build (ubuntu:24.04 base, fast and small).
   # ---------------------------------------------------------------------------
   podman-build:
     name: Podman build (dry-run)
@@ -235,13 +271,32 @@ jobs:
             exit 1
           }
 
-      - name: Build vLLM image (Podman)
+      # vLLM: hadolint syntax check (podman has no --check/--dry-run equivalent).
+      # Does NOT pull vllm/vllm-openai, does NOT execute RUN instructions,
+      # does NOT create a local image. No GPU required.
+      - name: Dry-run build check — vllm/Dockerfile (hadolint, Podman-compatible)
         run: |
-          echo "::group::Building vLLM Dockerfile with Podman"
-          podman build --no-cache --tag democlaw/vllm:ci-podman ./vllm
+          echo "::group::Dry-run build check: vllm/Dockerfile (hadolint)"
+          echo "NOTE: podman build has no --check/--dry-run flag."
+          echo "      Using hadolint for equivalent Dockerfile syntax validation."
+          echo "      vllm/vllm-openai base image (~15-20 GB) is NOT pulled."
+          echo "      No GPU required."
+          echo ""
+          HADOLINT_VERSION="v2.12.0"
+          echo "Downloading hadolint ${HADOLINT_VERSION}..."
+          curl -fsSL \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+            -o /tmp/hadolint
+          chmod +x /tmp/hadolint
+          echo "Running: hadolint vllm/Dockerfile"
+          /tmp/hadolint vllm/Dockerfile
+          check_exit=$?
           echo "::endgroup::"
-          echo "✓ vLLM image built successfully (Podman)"
+          [ "${check_exit}" -eq 0 ] && \
+            echo "✓ vllm/Dockerfile passed dry-run lint check (hadolint, Podman-compatible)" || \
+            { echo "✗ vllm/Dockerfile failed lint check (exit ${check_exit})"; exit "${check_exit}"; }
 
+      # OpenClaw: full podman build (ubuntu:24.04 base image, practical in CI).
       - name: Build OpenClaw image (Podman)
         run: |
           echo "::group::Building OpenClaw Dockerfile with Podman"
@@ -249,14 +304,12 @@ jobs:
           echo "::endgroup::"
           echo "✓ OpenClaw image built successfully (Podman)"
 
-      - name: Verify images exist (no push)
+      - name: Verify OpenClaw image exists locally (not pushed)
         run: |
-          podman image inspect democlaw/vllm:ci-podman > /dev/null 2>&1
-          echo "✓ democlaw/vllm:ci-podman exists locally"
           podman image inspect democlaw/openclaw:ci-podman > /dev/null 2>&1
           echo "✓ democlaw/openclaw:ci-podman exists locally"
           echo ""
-          echo "Dry-run complete — images built but NOT pushed."
+          echo "Dry-run complete — OpenClaw built, vLLM syntax-checked, nothing pushed."
 
   # ---------------------------------------------------------------------------
   # Test the vLLM in-container healthcheck script against a mock HTTP server.
@@ -282,7 +335,7 @@ jobs:
           python3 - <<'PYEOF' &
           import http.server, json, os
 
-          MODEL = os.environ.get("MODEL_NAME", "Qwen/Qwen3.5-9B-AWQ")
+          MODEL = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-AWQ")
 
           class Handler(http.server.BaseHTTPRequestHandler):
               def log_message(self, fmt, *args):
@@ -512,7 +565,7 @@ jobs:
           python3 - <<'PYEOF' &
           import http.server, json, os
 
-          MODEL = os.environ.get("MODEL_NAME", "Qwen/Qwen3.5-9B-AWQ")
+          MODEL = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-AWQ")
 
           class Handler(http.server.BaseHTTPRequestHandler):
               def log_message(self, fmt, *args):
@@ -574,7 +627,7 @@ jobs:
       - name: Run validate-api.sh — full test (expect exit 0)
         env:
           VLLM_BASE_URL: "http://localhost:8000"
-          MODEL_NAME: "Qwen/Qwen3.5-9B-AWQ"
+          MODEL_NAME: "Qwen/Qwen2.5-7B-Instruct-AWQ"
           CURL_TIMEOUT: "10"
           INFERENCE_TIMEOUT: "15"
           SKIP_INFERENCE_TEST: "false"
@@ -589,7 +642,7 @@ jobs:
       - name: Run validate-api.sh — skip-inference mode (expect exit 0)
         env:
           VLLM_BASE_URL: "http://localhost:8000"
-          MODEL_NAME: "Qwen/Qwen3.5-9B-AWQ"
+          MODEL_NAME: "Qwen/Qwen2.5-7B-Instruct-AWQ"
           CURL_TIMEOUT: "10"
           SKIP_INFERENCE_TEST: "true"
         run: |

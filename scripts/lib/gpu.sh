@@ -224,7 +224,13 @@ check_cuda_driver() {
     #      | NVIDIA-SMI 535.154.05  Driver Version: 535.154.05  CUDA Version: 12.2 |
     # ------------------------------------------------------------------
     local cuda_ver
-    cuda_ver=$(nvidia-smi 2>/dev/null | grep -oP 'CUDA Version:\s*\K[\d.]+' || true)
+    # Use POSIX-compatible grep (no -P/PCRE) to extract the CUDA version number
+    # from the nvidia-smi header line: "... CUDA Version: 12.2 ..."
+    cuda_ver=$(nvidia-smi 2>/dev/null \
+        | grep -o 'CUDA Version: [0-9][0-9.]*' \
+        | head -1 \
+        | grep -o '[0-9][0-9.]*' \
+        || true)
 
     if [ -z "${cuda_ver}" ]; then
         # nvidia-smi on very old drivers does not print CUDA Version in the header.
