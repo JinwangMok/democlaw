@@ -106,15 +106,55 @@ if errorlevel 1 (
 echo %GREEN%[start] NVIDIA GPU validated.%NC%
 
 :: ---------------------------------------------------------------------------
+:: Phase 0: Build images (synchronous — must complete before containers start)
+:: ---------------------------------------------------------------------------
+echo %CYAN%[start]%NC%
+echo %CYAN%[start] --- Phase 0: Building container images ----%NC%
+
+if not defined VLLM_IMAGE_TAG    set "VLLM_IMAGE_TAG=democlaw/vllm:latest"
+if not defined OPENCLAW_IMAGE_TAG set "OPENCLAW_IMAGE_TAG=democlaw/openclaw:latest"
+
+%RUNTIME% image inspect "%VLLM_IMAGE_TAG%" >nul 2>&1
+if errorlevel 1 (
+    echo %CYAN%[start] Building vLLM image ...%NC%
+    %RUNTIME% build -t "%VLLM_IMAGE_TAG%" "%PROJECT_ROOT%\vllm"
+    if errorlevel 1 (
+        echo %RED%[start] ERROR: Failed to build vLLM image.%NC%
+        exit /b 1
+    )
+) else (
+    echo %CYAN%[start] vLLM image already exists.%NC%
+)
+
+%RUNTIME% image inspect "%OPENCLAW_IMAGE_TAG%" >nul 2>&1
+if errorlevel 1 (
+    echo %CYAN%[start] Building OpenClaw image ...%NC%
+    %RUNTIME% build -t "%OPENCLAW_IMAGE_TAG%" "%PROJECT_ROOT%\openclaw"
+    if errorlevel 1 (
+        echo %RED%[start] ERROR: Failed to build OpenClaw image.%NC%
+        exit /b 1
+    )
+) else (
+    echo %CYAN%[start] OpenClaw image already exists.%NC%
+)
+
+echo %GREEN%[start] Images ready.%NC%
+
+:: ---------------------------------------------------------------------------
 :: Phase 1: Start vLLM
 :: ---------------------------------------------------------------------------
 echo %CYAN%[start]%NC%
 echo %CYAN%[start] --- Phase 1: Starting vLLM server ----%NC%
 
-start "DemoClaw-vLLM" /b cmd /c ""%SCRIPT_DIR%\start-vllm.bat" > "%TEMP%\democlaw-vllm.log" 2>&1"
-set "VLLM_EXIT=0"
+call "%SCRIPT_DIR%\start-vllm.bat"
+set "VLLM_EXIT=!errorlevel!"
 
-echo %CYAN%[start] vLLM start launched in background. Waiting 5 seconds before starting OpenClaw ...%NC%
+if !VLLM_EXIT! neq 0 (
+    echo %RED%[start] ERROR: vLLM failed to start (exit code !VLLM_EXIT!).%NC%
+    goto :final_summary
+)
+
+echo %CYAN%[start] Waiting 5 seconds before starting OpenClaw ...%NC%
 timeout /t 5 >nul 2>&1
 
 :: ---------------------------------------------------------------------------
@@ -123,66 +163,10 @@ timeout /t 5 >nul 2>&1
 echo %CYAN%[start]%NC%
 echo %CYAN%[start] --- Phase 2: Starting OpenClaw ----%NC%
 
-start "DemoClaw-OpenClaw" /b cmd /c ""%SCRIPT_DIR%\start-openclaw.bat" > "%TEMP%\democlaw-openclaw.log" 2>&1"
-set "OPENCLAW_EXIT=0"
+call "%SCRIPT_DIR%\start-openclaw.bat"
+set "OPENCLAW_EXIT=!errorlevel!"
 
-:: ---------------------------------------------------------------------------
-:: Wait for background processes to settle (poll container states)
-:: ---------------------------------------------------------------------------
-echo %CYAN%[start] Waiting for both containers to become ready ...%NC%
-
-set /a "wait_elapsed=0"
-set /a "wait_max=360"
-set /a "wait_interval=10"
-
-:wait_containers_loop
-if %wait_elapsed% geq %wait_max% goto :wait_timeout
-
-:: Check vLLM container state
-set "VLLM_STATE=missing"
-for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "democlaw-vllm" 2^>nul') do set "VLLM_STATE=%%s"
-
-:: Check OpenClaw container state
-set "OPENCLAW_STATE=missing"
-for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "democlaw-openclaw" 2^>nul') do set "OPENCLAW_STATE=%%s"
-
-echo %CYAN%[start]   vLLM: !VLLM_STATE!  OpenClaw: !OPENCLAW_STATE!  (%wait_elapsed%/%wait_max%s)%NC%
-
-:: Exit early if either container has died
-if "!VLLM_STATE!"=="exited" (
-    set "VLLM_EXIT=1"
-    goto :after_wait
-)
-if "!VLLM_STATE!"=="dead" (
-    set "VLLM_EXIT=1"
-    goto :after_wait
-)
-if "!OPENCLAW_STATE!"=="exited" (
-    set "OPENCLAW_EXIT=1"
-    goto :after_wait
-)
-if "!OPENCLAW_STATE!"=="dead" (
-    set "OPENCLAW_EXIT=1"
-    goto :after_wait
-)
-
-:: Both running -- quick health check to see if APIs are up
-if "!VLLM_STATE!"=="running" if "!OPENCLAW_STATE!"=="running" (
-    curl -sf "http://localhost:%VLLM_HOST_PORT:-8000%/health" >nul 2>&1
-    if not errorlevel 1 (
-        curl -sf -o nul "http://localhost:%OPENCLAW_HOST_PORT:-18789%" >nul 2>&1
-        if not errorlevel 1 goto :after_wait
-    )
-)
-
-timeout /t %wait_interval% >nul 2>&1
-set /a "wait_elapsed=wait_elapsed+wait_interval"
-goto :wait_containers_loop
-
-:wait_timeout
-echo %YELLOW%[start] Wait timeout reached (%wait_max%s). Proceeding to healthcheck.%NC%
-
-:after_wait
+:: (Containers started synchronously above — no polling needed)
 
 :: ---------------------------------------------------------------------------
 :: Phase 3: Comprehensive healthcheck

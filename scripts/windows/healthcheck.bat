@@ -133,7 +133,8 @@ set "VLLM_CONTAINER_OK=!_CONTAINER_OK!"
 :: ---------------------------------------------------------------------------
 echo %CYAN%[healthcheck] Checking vLLM health endpoint ...%NC%
 set "VLLM_HEALTHY=false"
-for /f "tokens=*" %%c in ('curl -sf -o nul -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/health" 2^>nul') do set "HTTP_CODE=%%c"
+set "HTTP_CODE=000"
+for /f "tokens=*" %%c in ('curl -sf -o nul -w "%%%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/health" 2^>nul') do set "HTTP_CODE=%%c"
 if "!HTTP_CODE!"=="200" (
     call :record_pass "vLLM /health endpoint" "HTTP 200"
     set "VLLM_HEALTHY=true"
@@ -147,7 +148,8 @@ if "!HTTP_CODE!"=="200" (
 if "!VLLM_HEALTHY!"=="true" (
     echo %CYAN%[healthcheck] Checking vLLM /v1/models endpoint ...%NC%
     set "TMPFILE=%TEMP%\democlaw-models-%RANDOM%.json"
-    for /f "tokens=*" %%c in ('curl -sf -o "!TMPFILE!" -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/v1/models" 2^>nul') do set "HTTP_CODE=%%c"
+    set "HTTP_CODE=000"
+    for /f "tokens=*" %%c in ('curl -sf -o "!TMPFILE!" -w "%%%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/v1/models" 2^>nul') do set "HTTP_CODE=%%c"
 
     if "!HTTP_CODE!"=="200" (
         call :record_pass "vLLM /v1/models endpoint" "HTTP 200"
@@ -177,7 +179,8 @@ call :check_container_running "%OPENCLAW_CONTAINER_NAME%" "OpenClaw"
 :: ---------------------------------------------------------------------------
 echo %CYAN%[healthcheck] Checking OpenClaw dashboard on port %OPENCLAW_HOST_PORT% ...%NC%
 set "TMPFILE=%TEMP%\democlaw-openclaw-%RANDOM%.html"
-for /f "tokens=*" %%c in ('curl -sf -o "!TMPFILE!" -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%OPENCLAW_URL%/" 2^>nul') do set "HTTP_CODE=%%c"
+set "HTTP_CODE=000"
+for /f "tokens=*" %%c in ('curl -sf -o "!TMPFILE!" -w "%%%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%OPENCLAW_URL%/" 2^>nul') do set "HTTP_CODE=%%c"
 
 if "!HTTP_CODE!"=="000" (
     call :record_fail "OpenClaw dashboard reachable" "No response at %OPENCLAW_URL% (port %OPENCLAW_HOST_PORT%)"
