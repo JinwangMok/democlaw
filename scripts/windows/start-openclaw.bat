@@ -12,16 +12,6 @@
 setlocal EnableDelayedExpansion
 
 :: ---------------------------------------------------------------------------
-:: ANSI color helpers
-:: ---------------------------------------------------------------------------
-for /f %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
-set "RED=%ESC%[31m"
-set "GREEN=%ESC%[32m"
-set "YELLOW=%ESC%[33m"
-set "CYAN=%ESC%[36m"
-set "NC=%ESC%[0m"
-
-:: ---------------------------------------------------------------------------
 :: Resolve project root
 :: ---------------------------------------------------------------------------
 set "SCRIPT_DIR=%~dp0"
@@ -33,7 +23,7 @@ for %%i in ("%SCRIPT_DIR%\..\..") do set "PROJECT_ROOT=%%~fi"
 :: ---------------------------------------------------------------------------
 set "ENV_FILE=%PROJECT_ROOT%\.env"
 if exist "%ENV_FILE%" (
-    echo %CYAN%[start-openclaw] Loading environment from %ENV_FILE%%NC%
+    echo [start-openclaw] Loading environment from %ENV_FILE%
     for /f "usebackq tokens=1,* delims==" %%a in ("%ENV_FILE%") do (
         set "line=%%a"
         if not "!line:~0,1!"=="#" (
@@ -71,7 +61,7 @@ set "IMAGE_TAG=%OPENCLAW_IMAGE_TAG%"
 :: ---------------------------------------------------------------------------
 call :detect_runtime
 if errorlevel 1 (
-    echo %RED%[start-openclaw] ERROR: No container runtime found. Install Docker Desktop or Podman Desktop.%NC%
+    echo [start-openclaw] ERROR: No container runtime found. Install Docker Desktop or Podman Desktop.
     exit /b 1
 )
 
@@ -96,18 +86,18 @@ if errorlevel 1 goto :end
 :: ---------------------------------------------------------------------------
 call :build_image "%IMAGE_TAG%" "%PROJECT_ROOT%\openclaw"
 if errorlevel 1 (
-    echo %RED%[start-openclaw] ERROR: Failed to build image '%IMAGE_TAG%'.%NC%
+    echo [start-openclaw] ERROR: Failed to build image '%IMAGE_TAG%'.
     exit /b 1
 )
 
 :: ---------------------------------------------------------------------------
 :: Launch OpenClaw container
 :: ---------------------------------------------------------------------------
-echo %CYAN%[start-openclaw] Starting OpenClaw container '%CONTAINER_NAME%' ...%NC%
-echo %CYAN%[start-openclaw]   Dashboard port  : localhost:%OPENCLAW_HOST_PORT% -^> container:%OPENCLAW_PORT%%NC%
-echo %CYAN%[start-openclaw]   vLLM endpoint   : %VLLM_BASE_URL%%NC%
-echo %CYAN%[start-openclaw]   Model           : %VLLM_MODEL_NAME%%NC%
-echo %CYAN%[start-openclaw]   Network         : %NETWORK_NAME%%NC%
+echo [start-openclaw] Starting OpenClaw container '%CONTAINER_NAME%' ...
+echo [start-openclaw]   Dashboard port  : localhost:%OPENCLAW_HOST_PORT% -^> container:%OPENCLAW_PORT%
+echo [start-openclaw]   vLLM endpoint   : %VLLM_BASE_URL%
+echo [start-openclaw]   Model           : %VLLM_MODEL_NAME%
+echo [start-openclaw]   Network         : %NETWORK_NAME%
 
 %RUNTIME% run -d ^
     --name "%CONTAINER_NAME%" ^
@@ -138,17 +128,17 @@ echo %CYAN%[start-openclaw]   Network         : %NETWORK_NAME%%NC%
     "%IMAGE_TAG%"
 
 if errorlevel 1 (
-    echo %RED%[start-openclaw] ERROR: Failed to start container '%CONTAINER_NAME%'.%NC%
+    echo [start-openclaw] ERROR: Failed to start container '%CONTAINER_NAME%'.
     exit /b 1
 )
 
-echo %GREEN%[start-openclaw] Container '%CONTAINER_NAME%' started successfully.%NC%
+echo [start-openclaw] Container '%CONTAINER_NAME%' started successfully.
 
 :: ---------------------------------------------------------------------------
 :: Wait for OpenClaw dashboard
 :: ---------------------------------------------------------------------------
 set "DASHBOARD_URL=http://localhost:%OPENCLAW_HOST_PORT%"
-echo %CYAN%[start-openclaw] Waiting for OpenClaw dashboard at %DASHBOARD_URL% (timeout: %OPENCLAW_HEALTH_TIMEOUT%s) ...%NC%
+echo [start-openclaw] Waiting for OpenClaw dashboard at %DASHBOARD_URL% (timeout: %OPENCLAW_HEALTH_TIMEOUT%s) ...
 
 set /a "elapsed=0"
 set /a "interval=3"
@@ -159,36 +149,36 @@ if %elapsed% geq %OPENCLAW_HEALTH_TIMEOUT% goto :dashboard_timeout
 :: Check container hasn't crashed
 for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "%CONTAINER_NAME%" 2^>nul') do set "CSTATE=%%s"
 if "!CSTATE!"=="exited" (
-    echo %RED%[start-openclaw] ERROR: Container '%CONTAINER_NAME%' has stopped. Check logs:%NC%
-    echo %RED%[start-openclaw]   %RUNTIME% logs %CONTAINER_NAME%%NC%
+    echo [start-openclaw] ERROR: Container '%CONTAINER_NAME%' has stopped. Check logs:
+    echo [start-openclaw]   %RUNTIME% logs %CONTAINER_NAME%
     exit /b 1
 )
 if "!CSTATE!"=="dead" (
-    echo %RED%[start-openclaw] ERROR: Container '%CONTAINER_NAME%' is dead. Check logs:%NC%
-    echo %RED%[start-openclaw]   %RUNTIME% logs %CONTAINER_NAME%%NC%
+    echo [start-openclaw] ERROR: Container '%CONTAINER_NAME%' is dead. Check logs:
+    echo [start-openclaw]   %RUNTIME% logs %CONTAINER_NAME%
     exit /b 1
 )
 
 curl -sf -o nul "%DASHBOARD_URL%" 2>nul
 if not errorlevel 1 (
     echo.
-    echo %GREEN%[start-openclaw] =============================================%NC%
-    echo %GREEN%[start-openclaw]   OpenClaw dashboard is ready!%NC%
-    echo %GREEN%[start-openclaw]   URL: %DASHBOARD_URL%%NC%
-    echo %GREEN%[start-openclaw] =============================================%NC%
+    echo [start-openclaw] =============================================
+    echo [start-openclaw]   OpenClaw dashboard is ready!
+    echo [start-openclaw]   URL: %DASHBOARD_URL%
+    echo [start-openclaw] =============================================
     exit /b 0
 )
 
 timeout /t %interval% >nul 2>&1
 set /a "elapsed=elapsed+interval"
-echo %CYAN%[start-openclaw]   ... waiting (%elapsed%/%OPENCLAW_HEALTH_TIMEOUT%s)%NC%
+echo [start-openclaw]   ... waiting (%elapsed%/%OPENCLAW_HEALTH_TIMEOUT%s)
 goto :wait_dashboard_loop
 
 :dashboard_timeout
-echo %YELLOW%[start-openclaw] WARNING: OpenClaw dashboard did not respond within %OPENCLAW_HEALTH_TIMEOUT%s.%NC%
-echo %YELLOW%[start-openclaw] The container is still running -- it may be waiting for vLLM.%NC%
-echo %YELLOW%[start-openclaw]   Dashboard URL : %DASHBOARD_URL%%NC%
-echo %YELLOW%[start-openclaw]   Check logs    : %RUNTIME% logs -f %CONTAINER_NAME%%NC%
+echo [start-openclaw] WARNING: OpenClaw dashboard did not respond within %OPENCLAW_HEALTH_TIMEOUT%s.
+echo [start-openclaw] The container is still running -- it may be waiting for vLLM.
+echo [start-openclaw]   Dashboard URL : %DASHBOARD_URL%
+echo [start-openclaw]   Check logs    : %RUNTIME% logs -f %CONTAINER_NAME%
 exit /b 1
 
 goto :end
@@ -201,23 +191,23 @@ goto :end
 if defined CONTAINER_RUNTIME (
     where "%CONTAINER_RUNTIME%" >nul 2>&1
     if errorlevel 1 (
-        echo %RED%[start-openclaw] ERROR: CONTAINER_RUNTIME='%CONTAINER_RUNTIME%' not found in PATH.%NC%
+        echo [start-openclaw] ERROR: CONTAINER_RUNTIME='%CONTAINER_RUNTIME%' not found in PATH.
         exit /b 1
     )
     set "RUNTIME=%CONTAINER_RUNTIME%"
-    echo %CYAN%[start-openclaw] Using container runtime: %RUNTIME%%NC%
+    echo [start-openclaw] Using container runtime: %RUNTIME%
     exit /b 0
 )
 where docker >nul 2>&1
 if not errorlevel 1 (
     set "RUNTIME=docker"
-    echo %CYAN%[start-openclaw] Detected container runtime: docker%NC%
+    echo [start-openclaw] Detected container runtime: docker
     exit /b 0
 )
 where podman >nul 2>&1
 if not errorlevel 1 (
     set "RUNTIME=podman"
-    echo %CYAN%[start-openclaw] Detected container runtime: podman%NC%
+    echo [start-openclaw] Detected container runtime: podman
     exit /b 0
 )
 exit /b 1
@@ -226,39 +216,39 @@ exit /b 1
 set "_NET=%~1"
 %RUNTIME% network inspect "%_NET%" >nul 2>&1
 if errorlevel 1 (
-    echo %CYAN%[start-openclaw] Creating network '%_NET%' ...%NC%
+    echo [start-openclaw] Creating network '%_NET%' ...
     %RUNTIME% network create "%_NET%"
     if errorlevel 1 (
-        echo %RED%[start-openclaw] ERROR: Failed to create network '%_NET%'.%NC%
+        echo [start-openclaw] ERROR: Failed to create network '%_NET%'.
         exit /b 1
     )
 ) else (
-    echo %CYAN%[start-openclaw] Network '%_NET%' already exists.%NC%
+    echo [start-openclaw] Network '%_NET%' already exists.
 )
 exit /b 0
 
 :verify_vllm_network_membership
-echo %CYAN%[start-openclaw] Verifying vLLM endpoint reachability on network '%NETWORK_NAME%' ...%NC%
-echo %CYAN%[start-openclaw]   vLLM container : %VLLM_CONTAINER_NAME%%NC%
-echo %CYAN%[start-openclaw]   vLLM endpoint  : %VLLM_BASE_URL%%NC%
+echo [start-openclaw] Verifying vLLM endpoint reachability on network '%NETWORK_NAME%' ...
+echo [start-openclaw]   vLLM container : %VLLM_CONTAINER_NAME%
+echo [start-openclaw]   vLLM endpoint  : %VLLM_BASE_URL%
 
 %RUNTIME% container inspect "%VLLM_CONTAINER_NAME%" >nul 2>&1
 if errorlevel 1 (
-    echo %YELLOW%[start-openclaw] WARNING: vLLM container '%VLLM_CONTAINER_NAME%' does not exist.%NC%
-    echo %YELLOW%[start-openclaw] OpenClaw will start but wait for vLLM to become available.%NC%
-    echo %YELLOW%[start-openclaw] Start vLLM with: scripts\windows\start-vllm.bat%NC%
+    echo [start-openclaw] WARNING: vLLM container '%VLLM_CONTAINER_NAME%' does not exist.
+    echo [start-openclaw] OpenClaw will start but wait for vLLM to become available.
+    echo [start-openclaw] Start vLLM with: scripts\windows\start-vllm.bat
     exit /b 0
 )
 
 for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "%VLLM_CONTAINER_NAME%" 2^>nul') do set "_VSTATE=%%s"
 if not "!_VSTATE!"=="running" (
-    echo %YELLOW%[start-openclaw] WARNING: vLLM container exists but is not running (state: !_VSTATE!).%NC%
-    echo %YELLOW%[start-openclaw] OpenClaw will start and wait for vLLM at: %VLLM_BASE_URL%%NC%
+    echo [start-openclaw] WARNING: vLLM container exists but is not running (state: !_VSTATE!).
+    echo [start-openclaw] OpenClaw will start and wait for vLLM at: %VLLM_BASE_URL%
     exit /b 0
 )
 
-echo %GREEN%[start-openclaw] vLLM container '%VLLM_CONTAINER_NAME%' is running.%NC%
-echo %GREEN%[start-openclaw] OpenClaw will reach vLLM via: %VLLM_BASE_URL%%NC%
+echo [start-openclaw] vLLM container '%VLLM_CONTAINER_NAME%' is running.
+echo [start-openclaw] OpenClaw will reach vLLM via: %VLLM_BASE_URL%
 exit /b 0
 
 :handle_existing_container
@@ -268,12 +258,12 @@ if errorlevel 1 exit /b 0
 
 for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "%_CNAME%" 2^>nul') do set "_CSTATE=%%s"
 if "!_CSTATE!"=="running" (
-    echo %GREEN%[start-openclaw] Container '%_CNAME%' is already running.%NC%
-    echo %GREEN%[start-openclaw] Dashboard: http://localhost:%OPENCLAW_HOST_PORT%%NC%
-    echo %GREEN%[start-openclaw] To restart: %RUNTIME% rm -f %_CNAME% ^&^& %~f0%NC%
+    echo [start-openclaw] Container '%_CNAME%' is already running.
+    echo [start-openclaw] Dashboard: http://localhost:%OPENCLAW_HOST_PORT%
+    echo [start-openclaw] To restart: %RUNTIME% rm -f %_CNAME% ^&^& %~f0
     exit /b 1
 )
-echo %CYAN%[start-openclaw] Removing stopped container '%_CNAME%' ...%NC%
+echo [start-openclaw] Removing stopped container '%_CNAME%' ...
 %RUNTIME% rm -f "%_CNAME%" >nul 2>&1
 exit /b 0
 
@@ -282,11 +272,11 @@ set "_TAG=%~1"
 set "_CTX=%~2"
 %RUNTIME% image inspect "%_TAG%" >nul 2>&1
 if errorlevel 1 (
-    echo %CYAN%[start-openclaw] Building image '%_TAG%' from %_CTX% ...%NC%
+    echo [start-openclaw] Building image '%_TAG%' from %_CTX% ...
     %RUNTIME% build -t "%_TAG%" "%_CTX%"
     if errorlevel 1 exit /b 1
 ) else (
-    echo %CYAN%[start-openclaw] Image '%_TAG%' already exists. Use '%RUNTIME% rmi %_TAG%' to rebuild.%NC%
+    echo [start-openclaw] Image '%_TAG%' already exists. Use '%RUNTIME% rmi %_TAG%' to rebuild.
 )
 exit /b 0
 

@@ -14,16 +14,6 @@
 setlocal EnableDelayedExpansion
 
 :: ---------------------------------------------------------------------------
-:: ANSI color helpers (requires Windows 10 1511+ with VT processing enabled)
-:: ---------------------------------------------------------------------------
-for /f %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
-set "RED=%ESC%[31m"
-set "GREEN=%ESC%[32m"
-set "YELLOW=%ESC%[33m"
-set "CYAN=%ESC%[36m"
-set "NC=%ESC%[0m"
-
-:: ---------------------------------------------------------------------------
 :: Resolve project root (two levels up from this script)
 :: ---------------------------------------------------------------------------
 set "SCRIPT_DIR=%~dp0"
@@ -35,7 +25,7 @@ for %%i in ("%SCRIPT_DIR%\..\..") do set "PROJECT_ROOT=%%~fi"
 :: ---------------------------------------------------------------------------
 set "ENV_FILE=%PROJECT_ROOT%\.env"
 if exist "%ENV_FILE%" (
-    echo %CYAN%[start-vllm] Loading environment from %ENV_FILE%%NC%
+    echo [start-vllm] Loading environment from %ENV_FILE%
     for /f "usebackq tokens=1,* delims==" %%a in ("%ENV_FILE%") do (
         set "line=%%a"
         if not "!line:~0,1!"=="#" (
@@ -113,11 +103,11 @@ if not exist "%HF_CACHE_DIR%" (
 :: Pull model weights (unless SKIP_MODEL_PULL=true)
 :: ---------------------------------------------------------------------------
 if /i "%SKIP_MODEL_PULL%"=="true" (
-    echo %CYAN%[start-vllm] SKIP_MODEL_PULL=true -- skipping model pre-pull.%NC%
+    echo [start-vllm] SKIP_MODEL_PULL=true -- skipping model pre-pull.
 ) else (
     call :pull_model_weights
     if errorlevel 1 (
-        echo %YELLOW%[start-vllm] WARNING: Model pre-pull returned non-zero. vLLM will attempt download on start.%NC%
+        echo [start-vllm] WARNING: Model pre-pull returned non-zero. vLLM will attempt download on start.
     )
 )
 
@@ -130,17 +120,17 @@ set "GPU_FLAGS=!_GPU_FLAGS!"
 :: ---------------------------------------------------------------------------
 :: Launch vLLM container
 :: ---------------------------------------------------------------------------
-echo %CYAN%[start-vllm] =======================================================%NC%
-echo %CYAN%[start-vllm]   Step: Launch vLLM server container%NC%
-echo %CYAN%[start-vllm] =======================================================%NC%
-echo %CYAN%[start-vllm] Starting vLLM container '%CONTAINER_NAME%' ...%NC%
-echo %CYAN%[start-vllm]   Model           : %MODEL_NAME%%NC%
-echo %CYAN%[start-vllm]   Quantization    : %QUANTIZATION%%NC%
-echo %CYAN%[start-vllm]   Max model len   : %MAX_MODEL_LEN%%NC%
-echo %CYAN%[start-vllm]   GPU mem util    : %GPU_MEMORY_UTILIZATION%%NC%
-echo %CYAN%[start-vllm]   Bind address    : %VLLM_HOST%:%VLLM_PORT%%NC%
-echo %CYAN%[start-vllm]   Host port       : %VLLM_HOST_PORT% -^> container %VLLM_PORT%%NC%
-echo %CYAN%[start-vllm]   HF cache        : %HF_CACHE_DIR%%NC%
+echo [start-vllm] =======================================================
+echo [start-vllm]   Step: Launch vLLM server container
+echo [start-vllm] =======================================================
+echo [start-vllm] Starting vLLM container '%CONTAINER_NAME%' ...
+echo [start-vllm]   Model           : %MODEL_NAME%
+echo [start-vllm]   Quantization    : %QUANTIZATION%
+echo [start-vllm]   Max model len   : %MAX_MODEL_LEN%
+echo [start-vllm]   GPU mem util    : %GPU_MEMORY_UTILIZATION%
+echo [start-vllm]   Bind address    : %VLLM_HOST%:%VLLM_PORT%
+echo [start-vllm]   Host port       : %VLLM_HOST_PORT% -^> container %VLLM_PORT%
+echo [start-vllm]   HF cache        : %HF_CACHE_DIR%
 
 set "HF_TOKEN_FLAG="
 if defined HF_TOKEN (
@@ -170,19 +160,19 @@ if defined HF_TOKEN (
     "%IMAGE_TAG%"
 
 if errorlevel 1 (
-    echo %RED%[start-vllm] ERROR: Failed to start container '%CONTAINER_NAME%'.%NC%
+    echo [start-vllm] ERROR: Failed to start container '%CONTAINER_NAME%'.
     exit /b 1
 )
 
-echo %GREEN%[start-vllm] Container '%CONTAINER_NAME%' started successfully.%NC%
+echo [start-vllm] Container '%CONTAINER_NAME%' started successfully.
 
 :: ---------------------------------------------------------------------------
 :: Wait for vLLM /health endpoint
 :: ---------------------------------------------------------------------------
 set "HEALTH_URL=http://localhost:%VLLM_HOST_PORT%/health"
 set "MODELS_URL=http://localhost:%VLLM_HOST_PORT%/v1/models"
-echo %CYAN%[start-vllm] Waiting for vLLM to become healthy (timeout: %VLLM_HEALTH_TIMEOUT%s) ...%NC%
-echo %CYAN%[start-vllm] Phase 1/2: Waiting for /health endpoint at %HEALTH_URL% ...%NC%
+echo [start-vllm] Waiting for vLLM to become healthy (timeout: %VLLM_HEALTH_TIMEOUT%s) ...
+echo [start-vllm] Phase 1/2: Waiting for /health endpoint at %HEALTH_URL% ...
 
 set /a "elapsed=0"
 set /a "interval=5"
@@ -197,29 +187,29 @@ if "!CSTATE!"=="dead"   goto :container_died
 
 curl -sf "%HEALTH_URL%" >nul 2>&1
 if not errorlevel 1 (
-    echo %GREEN%[start-vllm] /health endpoint is responding.%NC%
+    echo [start-vllm] /health endpoint is responding.
     goto :wait_models
 )
 
 timeout /t %interval% >nul 2>&1
 set /a "elapsed=elapsed+interval"
-echo %CYAN%[start-vllm]   ... waiting for /health (%elapsed%/%VLLM_HEALTH_TIMEOUT%s)%NC%
+echo [start-vllm]   ... waiting for /health (%elapsed%/%VLLM_HEALTH_TIMEOUT%s)
 goto :wait_health_loop
 
 :container_died
-echo %RED%[start-vllm] ERROR: Container '%CONTAINER_NAME%' exited unexpectedly (state: !CSTATE!).%NC%
-echo %RED%[start-vllm] Check logs with: %RUNTIME% logs %CONTAINER_NAME%%NC%
+echo [start-vllm] ERROR: Container '%CONTAINER_NAME%' exited unexpectedly (state: !CSTATE!).
+echo [start-vllm] Check logs with: %RUNTIME% logs %CONTAINER_NAME%
 %RUNTIME% logs --tail 30 "%CONTAINER_NAME%" 2>&1
 exit /b 1
 
 :health_timeout
-echo %YELLOW%[start-vllm] WARNING: vLLM /health did not respond within %VLLM_HEALTH_TIMEOUT%s.%NC%
-echo %YELLOW%[start-vllm] The container is still running -- the model may still be loading.%NC%
-echo %YELLOW%[start-vllm] Check progress with: %RUNTIME% logs -f %CONTAINER_NAME%%NC%
+echo [start-vllm] WARNING: vLLM /health did not respond within %VLLM_HEALTH_TIMEOUT%s.
+echo [start-vllm] The container is still running -- the model may still be loading.
+echo [start-vllm] Check progress with: %RUNTIME% logs -f %CONTAINER_NAME%
 exit /b 1
 
 :wait_models
-echo %CYAN%[start-vllm] Phase 2/2: Verifying /v1/models endpoint lists '%MODEL_NAME%' ...%NC%
+echo [start-vllm] Phase 2/2: Verifying /v1/models endpoint lists '%MODEL_NAME%' ...
 set /a "models_elapsed=0"
 set /a "models_timeout=60"
 
@@ -228,25 +218,25 @@ if %models_elapsed% geq %models_timeout% goto :models_timeout
 
 curl -sf --max-time 10 "%MODELS_URL%" >nul 2>&1
 if not errorlevel 1 (
-    echo %GREEN%[start-vllm] /v1/models endpoint is responding.%NC%
-    echo %GREEN%[start-vllm]%NC%
-    echo %GREEN%[start-vllm] vLLM server is healthy and ready to serve requests.%NC%
-    echo %GREEN%[start-vllm]   API endpoint: http://localhost:%VLLM_HOST_PORT%/v1%NC%
-    echo %GREEN%[start-vllm]   Models API  : %MODELS_URL%%NC%
-    echo %GREEN%[start-vllm]   Health check: %HEALTH_URL%%NC%
+    echo [start-vllm] /v1/models endpoint is responding.
+    echo [start-vllm]
+    echo [start-vllm] vLLM server is healthy and ready to serve requests.
+    echo [start-vllm]   API endpoint: http://localhost:%VLLM_HOST_PORT%/v1
+    echo [start-vllm]   Models API  : %MODELS_URL%
+    echo [start-vllm]   Health check: %HEALTH_URL%
     exit /b 0
 )
 
 timeout /t %interval% >nul 2>&1
 set /a "models_elapsed=models_elapsed+interval"
-echo %CYAN%[start-vllm]   ... waiting for /v1/models (%models_elapsed%/%models_timeout%s)%NC%
+echo [start-vllm]   ... waiting for /v1/models (%models_elapsed%/%models_timeout%s)
 goto :wait_models_loop
 
 :models_timeout
-echo %YELLOW%[start-vllm] WARNING: /v1/models did not respond within %models_timeout%s after /health.%NC%
-echo %YELLOW%[start-vllm] The server is running but the model may still be loading.%NC%
-echo %YELLOW%[start-vllm] Check with: curl %MODELS_URL%%NC%
-echo %YELLOW%[start-vllm] Check logs: %RUNTIME% logs -f %CONTAINER_NAME%%NC%
+echo [start-vllm] WARNING: /v1/models did not respond within %models_timeout%s after /health.
+echo [start-vllm] The server is running but the model may still be loading.
+echo [start-vllm] Check with: curl %MODELS_URL%
+echo [start-vllm] Check logs: %RUNTIME% logs -f %CONTAINER_NAME%
 exit /b 1
 
 goto :end
@@ -259,46 +249,46 @@ goto :end
 if defined CONTAINER_RUNTIME (
     where "%CONTAINER_RUNTIME%" >nul 2>&1
     if errorlevel 1 (
-        echo %RED%[start-vllm] ERROR: CONTAINER_RUNTIME='%CONTAINER_RUNTIME%' is set but not found in PATH.%NC%
+        echo [start-vllm] ERROR: CONTAINER_RUNTIME='%CONTAINER_RUNTIME%' is set but not found in PATH.
         exit /b 1
     )
     set "RUNTIME=%CONTAINER_RUNTIME%"
-    echo %CYAN%[start-vllm] Using container runtime: %RUNTIME%%NC%
+    echo [start-vllm] Using container runtime: %RUNTIME%
     exit /b 0
 )
 where docker >nul 2>&1
 if not errorlevel 1 (
     set "RUNTIME=docker"
-    echo %CYAN%[start-vllm] Detected container runtime: docker%NC%
+    echo [start-vllm] Detected container runtime: docker
     exit /b 0
 )
 where podman >nul 2>&1
 if not errorlevel 1 (
     set "RUNTIME=podman"
-    echo %CYAN%[start-vllm] Detected container runtime: podman%NC%
+    echo [start-vllm] Detected container runtime: podman
     exit /b 0
 )
 exit /b 1
 
 :error_no_runtime
-echo %RED%[start-vllm] ERROR: No container runtime found. Install Docker Desktop or Podman Desktop.%NC%
+echo [start-vllm] ERROR: No container runtime found. Install Docker Desktop or Podman Desktop.
 exit /b 1
 
 :validate_gpu
-echo %CYAN%[start-vllm] Checking for nvidia-smi ...%NC%
+echo [start-vllm] Checking for nvidia-smi ...
 where nvidia-smi >nul 2>&1
 if errorlevel 1 (
-    echo %RED%[start-vllm] ERROR: nvidia-smi not found in PATH.%NC%
-    echo %RED%[start-vllm]   Install NVIDIA drivers and ensure nvidia-smi is in PATH.%NC%
-    echo %RED%[start-vllm]   Download: https://www.nvidia.com/Download/index.aspx%NC%
+    echo [start-vllm] ERROR: nvidia-smi not found in PATH.
+    echo [start-vllm]   Install NVIDIA drivers and ensure nvidia-smi is in PATH.
+    echo [start-vllm]   Download: https://www.nvidia.com/Download/index.aspx
     exit /b 1
 )
 nvidia-smi >nul 2>&1
 if errorlevel 1 (
-    echo %RED%[start-vllm] ERROR: nvidia-smi is installed but failed to communicate with the NVIDIA driver.%NC%
+    echo [start-vllm] ERROR: nvidia-smi is installed but failed to communicate with the NVIDIA driver.
     exit /b 1
 )
-echo %GREEN%[start-vllm] nvidia-smi is available and functional.%NC%
+echo [start-vllm] nvidia-smi is available and functional.
 
 :: Check VRAM (requires nvidia-smi)
 for /f "tokens=*" %%v in ('nvidia-smi --query-gpu^=memory.total --format^=csv^,noheader^,nounits 2^>nul') do (
@@ -306,13 +296,13 @@ for /f "tokens=*" %%v in ('nvidia-smi --query-gpu^=memory.total --format^=csv^,n
     set "VRAM_MIB=!VRAM_MIB: =!"
 )
 if not defined VRAM_MIB (
-    echo %YELLOW%[start-vllm] WARNING: Could not determine GPU VRAM. Proceeding anyway.%NC%
+    echo [start-vllm] WARNING: Could not determine GPU VRAM. Proceeding anyway.
     exit /b 0
 )
-echo %CYAN%[start-vllm] Detected GPU VRAM: %VRAM_MIB% MiB%NC%
+echo [start-vllm] Detected GPU VRAM: %VRAM_MIB% MiB
 if %VRAM_MIB% lss 7500 (
-    echo %RED%[start-vllm] ERROR: Insufficient GPU VRAM: %VRAM_MIB% MiB detected, 7500 MiB required.%NC%
-    echo %RED%[start-vllm]   Qwen3.5-9B AWQ 4-bit requires ~8 GB VRAM.%NC%
+    echo [start-vllm] ERROR: Insufficient GPU VRAM: %VRAM_MIB% MiB detected, 7500 MiB required.
+    echo [start-vllm]   Qwen3.5-9B AWQ 4-bit requires ~8 GB VRAM.
     exit /b 1
 )
 exit /b 0
@@ -321,14 +311,14 @@ exit /b 0
 set "_NET=%~1"
 %RUNTIME% network inspect "%_NET%" >nul 2>&1
 if errorlevel 1 (
-    echo %CYAN%[start-vllm] Creating network '%_NET%' ...%NC%
+    echo [start-vllm] Creating network '%_NET%' ...
     %RUNTIME% network create "%_NET%"
     if errorlevel 1 (
-        echo %RED%[start-vllm] ERROR: Failed to create network '%_NET%'.%NC%
+        echo [start-vllm] ERROR: Failed to create network '%_NET%'.
         exit /b 1
     )
 ) else (
-    echo %CYAN%[start-vllm] Network '%_NET%' already exists.%NC%
+    echo [start-vllm] Network '%_NET%' already exists.
 )
 exit /b 0
 
@@ -339,11 +329,11 @@ if errorlevel 1 exit /b 0
 
 for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "%_CNAME%" 2^>nul') do set "_CSTATE=%%s"
 if "!_CSTATE!"=="running" (
-    echo %GREEN%[start-vllm] Container '%_CNAME%' is already running.%NC%
-    echo %GREEN%[start-vllm] To restart: %RUNTIME% rm -f %_CNAME% ^&^& %~f0%NC%
+    echo [start-vllm] Container '%_CNAME%' is already running.
+    echo [start-vllm] To restart: %RUNTIME% rm -f %_CNAME% ^&^& %~f0
     exit /b 1
 )
-echo %CYAN%[start-vllm] Removing stopped container '%_CNAME%' ...%NC%
+echo [start-vllm] Removing stopped container '%_CNAME%' ...
 %RUNTIME% rm -f "%_CNAME%" >nul 2>&1
 exit /b 0
 
@@ -352,14 +342,14 @@ set "_TAG=%~1"
 set "_CTX=%~2"
 %RUNTIME% image inspect "%_TAG%" >nul 2>&1
 if errorlevel 1 (
-    echo %CYAN%[start-vllm] Building image '%_TAG%' from %_CTX% ...%NC%
+    echo [start-vllm] Building image '%_TAG%' from %_CTX% ...
     %RUNTIME% build -t "%_TAG%" "%_CTX%"
     if errorlevel 1 (
-        echo %RED%[start-vllm] ERROR: Failed to build image '%_TAG%'.%NC%
+        echo [start-vllm] ERROR: Failed to build image '%_TAG%'.
         exit /b 1
     )
 ) else (
-    echo %CYAN%[start-vllm] Image '%_TAG%' already exists. Use '%RUNTIME% rmi %_TAG%' to rebuild.%NC%
+    echo [start-vllm] Image '%_TAG%' already exists. Use '%RUNTIME% rmi %_TAG%' to rebuild.
 )
 exit /b 0
 
@@ -371,12 +361,12 @@ if "%RUNTIME%"=="podman" (
 exit /b 0
 
 :pull_model_weights
-echo %CYAN%[start-vllm] =======================================================%NC%
-echo %CYAN%[start-vllm]   Step: Pull model weights from HuggingFace%NC%
-echo %CYAN%[start-vllm]   Model     : %MODEL_NAME%%NC%
-echo %CYAN%[start-vllm]   Cache dir : %HF_CACHE_DIR%%NC%
-echo %CYAN%[start-vllm] =======================================================%NC%
-echo %CYAN%[start-vllm] This may take several minutes on first run (~5 GB download).%NC%
+echo [start-vllm] =======================================================
+echo [start-vllm]   Step: Pull model weights from HuggingFace
+echo [start-vllm]   Model     : %MODEL_NAME%
+echo [start-vllm]   Cache dir : %HF_CACHE_DIR%
+echo [start-vllm] =======================================================
+echo [start-vllm] This may take several minutes on first run (~5 GB download).
 
 call :get_gpu_flags
 set "_HF_ENV="

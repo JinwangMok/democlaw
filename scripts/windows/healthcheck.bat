@@ -23,16 +23,6 @@
 setlocal EnableDelayedExpansion
 
 :: ---------------------------------------------------------------------------
-:: ANSI color helpers
-:: ---------------------------------------------------------------------------
-for /f %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
-set "RED=%ESC%[31m"
-set "GREEN=%ESC%[32m"
-set "YELLOW=%ESC%[33m"
-set "CYAN=%ESC%[36m"
-set "NC=%ESC%[0m"
-
-:: ---------------------------------------------------------------------------
 :: Parse arguments
 :: ---------------------------------------------------------------------------
 set "VLLM_ONLY=false"
@@ -97,7 +87,7 @@ echo.
 :: ---------------------------------------------------------------------------
 :: 1. Container runtime
 :: ---------------------------------------------------------------------------
-echo %CYAN%[healthcheck] Checking container runtime ...%NC%
+echo [healthcheck] Checking container runtime ...
 call :detect_runtime
 if errorlevel 1 (
     call :record_fail "Container runtime" "No container runtime found (docker or podman)"
@@ -113,7 +103,7 @@ call :record_pass "Container runtime" "%RUNTIME% available (!RT_VER!)"
 :: ---------------------------------------------------------------------------
 :: 2. Network
 :: ---------------------------------------------------------------------------
-echo %CYAN%[healthcheck] Checking container network ...%NC%
+echo [healthcheck] Checking container network ...
 %RUNTIME% network inspect "%DEMOCLAW_NETWORK%" >nul 2>&1
 if errorlevel 1 (
     call :record_fail "Container network" "'%DEMOCLAW_NETWORK%' not found"
@@ -124,32 +114,38 @@ if errorlevel 1 (
 :: ---------------------------------------------------------------------------
 :: 3. vLLM container state
 :: ---------------------------------------------------------------------------
-echo %CYAN%[healthcheck] Checking vLLM service ...%NC%
+echo [healthcheck] Checking vLLM service ...
 call :check_container_running "%VLLM_CONTAINER_NAME%" "vLLM"
 set "VLLM_CONTAINER_OK=!_CONTAINER_OK!"
 
 :: ---------------------------------------------------------------------------
 :: 4. vLLM /health endpoint
 :: ---------------------------------------------------------------------------
-echo %CYAN%[healthcheck] Checking vLLM health endpoint ...%NC%
+echo [healthcheck] Checking vLLM health endpoint ...
 set "VLLM_HEALTHY=false"
-set "HTTP_CODE=000"
-for /f "tokens=*" %%c in ('curl -sf -o nul -w "%%%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/health" 2^>nul') do set "HTTP_CODE=%%c"
-if "!HTTP_CODE!"=="200" (
+set "TMPCODE=%TEMP%\democlaw-hc-vllm-health-%RANDOM%.txt"
+curl -sf -o nul -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/health" >"%TMPCODE%" 2>nul
+set /p "HTTP_CODE=" <"%TMPCODE%"
+del /f /q "%TMPCODE%" >nul 2>&1
+if not defined HTTP_CODE set "HTTP_CODE=000"
+if "%HTTP_CODE%"=="200" (
     call :record_pass "vLLM /health endpoint" "HTTP 200"
     set "VLLM_HEALTHY=true"
 ) else (
-    call :record_fail "vLLM /health endpoint" "HTTP !HTTP_CODE! (expected 200) at %VLLM_BASE_URL%/health"
+    call :record_fail "vLLM /health endpoint" "HTTP %HTTP_CODE% (expected 200) at %VLLM_BASE_URL%/health"
 )
 
 :: ---------------------------------------------------------------------------
 :: 5. vLLM /v1/models endpoint
 :: ---------------------------------------------------------------------------
 if "!VLLM_HEALTHY!"=="true" (
-    echo %CYAN%[healthcheck] Checking vLLM /v1/models endpoint ...%NC%
+    echo [healthcheck] Checking vLLM /v1/models endpoint ...
     set "TMPFILE=%TEMP%\democlaw-models-%RANDOM%.json"
-    set "HTTP_CODE=000"
-    for /f "tokens=*" %%c in ('curl -sf -o "!TMPFILE!" -w "%%%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/v1/models" 2^>nul') do set "HTTP_CODE=%%c"
+    set "TMPCODE=%TEMP%\democlaw-hc-vllm-models-%RANDOM%.txt"
+    curl -sf -o "!TMPFILE!" -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/v1/models" >"!TMPCODE!" 2>nul
+    set /p "HTTP_CODE=" <"!TMPCODE!"
+    del /f /q "!TMPCODE!" >nul 2>&1
+    if not defined HTTP_CODE set "HTTP_CODE=000"
 
     if "!HTTP_CODE!"=="200" (
         call :record_pass "vLLM /v1/models endpoint" "HTTP 200"
@@ -171,26 +167,29 @@ if "%VLLM_ONLY%"=="true" goto :print_summary
 :: ---------------------------------------------------------------------------
 :: 6. OpenClaw container state
 :: ---------------------------------------------------------------------------
-echo %CYAN%[healthcheck] Checking OpenClaw service ...%NC%
+echo [healthcheck] Checking OpenClaw service ...
 call :check_container_running "%OPENCLAW_CONTAINER_NAME%" "OpenClaw"
 
 :: ---------------------------------------------------------------------------
 :: 7. OpenClaw dashboard
 :: ---------------------------------------------------------------------------
-echo %CYAN%[healthcheck] Checking OpenClaw dashboard on port %OPENCLAW_HOST_PORT% ...%NC%
+echo [healthcheck] Checking OpenClaw dashboard on port %OPENCLAW_HOST_PORT% ...
 set "TMPFILE=%TEMP%\democlaw-openclaw-%RANDOM%.html"
-set "HTTP_CODE=000"
-for /f "tokens=*" %%c in ('curl -sf -o "!TMPFILE!" -w "%%%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%OPENCLAW_URL%/" 2^>nul') do set "HTTP_CODE=%%c"
+set "TMPCODE=%TEMP%\democlaw-hc-openclaw-%RANDOM%.txt"
+curl -sf -o "%TMPFILE%" -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%OPENCLAW_URL%/" >"%TMPCODE%" 2>nul
+set /p "HTTP_CODE=" <"%TMPCODE%"
+del /f /q "%TMPCODE%" >nul 2>&1
+if not defined HTTP_CODE set "HTTP_CODE=000"
 
-if "!HTTP_CODE!"=="000" (
+if "%HTTP_CODE%"=="000" (
     call :record_fail "OpenClaw dashboard reachable" "No response at %OPENCLAW_URL% (port %OPENCLAW_HOST_PORT%)"
 ) else (
-    set /a "CODE_NUM=!HTTP_CODE!"
+    set /a "CODE_NUM=%HTTP_CODE%"
     if !CODE_NUM! geq 200 if !CODE_NUM! lss 400 (
-        call :record_pass "OpenClaw dashboard reachable" "HTTP !HTTP_CODE! at %OPENCLAW_URL%"
+        call :record_pass "OpenClaw dashboard reachable" "HTTP %HTTP_CODE% at %OPENCLAW_URL%"
         :: Check for HTML content
-        if exist "!TMPFILE!" (
-            findstr /i /c:"<html" /c:"<!doctype" /c:"<head" /c:"<body" /c:"<div" "!TMPFILE!" >nul 2>&1
+        if exist "%TMPFILE%" (
+            findstr /i /c:"<html" /c:"<!doctype" /c:"<head" /c:"<body" /c:"<div" "%TMPFILE%" >nul 2>&1
             if not errorlevel 1 (
                 call :record_pass "OpenClaw dashboard content" "HTML content verified"
             ) else (
@@ -198,10 +197,10 @@ if "!HTTP_CODE!"=="000" (
             )
         )
     ) else (
-        call :record_fail "OpenClaw dashboard reachable" "HTTP !HTTP_CODE! (expected 2xx/3xx) at %OPENCLAW_URL%"
+        call :record_fail "OpenClaw dashboard reachable" "HTTP %HTTP_CODE% (expected 2xx/3xx) at %OPENCLAW_URL%"
     )
 )
-if exist "!TMPFILE!" del /f /q "!TMPFILE!" >nul 2>&1
+if exist "%TMPFILE%" del /f /q "%TMPFILE%" >nul 2>&1
 
 :print_summary
 echo.
@@ -210,15 +209,15 @@ echo   Results: %CHECKS_PASSED% passed, %CHECKS_FAILED% failed, %CHECKS_WARNED% 
 echo --------------------------------------
 
 if %CHECKS_FAILED% gtr 0 (
-    echo %RED%  Overall: UNHEALTHY%NC%
+    echo   Overall: UNHEALTHY
     echo.
     exit /b 1
 ) else if %CHECKS_WARNED% gtr 0 (
-    echo %YELLOW%  Overall: DEGRADED%NC%
+    echo   Overall: DEGRADED
     echo.
     exit /b 0
 ) else (
-    echo %GREEN%  Overall: HEALTHY%NC%
+    echo   Overall: HEALTHY
     echo.
     exit /b 0
 )
@@ -269,19 +268,19 @@ exit /b 0
 :record_pass
 set /a "CHECKS_TOTAL=CHECKS_TOTAL+1"
 set /a "CHECKS_PASSED=CHECKS_PASSED+1"
-echo %GREEN%  [PASS]%NC% %~1 -- %~2
+echo   [PASS] %~1 -- %~2
 exit /b 0
 
 :record_fail
 set /a "CHECKS_TOTAL=CHECKS_TOTAL+1"
 set /a "CHECKS_FAILED=CHECKS_FAILED+1"
-echo %RED%  [FAIL]%NC% %~1 -- %~2
+echo   [FAIL] %~1 -- %~2
 exit /b 0
 
 :record_warn
 set /a "CHECKS_TOTAL=CHECKS_TOTAL+1"
 set /a "CHECKS_WARNED=CHECKS_WARNED+1"
-echo %YELLOW%  [WARN]%NC% %~1 -- %~2
+echo   [WARN] %~1 -- %~2
 exit /b 0
 
 endlocal

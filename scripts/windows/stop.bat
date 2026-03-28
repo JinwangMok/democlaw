@@ -10,16 +10,6 @@
 setlocal EnableDelayedExpansion
 
 :: ---------------------------------------------------------------------------
-:: ANSI color helpers
-:: ---------------------------------------------------------------------------
-for /f %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
-set "RED=%ESC%[31m"
-set "GREEN=%ESC%[32m"
-set "YELLOW=%ESC%[33m"
-set "CYAN=%ESC%[36m"
-set "NC=%ESC%[0m"
-
-:: ---------------------------------------------------------------------------
 :: Resolve project root
 :: ---------------------------------------------------------------------------
 set "SCRIPT_DIR=%~dp0"
@@ -56,11 +46,11 @@ if not defined REMOVE_NETWORK          set "REMOVE_NETWORK=false"
 :: ---------------------------------------------------------------------------
 call :detect_runtime
 if errorlevel 1 (
-    echo %RED%[stop] ERROR: No container runtime found. Install Docker Desktop or Podman Desktop.%NC%
+    echo [stop] ERROR: No container runtime found. Install Docker Desktop or Podman Desktop.
     exit /b 1
 )
 
-echo %CYAN%[stop] Stopping DemoClaw containers ...%NC%
+echo [stop] Stopping DemoClaw containers ...
 
 :: ---------------------------------------------------------------------------
 :: Stop OpenClaw first, then vLLM
@@ -74,19 +64,19 @@ call :stop_container "%VLLM_CONTAINER_NAME%"
 if /i "%REMOVE_NETWORK%"=="true" (
     %RUNTIME% network inspect "%DEMOCLAW_NETWORK%" >nul 2>&1
     if not errorlevel 1 (
-        echo %CYAN%[stop] Removing network '%DEMOCLAW_NETWORK%' ...%NC%
+        echo [stop] Removing network '%DEMOCLAW_NETWORK%' ...
         %RUNTIME% network rm "%DEMOCLAW_NETWORK%" >nul 2>&1
         if errorlevel 1 (
-            echo %YELLOW%[stop] WARNING: Could not remove network '%DEMOCLAW_NETWORK%' -- it may still have connected containers.%NC%
+            echo [stop] WARNING: Could not remove network '%DEMOCLAW_NETWORK%' -- it may still have connected containers.
         ) else (
-            echo %GREEN%[stop] Network '%DEMOCLAW_NETWORK%' removed.%NC%
+            echo [stop] Network '%DEMOCLAW_NETWORK%' removed.
         )
     ) else (
-        echo %CYAN%[stop] Network '%DEMOCLAW_NETWORK%' does not exist -- skipping.%NC%
+        echo [stop] Network '%DEMOCLAW_NETWORK%' does not exist -- skipping.
     )
 )
 
-echo %GREEN%[stop] Done.%NC%
+echo [stop] Done.
 exit /b 0
 
 :: ===========================================================================
@@ -97,7 +87,7 @@ exit /b 0
 if defined CONTAINER_RUNTIME (
     where "%CONTAINER_RUNTIME%" >nul 2>&1
     if errorlevel 1 (
-        echo %RED%[stop] ERROR: CONTAINER_RUNTIME='%CONTAINER_RUNTIME%' not found in PATH.%NC%
+        echo [stop] ERROR: CONTAINER_RUNTIME='%CONTAINER_RUNTIME%' not found in PATH.
         exit /b 1
     )
     set "RUNTIME=%CONTAINER_RUNTIME%"
@@ -119,15 +109,15 @@ exit /b 1
 set "_CNAME=%~1"
 %RUNTIME% container inspect "%_CNAME%" >nul 2>&1
 if errorlevel 1 (
-    echo %CYAN%[stop] Container '%_CNAME%' does not exist -- skipping.%NC%
+    echo [stop] Container '%_CNAME%' does not exist -- skipping.
     exit /b 0
 )
-echo %CYAN%[stop] Stopping and removing container '%_CNAME%' ...%NC%
+echo [stop] Stopping and removing container '%_CNAME%' ...
 %RUNTIME% rm -f "%_CNAME%" >nul 2>&1
 if errorlevel 1 (
-    echo %YELLOW%[stop] WARNING: Could not remove container '%_CNAME%'.%NC%
+    echo [stop] WARNING: Could not remove container '%_CNAME%'.
 ) else (
-    echo %GREEN%[stop] Container '%_CNAME%' removed.%NC%
+    echo [stop] Container '%_CNAME%' removed.
 )
 exit /b 0
 
