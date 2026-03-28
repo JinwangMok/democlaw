@@ -54,12 +54,19 @@ NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
 IMAGE_TAG="${VLLM_IMAGE_TAG:-democlaw/vllm:latest}"
 
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3.5-9B-AWQ}"
+VLLM_HOST="${VLLM_HOST:-0.0.0.0}"
 VLLM_PORT="${VLLM_PORT:-8000}"
 VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 QUANTIZATION="${QUANTIZATION:-awq}"
 DTYPE="${DTYPE:-float16}"
+
+# API key for the OpenAI-compatible endpoint.
+# Leave empty (or "EMPTY") for no-auth mode — the default, safe on a trusted
+# private container network.  Set to a real secret to require
+# "Authorization: Bearer <key>" on every request from OpenClaw and clients.
+VLLM_API_KEY="${VLLM_API_KEY:-}"
 
 # HuggingFace cache — share host cache to avoid re-downloading models
 HF_CACHE_DIR="${HF_CACHE_DIR:-${HOME}/.cache/huggingface}"
@@ -102,17 +109,16 @@ validate_nvidia_gpu "${RUNTIME}"
 
 # ---------------------------------------------------------------------------
 # Ensure the shared container network exists
+#
+# Uses runtime_ensure_network() from lib/runtime.sh — idempotent and works
+# identically on both docker and podman.  Creates the network if absent;
+# no-ops (with a log message) if it already exists.
+#
+# Both the vLLM container (--hostname vllm --network-alias vllm) and the
+# OpenClaw container connect to this network, allowing OpenClaw to reach
+# vLLM via the predictable URL:  http://vllm:${VLLM_PORT}/v1
 # ---------------------------------------------------------------------------
-ensure_network() {
-    if ! "${RUNTIME}" network inspect "${NETWORK_NAME}" > /dev/null 2>&1; then
-        log "Creating network '${NETWORK_NAME}' ..."
-        "${RUNTIME}" network create "${NETWORK_NAME}"
-    else
-        log "Network '${NETWORK_NAME}' already exists."
-    fi
-}
-
-ensure_network
+runtime_ensure_network "${NETWORK_NAME}"
 
 # ---------------------------------------------------------------------------
 # Handle existing container (idempotent)
@@ -263,12 +269,20 @@ GPU_FLAGS=$(runtime_gpu_flags)
 log "======================================================="
 log "  Step: Launch vLLM server container"
 log "======================================================="
+_auth_mode="no-auth (any client may call the API)"
+if [ -n "${VLLM_API_KEY}" ] && [ "${VLLM_API_KEY}" != "EMPTY" ] && [ "${VLLM_API_KEY}" != "none" ]; then
+    _auth_mode="api-key (clients must send Authorization: Bearer <key>)"
+fi
+
 log "Starting vLLM container '${CONTAINER_NAME}' ..."
 log "  Model           : ${MODEL_NAME}"
 log "  Quantization    : ${QUANTIZATION}"
 log "  Max model len   : ${MAX_MODEL_LEN}"
 log "  GPU mem util    : ${GPU_MEMORY_UTILIZATION}"
+log "  Bind address    : ${VLLM_HOST}:${VLLM_PORT}  (0.0.0.0 = reachable from all containers)"
+log "  Network alias   : vllm  (OpenClaw uses http://vllm:${VLLM_PORT}/v1)"
 log "  Host port       : ${VLLM_HOST_PORT} -> container ${VLLM_PORT}"
+log "  Auth mode       : ${_auth_mode}"
 log "  HF cache        : ${HF_CACHE_DIR}"
 
 # shellcheck disable=SC2086
@@ -283,11 +297,13 @@ log "  HF cache        : ${HF_CACHE_DIR}"
     -p "${VLLM_HOST_PORT}:${VLLM_PORT}" \
     -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
     -e "MODEL_NAME=${MODEL_NAME}" \
+    -e "VLLM_HOST=${VLLM_HOST}" \
     -e "VLLM_PORT=${VLLM_PORT}" \
     -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}" \
     -e "GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}" \
     -e "QUANTIZATION=${QUANTIZATION}" \
     -e "DTYPE=${DTYPE}" \
+    -e "VLLM_API_KEY=${VLLM_API_KEY:-}" \
     -e "HF_TOKEN=${HF_TOKEN:-}" \
     -e "HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}" \
     --cap-drop ALL \

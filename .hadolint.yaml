@@ -1,0 +1,23 @@
+# hadolint configuration for democlaw
+# https://github.com/hadolint/hadolint#configure
+#
+# Rules relaxed with project-specific justifications:
+#
+#   DL3008 — apt-get pin versions
+#     Disabled: pinning system package versions across Ubuntu releases is
+#     impractical for a portable demo project; base-image updates handle CVEs.
+#
+#   DL3016 — npm pin versions
+#     Disabled: the 'openclaw' npm package is the application being containerised
+#     in this repository; callers control the version via the image build tag.
+#
+#   DL3028 — gem pin versions
+#     Disabled: no Ruby gems are used; included for completeness.
+
+ignore:
+  - DL3008   # apt-get install — pin package versions
+  - DL3016   # npm install — pin package versions
+  - DL3028   # gem install — pin gem versions
+
+# Treat all remaining violations as errors (default: info)
+failure-threshold: warning

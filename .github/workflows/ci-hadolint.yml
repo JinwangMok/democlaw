@@ -1,62 +1,135 @@
-name: Hadolint
+name: Dockerfile Lint (hadolint)
+
+# ---------------------------------------------------------------------------
+# CI job: validate Dockerfile syntax for the vLLM and OpenClaw containers
+#
+# Uses hadolint — the industry-standard Dockerfile linter — to validate both
+# Dockerfiles explicitly by name (not via wildcard).  Each Dockerfile is linted
+# in its own matrix job so failures are reported per-file.
+#
+# hadolint version pinned to v2.12.0 for reproducibility.
+# Project-specific rule overrides are in .hadolint.yaml at the repo root.
+#
+# No GPU, container daemon, or network access to registries is required.
+# ---------------------------------------------------------------------------
 
 on:
   push:
     branches: [main]
     paths:
-      - "**/Dockerfile"
+      - "vllm/Dockerfile"
+      - "openclaw/Dockerfile"
+      - ".hadolint.yaml"
       - ".github/workflows/ci-hadolint.yml"
   pull_request:
     branches: [main]
     paths:
-      - "**/Dockerfile"
+      - "vllm/Dockerfile"
+      - "openclaw/Dockerfile"
+      - ".hadolint.yaml"
       - ".github/workflows/ci-hadolint.yml"
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Lint each Dockerfile in its own matrix job.
+  # fail-fast: false ensures both Dockerfiles are always linted even if one
+  # fails, so developers get a complete picture of all issues at once.
+  # ---------------------------------------------------------------------------
   hadolint:
-    name: Lint Dockerfiles
+    name: "Lint ${{ matrix.label }} Dockerfile"
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: vllm/Dockerfile
+            label: vLLM
+          - dockerfile: openclaw/Dockerfile
+            label: OpenClaw
+
     steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Find Dockerfiles
-        id: find-dockerfiles
+      # -----------------------------------------------------------------------
+      # 2. Verify the target Dockerfile exists before trying to lint it.
+      #    This produces a clear error rather than a confusing hadolint failure
+      #    if the file path is wrong or the file was accidentally deleted.
+      # -----------------------------------------------------------------------
+      - name: Verify ${{ matrix.label }} Dockerfile exists
         run: |
-          dockerfiles=$(find . -name 'Dockerfile' -not -path './.git/*' -not -path './.omc/*' | sort)
-          echo "Found Dockerfiles:"
-          echo "$dockerfiles"
-          if [ -z "$dockerfiles" ]; then
-            echo "No Dockerfiles found."
-            echo "found=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "found=true" >> "$GITHUB_OUTPUT"
+          if [ ! -f "${{ matrix.dockerfile }}" ]; then
+            echo "::error file=${{ matrix.dockerfile }}::Dockerfile not found: ${{ matrix.dockerfile }}"
+            exit 1
           fi
+          echo "✓ ${{ matrix.dockerfile }} found"
 
-      - name: Install hadolint
-        if: steps.find-dockerfiles.outputs.found == 'true'
+      # -----------------------------------------------------------------------
+      # 3. Install hadolint (pinned version for reproducibility).
+      #    Downloaded from the official GitHub release — no Docker daemon needed.
+      # -----------------------------------------------------------------------
+      - name: Install hadolint v2.12.0
         run: |
           HADOLINT_VERSION="v2.12.0"
-          curl -sL "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+          sudo curl -sL \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
             -o /usr/local/bin/hadolint
-          chmod +x /usr/local/bin/hadolint
+          sudo chmod +x /usr/local/bin/hadolint
           hadolint --version
 
-      - name: Run hadolint
-        if: steps.find-dockerfiles.outputs.found == 'true'
+      # -----------------------------------------------------------------------
+      # 4. Display active hadolint configuration so suppressions are auditable.
+      # -----------------------------------------------------------------------
+      - name: Show hadolint configuration
         run: |
-          exit_code=0
-          while IFS= read -r dockerfile; do
-            echo "::group::Checking $dockerfile"
-            if hadolint "$dockerfile"; then
-              echo "✓ $dockerfile passed"
-            else
-              echo "✗ $dockerfile failed"
-              exit_code=1
-            fi
-            echo "::endgroup::"
-          done < <(find . -name 'Dockerfile' -not -path './.git/*' -not -path './.omc/*' | sort)
-          exit "$exit_code"
+          if [ -f .hadolint.yaml ]; then
+            echo "=== Active .hadolint.yaml ==="
+            cat .hadolint.yaml
+          else
+            echo "No .hadolint.yaml found — using hadolint defaults."
+          fi
+
+      # -----------------------------------------------------------------------
+      # 5. Lint the Dockerfile.
+      #    hadolint reads .hadolint.yaml automatically when it is present in the
+      #    working directory (the repository root after checkout).
+      #    Exit code 0 = no violations at or above the failure-threshold.
+      #    Exit code 1 = one or more violations found.
+      # -----------------------------------------------------------------------
+      - name: Run hadolint on ${{ matrix.label }} Dockerfile
+        run: |
+          echo "::group::hadolint ${{ matrix.dockerfile }}"
+          hadolint "${{ matrix.dockerfile }}"
+          echo "::endgroup::"
+          echo "✓ ${{ matrix.dockerfile }} — hadolint passed"
+
+  # ---------------------------------------------------------------------------
+  # Gate job: require BOTH matrix jobs to pass before marking the workflow
+  # green.  Referenced as a required status check in branch-protection rules.
+  # ---------------------------------------------------------------------------
+  dockerfile-lint-all-passed:
+    name: "Dockerfile lint — all passed"
+    runs-on: ubuntu-latest
+    needs: [hadolint]
+    if: always()
+    steps:
+      - name: Check all hadolint matrix jobs passed
+        run: |
+          result="${{ needs.hadolint.result }}"
+          echo "hadolint matrix result: ${result}"
+          if [ "${result}" != "success" ]; then
+            echo "✗ One or more Dockerfile lint jobs failed or were cancelled."
+            echo "  Check the individual 'Lint <label> Dockerfile' jobs above."
+            exit 1
+          fi
+          echo "✓ vllm/Dockerfile — passed"
+          echo "✓ openclaw/Dockerfile — passed"
+          echo ""
+          echo "All Dockerfile lint jobs passed."

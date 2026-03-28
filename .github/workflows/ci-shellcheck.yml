@@ -1,5 +1,26 @@
 name: ShellCheck
 
+# ---------------------------------------------------------------------------
+# CI job: lint and syntax-check all shell scripts
+#
+# Two complementary checks run for every shell script in the repository:
+#
+#   1. bash -n  (syntax validation)
+#      Parses every .sh file without executing it and reports any syntax
+#      errors (unclosed brackets, bad substitutions, etc.).  This is
+#      fast, requires no external tools, and acts as a first gate.
+#
+#   2. ShellCheck (static analysis / linting)
+#      Runs the industry-standard shellcheck linter to catch common
+#      bugs, portability issues, and stylistic problems.  Annotations
+#      are emitted in GCC format so GitHub surfaces them inline on the
+#      diff view.
+#
+# Both steps must pass for the job to succeed.  Together they provide
+# comprehensive shell script quality assurance without requiring a GPU
+# or container runtime.
+# ---------------------------------------------------------------------------
+
 on:
   push:
     branches: [main]
@@ -11,48 +32,150 @@ on:
     paths:
       - "**/*.sh"
       - ".github/workflows/ci-shellcheck.yml"
+  workflow_dispatch: {}
 
 permissions:
   contents: read
 
 jobs:
   shellcheck:
-    name: Lint shell scripts
+    name: Lint shell scripts (shellcheck + bash -n)
     runs-on: ubuntu-latest
+
     steps:
+      # -----------------------------------------------------------------------
+      # 0. Checkout
+      # -----------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # -----------------------------------------------------------------------
+      # 1. Install ShellCheck
+      # -----------------------------------------------------------------------
       - name: Install ShellCheck
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
+          echo "ShellCheck version: $(shellcheck --version | grep 'version:')"
 
-      - name: Find shell scripts
-        id: find-scripts
+      # -----------------------------------------------------------------------
+      # 2. Discover shell scripts
+      # -----------------------------------------------------------------------
+      - name: Discover shell scripts
+        id: discover
         run: |
-          scripts=$(find . -name '*.sh' -not -path './.git/*' -not -path './.omc/*' | sort)
-          echo "Found shell scripts:"
-          echo "$scripts"
-          if [ -z "$scripts" ]; then
-            echo "No shell scripts found."
+          mapfile -t scripts < <(git ls-files '*.sh' | sort)
+          count="${#scripts[@]}"
+          echo "Found ${count} shell script(s):"
+          printf '  %s\n' "${scripts[@]}"
+          if [ "$count" -eq 0 ]; then
             echo "found=false" >> "$GITHUB_OUTPUT"
           else
-            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "found=true"  >> "$GITHUB_OUTPUT"
+            echo "count=${count}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run ShellCheck
-        if: steps.find-scripts.outputs.found == 'true'
+      # -----------------------------------------------------------------------
+      # 3. Syntax validation — bash -n
+      #
+      # bash -n parses each script without executing it.  Any syntax error
+      # (unclosed brackets, bad here-docs, etc.) causes a non-zero exit.
+      # This step runs even when shellcheck is unavailable and serves as an
+      # independent, zero-dependency quality gate.
+      # -----------------------------------------------------------------------
+      - name: Syntax validation (bash -n)
+        if: steps.discover.outputs.found == 'true'
         run: |
+          bash_version=$(bash --version | head -1)
+          echo "Runtime: ${bash_version}"
+          echo ""
+
           exit_code=0
+          passed=0
+          failed=0
+
           while IFS= read -r script; do
-            echo "::group::Checking $script"
-            if shellcheck --severity=warning --shell=bash "$script"; then
-              echo "✓ $script passed"
+            echo "::group::bash -n ${script}"
+            if bash -n "${script}" 2>&1; then
+              echo "✓ ${script} — syntax OK"
+              passed=$((passed + 1))
             else
-              echo "✗ $script failed"
+              echo "✗ ${script} — syntax ERROR"
+              failed=$((failed + 1))
               exit_code=1
             fi
             echo "::endgroup::"
-          done < <(find . -name '*.sh' -not -path './.git/*' -not -path './.omc/*' | sort)
-          exit "$exit_code"
+          done < <(git ls-files '*.sh' | sort)
+
+          echo ""
+          echo "========================================"
+          echo "  bash -n Summary"
+          echo "========================================"
+          echo "  Passed : ${passed}"
+          echo "  Failed : ${failed}"
+          echo "  Total  : $((passed + failed))"
+          echo "========================================"
+
+          exit "${exit_code}"
+
+      # -----------------------------------------------------------------------
+      # 4. Static analysis — ShellCheck
+      #
+      # Flags used:
+      #   --severity=warning   report warnings and above (not just errors)
+      #   --shell=bash         target shell dialect
+      #   --format=gcc         emit GCC-style annotations; GitHub renders these
+      #                        as inline diff comments on pull requests
+      #   --source-path=scripts  allow shellcheck to resolve
+      #                          `# shellcheck source=lib/runtime.sh` directives
+      #                          used in the top-level orchestration scripts
+      # -----------------------------------------------------------------------
+      - name: Static analysis (shellcheck)
+        if: steps.discover.outputs.found == 'true'
+        run: |
+          shellcheck_version=$(shellcheck --version | grep 'version:' | awk '{print $2}')
+          echo "ShellCheck version: ${shellcheck_version}"
+          echo ""
+
+          exit_code=0
+          passed=0
+          failed=0
+
+          while IFS= read -r script; do
+            echo "::group::shellcheck ${script}"
+            if shellcheck \
+                --severity=warning \
+                --shell=bash \
+                --format=gcc \
+                --source-path=scripts \
+                "${script}"; then
+              echo "✓ ${script} — passed"
+              passed=$((passed + 1))
+            else
+              echo "✗ ${script} — failed"
+              failed=$((failed + 1))
+              exit_code=1
+            fi
+            echo "::endgroup::"
+          done < <(git ls-files '*.sh' | sort)
+
+          echo ""
+          echo "========================================"
+          echo "  ShellCheck Summary"
+          echo "========================================"
+          echo "  Version : ${shellcheck_version}"
+          echo "  Passed  : ${passed}"
+          echo "  Failed  : ${failed}"
+          echo "  Total   : $((passed + failed))"
+          echo "========================================"
+
+          exit "${exit_code}"
+
+      # -----------------------------------------------------------------------
+      # 5. Final gate — report overall result
+      # -----------------------------------------------------------------------
+      - name: Report overall result
+        if: always() && steps.discover.outputs.found == 'true'
+        run: |
+          total="${{ steps.discover.outputs.count }}"
+          echo "Linting complete — ${total} script(s) checked with bash -n and shellcheck."

@@ -464,17 +464,22 @@ _check_nvidia_podman_runtime() {
 
     local cdi_found=false
     local cdi_path=""
+    local _cdi_match=""
 
     # Check standard and alternative CDI spec locations
     if [ -f "/etc/cdi/nvidia.yaml" ]; then
         cdi_found=true
         cdi_path="/etc/cdi/nvidia.yaml"
-    elif ls /etc/cdi/nvidia*.yaml > /dev/null 2>&1; then
+    elif _cdi_match="$(find /etc/cdi -maxdepth 1 -name 'nvidia*.yaml' 2>/dev/null | head -1)" \
+         && [ -n "${_cdi_match}" ]; then
         cdi_found=true
-        cdi_path="$(ls /etc/cdi/nvidia*.yaml | head -1)"
-    elif [ -d "/var/run/cdi" ] && ls /var/run/cdi/nvidia*.yaml > /dev/null 2>&1; then
-        cdi_found=true
-        cdi_path="$(ls /var/run/cdi/nvidia*.yaml | head -1)"
+        cdi_path="${_cdi_match}"
+    elif [ -d "/var/run/cdi" ]; then
+        _cdi_match="$(find /var/run/cdi -maxdepth 1 -name 'nvidia*.yaml' 2>/dev/null | head -1)"
+        if [ -n "${_cdi_match}" ]; then
+            cdi_found=true
+            cdi_path="${_cdi_match}"
+        fi
     fi
 
     if [ "${cdi_found}" = "true" ]; then

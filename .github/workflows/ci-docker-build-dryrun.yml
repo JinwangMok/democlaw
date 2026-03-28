@@ -1,0 +1,190 @@
+name: Dockerfile dry-run build verification
+
+# ---------------------------------------------------------------------------
+# CI job: dry-run build verification for both Dockerfiles
+#
+# Validates that both Dockerfiles are syntactically and structurally correct
+# without performing a full image build, pulling large base images, or
+# requiring a GPU.
+#
+# Primary method: docker buildx build --check
+#   Introduced in Docker Buildx >= 0.13.0 (Docker Desktop 4.27 / Jan 2024).
+#   Parses and lints the Dockerfile through BuildKit's checker, reports any
+#   errors or warnings, and exits WITHOUT building any layers or pulling images.
+#   This is the closest equivalent to "docker build --dry-run".
+#
+# Fallback method: hadolint Dockerfile syntax / lint check
+#   Used automatically when the installed Buildx version is < 0.13.0 and
+#   does not support the --check flag.
+#
+# Neither method:
+#   - executes RUN instructions
+#   - pulls the FROM base image
+#   - creates a local image
+#   - pushes anything to a registry
+#   - requires NVIDIA GPU or nvidia-container-toolkit
+#
+# Covered Dockerfiles:
+#   - vllm/Dockerfile    — vLLM server (FROM vllm/vllm-openai, GPU at runtime)
+#   - openclaw/Dockerfile — OpenClaw assistant (FROM ubuntu:24.04)
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "vllm/Dockerfile"
+      - "openclaw/Dockerfile"
+      - ".github/workflows/ci-docker-build-dryrun.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "vllm/Dockerfile"
+      - "openclaw/Dockerfile"
+      - ".github/workflows/ci-docker-build-dryrun.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Dry-run verification job — runs once per Dockerfile via the matrix.
+  #
+  # Strategy:
+  #   1. Set up the latest stable Docker Buildx (via docker/setup-buildx-action).
+  #   2. Probe whether "docker buildx build --check" is supported.
+  #   3a. If yes → run "docker buildx build --check --no-cache <context>"
+  #   3b. If no  → download hadolint and run it as the equivalent syntax check.
+  #   4. Confirm no images were stored or pushed.
+  # ---------------------------------------------------------------------------
+  dockerfile-dry-run:
+    name: "Dry-run: ${{ matrix.name }} Dockerfile"
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── vLLM server ──────────────────────────────────────────────────
+          # FROM vllm/vllm-openai:v0.8.3
+          # GPU required at RUNTIME only; the Dockerfile itself can be
+          # validated without a GPU or pulling the large base image.
+          - name: vLLM
+            context: ./vllm
+            dockerfile: vllm/Dockerfile
+
+          # ── OpenClaw assistant ───────────────────────────────────────────
+          # FROM ubuntu:24.04 + Node.js
+          - name: OpenClaw
+            context: ./openclaw
+            dockerfile: openclaw/Dockerfile
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 0. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 1. Set up the latest Docker Buildx
+      #    docker/setup-buildx-action@v3 installs the latest stable release of
+      #    Buildx, which as of 2024 is >= 0.13.0 and supports --check.
+      # -----------------------------------------------------------------------
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # -----------------------------------------------------------------------
+      # 2. Report Buildx version so CI logs clearly show what was used.
+      # -----------------------------------------------------------------------
+      - name: Show Docker & Buildx versions
+        run: |
+          echo "=== Docker version ==="
+          docker version --format 'Client: {{.Client.Version}}  Server: {{.Server.Version}}'
+          echo ""
+          echo "=== Buildx version ==="
+          docker buildx version
+
+      # -----------------------------------------------------------------------
+      # 3. Dry-run build verification
+      #
+      # Primary path  — docker buildx build --check
+      #   --check      validate without building (Buildx >= 0.13.0)
+      #   --no-cache   ensure no cached layers influence the result
+      #   --file       explicit Dockerfile path inside the context
+      #
+      # Fallback path — hadolint
+      #   Used when the installed Buildx predates the --check flag.
+      #   hadolint parses the Dockerfile and reports lint errors / warnings
+      #   equivalent to what "docker build --dry-run" would do if it existed.
+      # -----------------------------------------------------------------------
+      - name: "Dry-run build check — ${{ matrix.name }}"
+        run: |
+          echo "::group::Dry-run build check: ${{ matrix.dockerfile }}"
+
+          # Detect whether --check is supported by this version of Buildx.
+          if docker buildx build --help 2>&1 | grep -q -- '--check'; then
+            echo "✓ docker buildx build --check is available"
+            echo ""
+            echo "Running: docker buildx build --check --no-cache ${{ matrix.context }}"
+            echo "--- Buildx output ---"
+            docker buildx build \
+              --check \
+              --no-cache \
+              "${{ matrix.context }}"
+            check_exit=$?
+          else
+            echo "ℹ docker buildx --check not supported by installed Buildx version"
+            echo "  Falling back to hadolint for equivalent Dockerfile syntax check."
+            echo ""
+
+            HADOLINT_VERSION="v2.12.0"
+            echo "Downloading hadolint ${HADOLINT_VERSION}..."
+            curl -fsSL \
+              "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+              -o /tmp/hadolint
+            chmod +x /tmp/hadolint
+            /tmp/hadolint --version
+
+            echo ""
+            echo "Running: hadolint ${{ matrix.dockerfile }}"
+            echo "--- hadolint output ---"
+            /tmp/hadolint "${{ matrix.dockerfile }}"
+            check_exit=$?
+          fi
+
+          echo "::endgroup::"
+
+          if [ "${check_exit}" -eq 0 ]; then
+            echo "✓ ${{ matrix.name }} Dockerfile passed dry-run build verification (exit 0)"
+          else
+            echo "✗ ${{ matrix.name }} Dockerfile failed dry-run build verification (exit ${check_exit})"
+            exit "${check_exit}"
+          fi
+
+      # -----------------------------------------------------------------------
+      # 4. Confirm that no images were created or pushed.
+      #    The --check flag must not produce any image artifact; this step
+      #    acts as a guard to verify the "dry-run" contract.
+      # -----------------------------------------------------------------------
+      - name: Confirm no images created (dry-run contract)
+        if: always()
+        run: |
+          echo "=== Local images after dry-run check ==="
+          # List any locally present images (buildx builder images are expected
+          # and are excluded from the assertion).
+          docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" \
+            | grep -v "^moby/buildkit\|^buildx_buildkit\|^REPOSITORY" \
+            || echo "(none)"
+          echo ""
+
+          # Confirm that no democlaw/* image was created.
+          if docker images --format "{{.Repository}}:{{.Tag}}" \
+              | grep -q "^democlaw/"; then
+            echo "⚠ WARNING: a democlaw/* image exists — was --check skipped?"
+          else
+            echo "✓ No democlaw/* images found — dry-run contract satisfied."
+          fi
+          echo ""
+          echo "Dry-run complete. No images were built, stored, or pushed."

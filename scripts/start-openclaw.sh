@@ -27,10 +27,46 @@ IMAGE_TAG="${OPENCLAW_IMAGE_TAG:-democlaw/openclaw:latest}"
 OPENCLAW_PORT="${OPENCLAW_PORT:-18789}"
 OPENCLAW_HOST_PORT="${OPENCLAW_HOST_PORT:-18789}"
 
-# vLLM connection defaults (passed to the OpenClaw container as env vars)
+# ---------------------------------------------------------------------------
+# OpenAI-compatible endpoint env vars — passed into the OpenClaw container
+# ---------------------------------------------------------------------------
+# Three variables define the core provider connection:
+#
+#   VLLM_BASE_URL   : API base URL using the vLLM container's network alias.
+#                     "vllm" resolves inside the shared bridge network so
+#                     OpenClaw reaches vLLM via container-to-container DNS.
+#                     Format: http://<hostname>:<port>/v1
+#                     Default: http://vllm:8000/v1
+#
+#   VLLM_MODEL_NAME : Model ID that OpenClaw sends in every API request.
+#                     Must match the model served by vLLM.
+#                     Default: Qwen/Qwen3.5-9B-AWQ  (AWQ 4-bit, 8 GB VRAM)
+#
+#   VLLM_API_KEY    : Placeholder API key.  vLLM accepts any non-empty value
+#                     by default; use "EMPTY" as the conventional placeholder.
+#                     Default: EMPTY
+#
+# Additional vLLM provider vars:
+#   VLLM_MAX_TOKENS   : Maximum tokens per response (default: 4096)
+#   VLLM_TEMPERATURE  : Sampling temperature (default: 0.7)
+#
+# Standard OpenAI SDK env vars (honoured by openai, LangChain, LiteLLM, …):
+#   OPENAI_API_BASE / OPENAI_BASE_URL  — mirror VLLM_BASE_URL
+#   OPENAI_API_KEY                     — mirror VLLM_API_KEY
+#   OPENAI_MODEL                       — mirror VLLM_MODEL_NAME
+#
+# OpenClaw-specific env vars (secondary lookup path):
+#   OPENCLAW_LLM_PROVIDER / OPENCLAW_LLM_BASE_URL / OPENCLAW_LLM_API_KEY
+#   OPENCLAW_LLM_MODEL / OPENCLAW_LLM_MAX_TOKENS / OPENCLAW_LLM_TEMPERATURE
+# ---------------------------------------------------------------------------
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm:8000/v1}"
 VLLM_API_KEY="${VLLM_API_KEY:-EMPTY}"
 VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen3.5-9B-AWQ}"
+VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-4096}"
+VLLM_TEMPERATURE="${VLLM_TEMPERATURE:-0.7}"
+
+# vLLM container name — used for network-membership verification before launch
+VLLM_CONTAINER_NAME="${VLLM_CONTAINER_NAME:-democlaw-vllm}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -73,17 +109,85 @@ fi
 
 # ---------------------------------------------------------------------------
 # Ensure the shared container network exists
+#
+# Uses runtime_ensure_network() from lib/runtime.sh — idempotent and works
+# identically on both docker and podman.  Creates the network if absent;
+# no-ops (with a log message) if it already exists.
+#
+# Both the vLLM container (network alias: "vllm") and this OpenClaw container
+# attach to this network so that OpenClaw can resolve vLLM by name:
+#   http://vllm:${VLLM_PORT}/v1
 # ---------------------------------------------------------------------------
-ensure_network() {
-    if ! "${RUNTIME}" network inspect "${NETWORK_NAME}" > /dev/null 2>&1; then
-        log "Creating network '${NETWORK_NAME}' ..."
-        "${RUNTIME}" network create "${NETWORK_NAME}"
+runtime_ensure_network "${NETWORK_NAME}"
+
+# ---------------------------------------------------------------------------
+# verify_vllm_network_membership — Ensure the vLLM container is running and
+#   connected to the shared network so that http://vllm:<port>/v1 is reachable
+#   from the OpenClaw container once it starts.
+#
+# This is the "endpoint reachability" check for Sub-AC 3c:
+#   - Confirms the vLLM container exists and is in "running" state.
+#   - Confirms the vLLM container is attached to NETWORK_NAME so that its
+#     network alias "vllm" resolves within the shared bridge network.
+#   - Emits a clear warning (rather than a hard exit) when vLLM is absent,
+#     because the OpenClaw entrypoint already retries the vLLM health probe
+#     internally (VLLM_HEALTH_RETRIES / VLLM_HEALTH_INTERVAL env vars).
+# ---------------------------------------------------------------------------
+verify_vllm_network_membership() {
+    log "Verifying vLLM endpoint reachability on network '${NETWORK_NAME}' ..."
+    log "  vLLM container : ${VLLM_CONTAINER_NAME}"
+    log "  vLLM endpoint  : ${VLLM_BASE_URL}"
+
+    # -----------------------------------------------------------------------
+    # Step 1: vLLM container existence check
+    # -----------------------------------------------------------------------
+    if ! "${RUNTIME}" container inspect "${VLLM_CONTAINER_NAME}" > /dev/null 2>&1; then
+        warn "vLLM container '${VLLM_CONTAINER_NAME}' does not exist."
+        warn "OpenClaw will start, but it will wait for vLLM to become available."
+        warn "Start vLLM with: ./scripts/start-vllm.sh"
+        warn ""
+        return 0
+    fi
+
+    # -----------------------------------------------------------------------
+    # Step 2: vLLM container running state check
+    # -----------------------------------------------------------------------
+    local vllm_state
+    vllm_state=$("${RUNTIME}" container inspect \
+        --format '{{.State.Status}}' "${VLLM_CONTAINER_NAME}" 2>/dev/null \
+        || echo "unknown")
+
+    if [ "${vllm_state}" != "running" ]; then
+        warn "vLLM container '${VLLM_CONTAINER_NAME}' exists but is not running (state: ${vllm_state})."
+        warn "OpenClaw will start and wait for vLLM at: ${VLLM_BASE_URL}"
+        warn "Start vLLM with: ./scripts/start-vllm.sh"
+        warn ""
+        return 0
+    fi
+
+    # -----------------------------------------------------------------------
+    # Step 3: Verify vLLM is attached to the shared container network so its
+    #   hostname alias ("vllm") resolves from within OpenClaw's network scope.
+    # -----------------------------------------------------------------------
+    local vllm_networks
+    vllm_networks=$("${RUNTIME}" container inspect \
+        --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' \
+        "${VLLM_CONTAINER_NAME}" 2>/dev/null | tr -s ' ' || echo "")
+
+    if echo "${vllm_networks}" | grep -qw "${NETWORK_NAME}"; then
+        log "vLLM container '${VLLM_CONTAINER_NAME}' is running and attached to '${NETWORK_NAME}'."
+        log "OpenClaw will reach vLLM via the shared network alias: ${VLLM_BASE_URL}"
     else
-        log "Network '${NETWORK_NAME}' already exists."
+        warn "vLLM container '${VLLM_CONTAINER_NAME}' is running but is NOT connected to '${NETWORK_NAME}'."
+        warn "Attached networks: ${vllm_networks:-<none detected>}"
+        warn "The hostname 'vllm' may not resolve from within OpenClaw's network."
+        warn "Ensure the vLLM container was started with: ./scripts/start-vllm.sh"
+        warn "(which always connects it to '${NETWORK_NAME}' with alias 'vllm')"
+        warn ""
     fi
 }
 
-ensure_network
+verify_vllm_network_membership
 
 # ---------------------------------------------------------------------------
 # Handle existing container (idempotent — safe to re-run)
@@ -124,12 +228,57 @@ build_image
 
 # ---------------------------------------------------------------------------
 # Launch the OpenClaw container
+#
+# Key flags:
+#   -d                          Run detached (background)
+#   --name                      Container name for log/stop/inspect access
+#   --network / --network-alias Attach to shared network; reachable as "openclaw"
+#   --hostname openclaw         Container hostname (for self-reference / logs)
+#   --restart unless-stopped    Auto-restart on failure (not on explicit stop)
+#   -p OPENCLAW_HOST_PORT:...   Publish dashboard port on the Linux host
+#
+#   OpenAI-compatible provider env vars (three sets for maximum compatibility):
+#   ① vLLM-specific vars consumed by the container entrypoint:
+#       VLLM_BASE_URL           URL of the OpenAI-compatible API endpoint
+#       VLLM_API_KEY            Placeholder API key (vLLM accepts any value)
+#       VLLM_MODEL_NAME         Model ID to request (must match vLLM's model)
+#       VLLM_MAX_TOKENS         Max tokens per response
+#       VLLM_TEMPERATURE        Sampling temperature
+#       VLLM_HEALTH_RETRIES     How many times to retry the vLLM health probe
+#       VLLM_HEALTH_INTERVAL    Seconds between health probe retries
+#   ② Standard OpenAI SDK env vars (openai-node / openai-python / LangChain):
+#       OPENAI_API_BASE         Legacy LangChain convention
+#       OPENAI_BASE_URL         Current openai SDK convention
+#       OPENAI_API_KEY          Must be non-empty; vLLM accepts any value
+#       OPENAI_MODEL            Model ID for SDK clients that read this var
+#   ③ OpenClaw-specific env vars (secondary lookup path):
+#       OPENCLAW_LLM_PROVIDER   "openai-compatible" selects vLLM as backend
+#       OPENCLAW_LLM_BASE_URL   Mirrors VLLM_BASE_URL
+#       OPENCLAW_LLM_API_KEY    Mirrors VLLM_API_KEY
+#       OPENCLAW_LLM_MODEL      Mirrors VLLM_MODEL_NAME
+#       OPENCLAW_LLM_MAX_TOKENS Mirrors VLLM_MAX_TOKENS
+#       OPENCLAW_LLM_TEMPERATURE Mirrors VLLM_TEMPERATURE
+#
+#   Security flags:
+#   --cap-drop ALL              Drop all Linux capabilities
+#   --security-opt no-new-privileges  Prevent privilege escalation
+#   --read-only                 Read-only root filesystem
+#   --tmpfs /tmp                Writable tmpfs for runtime temp files
+#   --tmpfs /app/config         Writable tmpfs for entrypoint-generated config.json
 # ---------------------------------------------------------------------------
-log "Starting OpenClaw container '${CONTAINER_NAME}' ..."
-log "  Dashboard port  : localhost:${OPENCLAW_HOST_PORT} -> container:${OPENCLAW_PORT}"
-log "  vLLM endpoint   : ${VLLM_BASE_URL}"
-log "  Model           : ${VLLM_MODEL_NAME}"
-log "  Network         : ${NETWORK_NAME}"
+log "======================================================="
+log "  Starting OpenClaw container"
+log "======================================================="
+log "  Container  : ${CONTAINER_NAME}"
+log "  Image      : ${IMAGE_TAG}"
+log "  Network    : ${NETWORK_NAME} (alias: openclaw)"
+log "  Dashboard  : localhost:${OPENCLAW_HOST_PORT} -> container:${OPENCLAW_PORT}"
+log "  vLLM URL   : ${VLLM_BASE_URL}"
+log "  Model      : ${VLLM_MODEL_NAME}"
+log "  API Key    : ${VLLM_API_KEY:0:4}****"
+log "  Max tokens : ${VLLM_MAX_TOKENS}"
+log "  Temperature: ${VLLM_TEMPERATURE}"
+log "======================================================="
 
 "${RUNTIME}" run -d \
     --name "${CONTAINER_NAME}" \
@@ -137,11 +286,16 @@ log "  Network         : ${NETWORK_NAME}"
     --hostname openclaw \
     --network-alias openclaw \
     --restart unless-stopped \
-    -p "${OPENCLAW_HOST_PORT}:${OPENCLAW_PORT}" \
+    -p "${OPENCLAW_HOST_PORT:-18789}:${OPENCLAW_PORT:-18789}" \
     -e "VLLM_BASE_URL=${VLLM_BASE_URL}" \
     -e "VLLM_API_KEY=${VLLM_API_KEY}" \
     -e "VLLM_MODEL_NAME=${VLLM_MODEL_NAME}" \
+    -e "VLLM_MAX_TOKENS=${VLLM_MAX_TOKENS}" \
+    -e "VLLM_TEMPERATURE=${VLLM_TEMPERATURE}" \
+    -e "VLLM_HEALTH_RETRIES=${VLLM_HEALTH_RETRIES:-60}" \
+    -e "VLLM_HEALTH_INTERVAL=${VLLM_HEALTH_INTERVAL:-5}" \
     -e "OPENCLAW_PORT=${OPENCLAW_PORT}" \
+    -e "OPENCLAW_HOST=0.0.0.0" \
     -e "OPENAI_API_BASE=${VLLM_BASE_URL}" \
     -e "OPENAI_BASE_URL=${VLLM_BASE_URL}" \
     -e "OPENAI_API_KEY=${VLLM_API_KEY}" \
@@ -150,8 +304,8 @@ log "  Network         : ${NETWORK_NAME}"
     -e "OPENCLAW_LLM_BASE_URL=${VLLM_BASE_URL}" \
     -e "OPENCLAW_LLM_API_KEY=${VLLM_API_KEY}" \
     -e "OPENCLAW_LLM_MODEL=${VLLM_MODEL_NAME}" \
-    -e "VLLM_HEALTH_RETRIES=${VLLM_HEALTH_RETRIES:-60}" \
-    -e "VLLM_HEALTH_INTERVAL=${VLLM_HEALTH_INTERVAL:-5}" \
+    -e "OPENCLAW_LLM_MAX_TOKENS=${VLLM_MAX_TOKENS}" \
+    -e "OPENCLAW_LLM_TEMPERATURE=${VLLM_TEMPERATURE}" \
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --read-only \
@@ -190,6 +344,25 @@ while [ "${elapsed}" -lt "${HEALTH_TIMEOUT}" ]; do
         log "  URL: ${DASHBOARD_URL}"
         log "============================================="
         log ""
+
+        # -----------------------------------------------------------------
+        # Validate the vLLM provider connection from within/alongside the
+        # OpenClaw container before declaring the assistant fully ready.
+        # validate_connection.sh queries /v1/models via the internal
+        # container network to confirm the provider link is live.
+        # A non-zero exit is treated as a warning — OpenClaw is running
+        # but the vLLM backend may not yet be serving requests.
+        # -----------------------------------------------------------------
+        log "Running provider connection validation (validate_connection.sh --exec) ..."
+        if bash "${SCRIPT_DIR}/validate_connection.sh" --exec; then
+            log "Provider connection confirmed — OpenClaw is fully ready."
+        else
+            warn "Provider connection check returned non-zero."
+            warn "OpenClaw dashboard is up but the vLLM backend may not be ready yet."
+            warn "Re-run when vLLM is healthy: ./scripts/validate_connection.sh --exec"
+            warn "Or check the host port     : ./scripts/validate_connection.sh --host"
+        fi
+
         exit 0
     fi
 

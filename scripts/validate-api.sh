@@ -47,6 +47,12 @@ MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3.5-9B-AWQ}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-10}"
 INFERENCE_TIMEOUT="${INFERENCE_TIMEOUT:-30}"
 
+# Optional API key — must match VLLM_API_KEY passed to the vLLM container.
+# Leave empty (or "EMPTY") when the server is running in no-auth mode (default).
+# When set to a real key, every curl request will include:
+#   Authorization: Bearer <VLLM_API_KEY>
+VLLM_API_KEY="${VLLM_API_KEY:-}"
+
 # Set to "true" to skip the POST /v1/chat/completions inference test
 # (useful when you only want to confirm the API shape without spending GPU time)
 SKIP_INFERENCE_TEST="${SKIP_INFERENCE_TEST:-false}"
@@ -75,6 +81,32 @@ header(){ echo -e "\n${BOLD}$*${NC}"; }
 FAILED=0
 
 # ---------------------------------------------------------------------------
+# Build optional Authorization header for API key auth.
+# When VLLM_API_KEY is empty, "EMPTY", or "none" we run in no-auth mode and
+# include no Authorization header.  This matches the vLLM entrypoint logic.
+# ---------------------------------------------------------------------------
+AUTH_HEADER=""
+_AUTH_MODE_LABEL="no-auth"
+case "${VLLM_API_KEY:-}" in
+    "" | EMPTY | none | no-auth )
+        AUTH_HEADER=""
+        _AUTH_MODE_LABEL="no-auth"
+        ;;
+    *)
+        AUTH_HEADER="Authorization: Bearer ${VLLM_API_KEY}"
+        _AUTH_MODE_LABEL="api-key"
+        ;;
+esac
+
+# Build the curl args array for the Authorization header once, globally.
+# When AUTH_HEADER is empty (no-auth mode), the array is empty and expands
+# to nothing in curl command lines.  When set, it adds -H "Authorization: Bearer <key>".
+_CURL_AUTH_ARGS=()
+if [ -n "${AUTH_HEADER}" ]; then
+    _CURL_AUTH_ARGS=(-H "${AUTH_HEADER}")
+fi
+
+# ---------------------------------------------------------------------------
 # Require curl
 # ---------------------------------------------------------------------------
 if ! command -v curl > /dev/null 2>&1; then
@@ -89,8 +121,14 @@ echo ""
 echo "======================================================="
 echo "  vLLM OpenAI-Compatible API Validation"
 echo "======================================================="
-echo "  Base URL : ${VLLM_BASE_URL}"
-echo "  Model    : ${MODEL_NAME}"
+echo "  Base URL  : ${VLLM_BASE_URL}"
+echo "  Model     : ${MODEL_NAME}"
+echo "  Auth mode : ${_AUTH_MODE_LABEL}"
+echo "======================================================="
+echo ""
+echo "  Network note: when run from another container on the same network,"
+echo "  set VLLM_BASE_URL=http://vllm:${VLLM_HOST_PORT} to test container-to-container"
+echo "  reachability via the 'vllm' network alias."
 echo "======================================================="
 
 # ===========================================================================
@@ -101,6 +139,7 @@ info "Endpoint: ${VLLM_BASE_URL}/health"
 
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
     --max-time "${CURL_TIMEOUT}" \
+    "${_CURL_AUTH_ARGS[@]}" \
     "${VLLM_BASE_URL}/health" 2>/dev/null || echo "000")
 
 if [ "${HTTP_CODE}" = "200" ]; then
@@ -120,6 +159,7 @@ TMPFILE=$(mktemp)
 HTTP_CODE=$(curl -sf -o "${TMPFILE}" -w "%{http_code}" \
     --max-time "${CURL_TIMEOUT}" \
     -H "Accept: application/json" \
+    "${_CURL_AUTH_ARGS[@]}" \
     "${VLLM_BASE_URL}/v1/models" 2>/dev/null || echo "000")
 
 RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
@@ -211,6 +251,7 @@ PAYLOAD_EOF
         --max-time "${INFERENCE_TIMEOUT}" \
         -H "Content-Type: application/json" \
         -H "Accept: application/json" \
+        "${_CURL_AUTH_ARGS[@]}" \
         -d "${PAYLOAD}" \
         "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
@@ -289,6 +330,52 @@ except Exception as e:
 fi
 
 # ===========================================================================
+# Check 4: Network reachability configuration (informational)
+#
+# This check reports the network configuration that makes the vLLM API
+# reachable from other containers on the shared network.  It does not
+# attempt a live connection (that requires running inside the network) but
+# validates that the configured VLLM_BASE_URL uses the correct alias when
+# invoked container-to-container, vs localhost when invoked from the host.
+# ===========================================================================
+header "4. Network reachability configuration"
+
+# Inspect the base URL to determine if we're testing from the host or from
+# within the container network.
+_IS_NETWORK_TEST="false"
+_EXPECTED_NETWORK_URL="http://vllm:${VLLM_HOST_PORT}/v1"
+
+if echo "${VLLM_BASE_URL}" | grep -q "vllm"; then
+    _IS_NETWORK_TEST="true"
+fi
+
+info "Configured base URL    : ${VLLM_BASE_URL}"
+info "Container network alias: vllm  (reachable at http://vllm:${VLLM_HOST_PORT}/v1)"
+info "Host access URL        : http://localhost:${VLLM_HOST_PORT}/v1"
+info "Shared network name    : democlaw-net (created by start-vllm.sh)"
+
+if [ "${_IS_NETWORK_TEST}" = "true" ]; then
+    pass "VLLM_BASE_URL uses the container network alias 'vllm' — correct for container-to-container access"
+else
+    pass "VLLM_BASE_URL uses localhost — correct for host-side access"
+    echo ""
+    echo -e "  ${CYAN}ℹ${NC}  To test container-to-container reachability from within the shared network,"
+    echo -e "  ${CYAN}ℹ${NC}  run this script with:  VLLM_BASE_URL=${_EXPECTED_NETWORK_URL} $0"
+fi
+
+# Report auth mode
+case "${_AUTH_MODE_LABEL}" in
+    no-auth)
+        pass "Auth mode: no-auth — vLLM accepts all requests; no Authorization header required"
+        echo -e "  ${YELLOW}ℹ${NC}  OpenClaw config.json apiKey ('EMPTY') is compatible with no-auth mode"
+        ;;
+    api-key)
+        pass "Auth mode: api-key — requests must include 'Authorization: Bearer ${VLLM_API_KEY}'"
+        echo -e "  ${CYAN}ℹ${NC}  Ensure openclaw/config.json apiKey matches VLLM_API_KEY"
+        ;;
+esac
+
+# ===========================================================================
 # Summary
 # ===========================================================================
 echo ""
@@ -298,6 +385,10 @@ if [ "${FAILED}" -eq 0 ]; then
     echo ""
     echo "  The vLLM server at ${VLLM_BASE_URL} correctly exposes"
     echo "  an OpenAI-compatible API on port ${VLLM_HOST_PORT}."
+    echo ""
+    echo "  Container-to-container access (from OpenClaw):"
+    echo "    URL : http://vllm:${VLLM_HOST_PORT}/v1"
+    echo "    Auth: ${_AUTH_MODE_LABEL}"
 else
     echo -e "  ${RED}${BOLD}FAIL${NC} — ${FAILED} check(s) failed"
     echo ""

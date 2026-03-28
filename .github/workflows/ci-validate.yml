@@ -1,0 +1,139 @@
+name: Validate Scripts & Repository Structure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/*.sh"
+      - "**/Dockerfile"
+      - ".github/workflows/ci-validate.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.sh"
+      - "**/Dockerfile"
+      - ".github/workflows/ci-validate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-scripts:
+    name: Validate shell scripts (executable + bash -n syntax + file structure)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # Step 1 — Verify all shell scripts have the executable bit set.
+      #
+      # git ls-files --stage reports the file mode stored in the index:
+      #   100644  regular file (not executable)
+      #   100755  regular file (executable)
+      # We fail if any .sh file is missing the +x bit.
+      # ------------------------------------------------------------------
+      - name: Check shell scripts are executable (git file mode)
+        run: |
+          failed=0
+          while IFS= read -r script; do
+            mode=$(git ls-files --stage "$script" | awk '{print $1}')
+            if [ "$mode" = "100755" ]; then
+              echo "✓ executable  $script"
+            else
+              echo "✗ NOT executable (mode=${mode:-unknown})  $script"
+              failed=1
+            fi
+          done < <(git ls-files '*.sh' | sort)
+
+          if [ "$failed" -ne 0 ]; then
+            echo ""
+            echo "ERROR: One or more shell scripts are not marked executable."
+            echo "Fix with:  git update-index --chmod=+x <script>"
+            echo "Then commit the mode change."
+            exit 1
+          fi
+
+      # ------------------------------------------------------------------
+      # Step 2 — Validate bash syntax with  bash -n  for every .sh file.
+      #
+      # bash -n reads the script without executing it and reports syntax
+      # errors.  This catches obvious problems (unclosed brackets, bad
+      # substitutions, etc.) without needing to run the scripts.
+      # ------------------------------------------------------------------
+      - name: Validate bash syntax (bash -n)
+        run: |
+          failed=0
+          while IFS= read -r script; do
+            echo "::group::bash -n $script"
+            if bash -n "$script" 2>&1; then
+              echo "✓ syntax OK  $script"
+            else
+              echo "✗ syntax ERROR  $script"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done < <(git ls-files '*.sh' | sort)
+
+          if [ "$failed" -ne 0 ]; then
+            echo ""
+            echo "ERROR: One or more shell scripts contain bash syntax errors."
+            exit 1
+          fi
+
+      # ------------------------------------------------------------------
+      # Step 3 — Verify required files exist in the expected directory
+      # structure.  Each entry below corresponds to a file that must be
+      # present for the project to work correctly.
+      # ------------------------------------------------------------------
+      - name: Verify required files exist
+        run: |
+          required_files=(
+            # ── vLLM container ────────────────────────────────────────────
+            "vllm/Dockerfile"
+            "vllm/entrypoint.sh"
+            "vllm/healthcheck.sh"
+
+            # ── OpenClaw container ────────────────────────────────────────
+            "openclaw/Dockerfile"
+            "openclaw/entrypoint.sh"
+            "openclaw/healthcheck.sh"
+            "openclaw/config.json"
+
+            # ── Top-level orchestration scripts ───────────────────────────
+            "scripts/start.sh"
+            "scripts/stop.sh"
+            "scripts/start-vllm.sh"
+            "scripts/start-openclaw.sh"
+
+            # ── Healthcheck & validation scripts ──────────────────────────
+            "scripts/healthcheck.sh"
+            "scripts/healthcheck_openclaw.sh"
+            "scripts/validate-api.sh"
+
+            # ── Shared libraries ──────────────────────────────────────────
+            "scripts/lib/runtime.sh"
+            "scripts/lib/gpu.sh"
+          )
+
+          failed=0
+          echo "Verifying required files exist in the expected directory structure..."
+          echo ""
+          for f in "${required_files[@]}"; do
+            if [ -f "$f" ]; then
+              echo "✓  $f"
+            else
+              echo "✗  MISSING: $f"
+              failed=1
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo ""
+            echo "ERROR: One or more required files are missing from the repository."
+            echo "All files listed above must be present for the project to function."
+            exit 1
+          fi
+
+          echo ""
+          echo "All required files are present."

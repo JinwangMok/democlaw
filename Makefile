@@ -5,23 +5,9 @@
 # All targets invoke the shell scripts in scripts/ which auto-detect
 # the container runtime (docker or podman).
 #
-# Usage:
-#   make build          # Build both container images
-#   make start          # Start the full stack (vLLM + OpenClaw)
-#   make stop           # Stop and remove all containers
-#   make restart        # Stop then start the full stack
-#   make clean          # Stop containers, remove images and network
-#   make status         # Run healthcheck on all services
-#   make validate-api   # Validate vLLM OpenAI-compatible API endpoints
-#   make logs           # Tail logs from both containers
-#
-# Individual service targets:
-#   make build-vllm     # Build the vLLM image only
-#   make build-openclaw # Build the OpenClaw image only
-#   make start-vllm     # Start the vLLM container only
-#   make start-openclaw # Start the OpenClaw container only
-#   make logs-vllm      # Tail vLLM container logs
-#   make logs-openclaw  # Tail OpenClaw container logs
+# Self-documenting: run  make help  to list all targets with descriptions.
+# Lines starting with  ##@  define section headers.
+# Lines starting with  ##   immediately before a target define its description.
 #
 # Override the container runtime:
 #   make start CONTAINER_RUNTIME=podman
@@ -37,8 +23,8 @@ PROJECT_ROOT := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 SCRIPTS_DIR  := $(PROJECT_ROOT)scripts
 
 # ---------------------------------------------------------------------------
-# Container runtime detection (mirrors scripts/lib/runtime.sh logic)
-# Prefer CONTAINER_RUNTIME env var, then docker, then podman.
+# Container runtime detection (mirrors scripts/lib/runtime.sh logic).
+# Honour CONTAINER_RUNTIME env var first, then prefer docker, then podman.
 # ---------------------------------------------------------------------------
 CONTAINER_RUNTIME ?= $(shell \
 	if command -v docker >/dev/null 2>&1; then echo docker; \
@@ -52,6 +38,19 @@ OPENCLAW_CONTAINER_NAME ?= democlaw-openclaw
 VLLM_IMAGE_TAG         ?= democlaw/vllm:latest
 OPENCLAW_IMAGE_TAG     ?= democlaw/openclaw:latest
 DEMOCLAW_NETWORK       ?= democlaw-net
+
+# ---------------------------------------------------------------------------
+# Build options
+# Set NO_CACHE=1 to force a clean rebuild (passes --no-cache to the runtime).
+# BUILDKIT is enabled by default for Docker; podman uses BuildKit natively.
+# Override image tags at the command line:
+#   make build VLLM_IMAGE_TAG=my-org/vllm:dev OPENCLAW_IMAGE_TAG=my-org/openclaw:dev
+# ---------------------------------------------------------------------------
+NO_CACHE              ?=
+DOCKER_BUILDKIT       ?= 1
+_BUILD_NOCACHE_FLAG    = $(if $(NO_CACHE),--no-cache,)
+
+export DOCKER_BUILDKIT
 
 # ---------------------------------------------------------------------------
 # Model and port configuration (mirrors .env.example defaults)
@@ -113,14 +112,28 @@ export HF_TOKEN
 export GPU_FLAGS
 
 # =============================================================================
-# Composite targets
+# .PHONY declarations
 # =============================================================================
 
-.PHONY: build build-all start stop restart clean status logs help \
-       health-check validate-api ps follow follow-vllm follow-openclaw \
+.PHONY: build build-all start stop restart restart-all clean status logs help \
+       health health-check validate-api validate-connection validate-connection-host ps follow follow-vllm follow-openclaw \
        shell-vllm shell-openclaw inspect-vllm inspect-openclaw \
-       top-vllm top-openclaw env-check \
-       run-vllm run-openclaw start-all stop-vllm stop-openclaw stop-all
+       top-vllm top-openclaw env-check check-gpu \
+       run-vllm run-openclaw start-all stop-vllm stop-openclaw stop-all \
+       restart-vllm restart-openclaw \
+       build-vllm build-openclaw start-vllm start-openclaw logs-vllm logs-openclaw \
+       build-docker build-podman \
+       build-vllm-docker build-vllm-podman \
+       build-openclaw-docker build-openclaw-podman \
+       run-vllm-docker run-vllm-podman \
+       run-openclaw-docker run-openclaw-podman \
+       start-vllm-docker start-vllm-podman \
+       start-openclaw-docker start-openclaw-podman \
+       start-docker start-podman
+
+# =============================================================================
+##@ Lifecycle
+# =============================================================================
 
 ## build: Build both vLLM and OpenClaw container images
 build: build-vllm build-openclaw
@@ -128,83 +141,264 @@ build: build-vllm build-openclaw
 ## build-all: Alias for build — build both vLLM and OpenClaw container images
 build-all: build-vllm build-openclaw
 
-## start: Start the full DemoClaw stack (vLLM + OpenClaw)
+## start: Start the full DemoClaw stack (vLLM + OpenClaw, with health wait)
 start:
 	@bash "$(SCRIPTS_DIR)/start.sh"
+
+## start-all: Start both services in sequence (vLLM then OpenClaw, with validation and health checks)
+start-all: start-vllm start-openclaw
 
 ## stop: Stop and remove all DemoClaw containers
 stop:
 	@bash "$(SCRIPTS_DIR)/stop.sh"
 
-## start-all: Start the full DemoClaw stack (vLLM then OpenClaw, with validation and health checks)
-start-all: start-vllm start-openclaw
-
-## stop-all: Stop and remove all DemoClaw containers (OpenClaw first, then vLLM)
+## stop-all: Stop OpenClaw then vLLM (ordered teardown)
 stop-all: stop-openclaw stop-vllm
 
-## restart: Stop then start the full stack
+## restart: Stop then start the full stack (ordered: stop all, then start all)
 restart: stop start
 
-## clean: Stop containers, remove images, and remove the network
+## restart-all: Alias for restart — stop all then start all containers
+restart-all: stop start
+
+## clean: Stop containers, remove images, dangling volumes, and the shared network
 clean:
 	@REMOVE_NETWORK=true bash "$(SCRIPTS_DIR)/stop.sh"
 	@echo "[clean] Removing container images ..."
 	@$(CONTAINER_RUNTIME) rmi -f $(VLLM_IMAGE_TAG) 2>/dev/null || true
 	@$(CONTAINER_RUNTIME) rmi -f $(OPENCLAW_IMAGE_TAG) 2>/dev/null || true
+	@echo "[clean] Pruning dangling volumes ..."
+	@$(CONTAINER_RUNTIME) volume prune -f 2>/dev/null || true
+	@echo "[clean] Note: HuggingFace model cache at $(HF_CACHE_DIR) is a host bind mount"
+	@echo "[clean]       and is intentionally preserved.  To also purge downloaded weights:"
+	@echo "[clean]         rm -rf $(HF_CACHE_DIR)"
 	@echo "[clean] Done."
 
-## status: Run healthcheck on all services
-status:
-	@bash "$(SCRIPTS_DIR)/healthcheck.sh"
-
-## logs: Tail logs from both containers (Ctrl+C to stop)
-logs:
-	@echo "=== vLLM logs ===" && \
-	$(CONTAINER_RUNTIME) logs --tail 20 $(VLLM_CONTAINER_NAME) 2>/dev/null || echo "(no vLLM container)"; \
-	echo ""; \
-	echo "=== OpenClaw logs ===" && \
-	$(CONTAINER_RUNTIME) logs --tail 20 $(OPENCLAW_CONTAINER_NAME) 2>/dev/null || echo "(no OpenClaw container)"
-
 # =============================================================================
-# Individual service targets
+##@ Per-service
 # =============================================================================
 
-.PHONY: build-vllm build-openclaw start-vllm start-openclaw logs-vllm logs-openclaw \
-        run-vllm run-openclaw stop-vllm stop-openclaw
-
-## build-vllm: Build the vLLM container image
+## build-vllm: Build the vLLM container image (set NO_CACHE=1 to skip layer cache)
 build-vllm:
-	@echo "[build] Building vLLM image '$(VLLM_IMAGE_TAG)' ..."
-	@$(CONTAINER_RUNTIME) build -t $(VLLM_IMAGE_TAG) "$(PROJECT_ROOT)vllm"
+	@echo "[build] Building vLLM image '$(VLLM_IMAGE_TAG)' with runtime '$(CONTAINER_RUNTIME)' ..."
+	@$(if $(NO_CACHE),echo "[build] Cache disabled (NO_CACHE=1)",)
+	@$(CONTAINER_RUNTIME) build $(_BUILD_NOCACHE_FLAG) \
+		--label "org.opencontainers.image.title=democlaw-vllm" \
+		--label "org.opencontainers.image.description=vLLM OpenAI-compatible server for Qwen3.5-9B AWQ 4-bit" \
+		-t $(VLLM_IMAGE_TAG) \
+		"$(PROJECT_ROOT)vllm"
+	@echo "[build] vLLM image '$(VLLM_IMAGE_TAG)' ready."
 
-## build-openclaw: Build the OpenClaw container image
+## build-openclaw: Build the OpenClaw container image (set NO_CACHE=1 to skip layer cache)
 build-openclaw:
-	@echo "[build] Building OpenClaw image '$(OPENCLAW_IMAGE_TAG)' ..."
-	@$(CONTAINER_RUNTIME) build -t $(OPENCLAW_IMAGE_TAG) "$(PROJECT_ROOT)openclaw"
+	@echo "[build] Building OpenClaw image '$(OPENCLAW_IMAGE_TAG)' with runtime '$(CONTAINER_RUNTIME)' ..."
+	@$(if $(NO_CACHE),echo "[build] Cache disabled (NO_CACHE=1)",)
+	@$(CONTAINER_RUNTIME) build $(_BUILD_NOCACHE_FLAG) \
+		--label "org.opencontainers.image.title=democlaw-openclaw" \
+		--label "org.opencontainers.image.description=OpenClaw AI assistant configured with vLLM backend" \
+		-t $(OPENCLAW_IMAGE_TAG) \
+		"$(PROJECT_ROOT)openclaw"
+	@echo "[build] OpenClaw image '$(OPENCLAW_IMAGE_TAG)' ready."
 
-## start-vllm: Start the vLLM container only
+# =============================================================================
+##@ Explicit-runtime build targets
+# Build both images (or individual images) pinned to a specific container
+# runtime, regardless of what CONTAINER_RUNTIME auto-detects.
+# Useful in CI pipelines where you want deterministic runtime selection.
+# =============================================================================
+
+## build-docker: Build both vLLM and OpenClaw images using docker
+build-docker:
+	@$(MAKE) build CONTAINER_RUNTIME=docker
+
+## build-podman: Build both vLLM and OpenClaw images using podman
+build-podman:
+	@$(MAKE) build CONTAINER_RUNTIME=podman
+
+## build-vllm-docker: Build the vLLM image using docker
+build-vllm-docker:
+	@$(MAKE) build-vllm CONTAINER_RUNTIME=docker
+
+## build-vllm-podman: Build the vLLM image using podman
+build-vllm-podman:
+	@$(MAKE) build-vllm CONTAINER_RUNTIME=podman
+
+## build-openclaw-docker: Build the OpenClaw image using docker
+build-openclaw-docker:
+	@$(MAKE) build-openclaw CONTAINER_RUNTIME=docker
+
+## build-openclaw-podman: Build the OpenClaw image using podman
+build-openclaw-podman:
+	@$(MAKE) build-openclaw CONTAINER_RUNTIME=podman
+
+# =============================================================================
+##@ Explicit-runtime run/start targets
+# Run or start individual services (or the full stack) pinned to a specific
+# container runtime, regardless of what CONTAINER_RUNTIME auto-detects.
+# These mirror the build-*-docker / build-*-podman pattern above.
+#
+# Equivalent to:   make <target> CONTAINER_RUNTIME=docker|podman
+# =============================================================================
+
+## run-vllm-docker: Run the vLLM container directly using docker (GPU + network + ports)
+run-vllm-docker:
+	@$(MAKE) run-vllm CONTAINER_RUNTIME=docker
+
+## run-vllm-podman: Run the vLLM container directly using podman (GPU + network + ports)
+run-vllm-podman:
+	@$(MAKE) run-vllm CONTAINER_RUNTIME=podman
+
+## run-openclaw-docker: Run the OpenClaw container directly using docker (network + ports)
+run-openclaw-docker:
+	@$(MAKE) run-openclaw CONTAINER_RUNTIME=docker
+
+## run-openclaw-podman: Run the OpenClaw container directly using podman (network + ports)
+run-openclaw-podman:
+	@$(MAKE) run-openclaw CONTAINER_RUNTIME=podman
+
+## start-vllm-docker: Start the vLLM container using docker (GPU validation + health wait)
+start-vllm-docker:
+	@$(MAKE) start-vllm CONTAINER_RUNTIME=docker
+
+## start-vllm-podman: Start the vLLM container using podman (GPU validation + health wait)
+start-vllm-podman:
+	@$(MAKE) start-vllm CONTAINER_RUNTIME=podman
+
+## start-openclaw-docker: Start the OpenClaw container using docker (health wait)
+start-openclaw-docker:
+	@$(MAKE) start-openclaw CONTAINER_RUNTIME=docker
+
+## start-openclaw-podman: Start the OpenClaw container using podman (health wait)
+start-openclaw-podman:
+	@$(MAKE) start-openclaw CONTAINER_RUNTIME=podman
+
+## start-docker: Start the full DemoClaw stack using docker
+start-docker:
+	@$(MAKE) start CONTAINER_RUNTIME=docker
+
+## start-podman: Start the full DemoClaw stack using podman
+start-podman:
+	@$(MAKE) start CONTAINER_RUNTIME=podman
+
+## start-vllm: Start the vLLM container (GPU validation + model pull + health wait)
 start-vllm:
 	@bash "$(SCRIPTS_DIR)/start-vllm.sh"
 
-## start-openclaw: Start the OpenClaw container only
+## start-openclaw: Start the OpenClaw container (with health wait)
 start-openclaw:
 	@bash "$(SCRIPTS_DIR)/start-openclaw.sh"
 
-## logs-vllm: Tail last 50 lines of vLLM container logs
-logs-vllm:
-	@$(CONTAINER_RUNTIME) logs --tail 50 $(VLLM_CONTAINER_NAME)
+## run-vllm: Run the vLLM container directly (GPU + network + ports + env vars, no health wait)
+run-vllm:
+	@if ! command -v nvidia-smi >/dev/null 2>&1 || ! nvidia-smi >/dev/null 2>&1; then \
+		echo "[run-vllm] ERROR: NVIDIA GPU / nvidia-smi not available." >&2; \
+		echo "[run-vllm] ERROR: A CUDA-capable NVIDIA GPU is required. There is no CPU fallback." >&2; \
+		exit 1; \
+	fi
+	@echo "[run-vllm] Ensuring network '$(DEMOCLAW_NETWORK)' exists ..."
+	@$(CONTAINER_RUNTIME) network inspect $(DEMOCLAW_NETWORK) >/dev/null 2>&1 \
+		|| $(CONTAINER_RUNTIME) network create $(DEMOCLAW_NETWORK)
+	@mkdir -p "$(HF_CACHE_DIR)"
+	@echo "[run-vllm] Starting vLLM container '$(VLLM_CONTAINER_NAME)' ..."
+	@echo "[run-vllm]   Image       : $(VLLM_IMAGE_TAG)"
+	@echo "[run-vllm]   Model       : $(MODEL_NAME)"
+	@echo "[run-vllm]   Quantize    : $(QUANTIZATION)  dtype=$(DTYPE)"
+	@echo "[run-vllm]   GPU flags   : $(GPU_FLAGS)"
+	@echo "[run-vllm]   Host port   : $(VLLM_HOST_PORT) -> container $(VLLM_PORT)"
+	$(CONTAINER_RUNTIME) run -d \
+		--name $(VLLM_CONTAINER_NAME) \
+		--network $(DEMOCLAW_NETWORK) \
+		--hostname vllm \
+		--network-alias vllm \
+		$(GPU_FLAGS) \
+		--restart unless-stopped \
+		--shm-size 1g \
+		-p $(VLLM_HOST_PORT):$(VLLM_PORT) \
+		-v "$(HF_CACHE_DIR):/root/.cache/huggingface:rw" \
+		-e MODEL_NAME=$(MODEL_NAME) \
+		-e VLLM_PORT=$(VLLM_PORT) \
+		-e MAX_MODEL_LEN=$(MAX_MODEL_LEN) \
+		-e GPU_MEMORY_UTILIZATION=$(GPU_MEMORY_UTILIZATION) \
+		-e QUANTIZATION=$(QUANTIZATION) \
+		-e DTYPE=$(DTYPE) \
+		-e HF_TOKEN=$(HF_TOKEN) \
+		-e HUGGING_FACE_HUB_TOKEN=$(HF_TOKEN) \
+		--cap-drop ALL \
+		--security-opt no-new-privileges \
+		$(VLLM_IMAGE_TAG)
+	@echo "[run-vllm] Container '$(VLLM_CONTAINER_NAME)' started."
+	@echo "[run-vllm] API endpoint : http://localhost:$(VLLM_HOST_PORT)/v1"
+	@echo "[run-vllm] Stream logs  : $(CONTAINER_RUNTIME) logs -f $(VLLM_CONTAINER_NAME)"
 
-## logs-openclaw: Tail last 50 lines of OpenClaw container logs
-logs-openclaw:
-	@$(CONTAINER_RUNTIME) logs --tail 50 $(OPENCLAW_CONTAINER_NAME)
+## run-openclaw: Run the OpenClaw container directly (network + ports + env vars, no health wait)
+run-openclaw:
+	@echo "[run-openclaw] Ensuring network '$(DEMOCLAW_NETWORK)' exists ..."
+	@$(CONTAINER_RUNTIME) network inspect $(DEMOCLAW_NETWORK) >/dev/null 2>&1 \
+		|| $(CONTAINER_RUNTIME) network create $(DEMOCLAW_NETWORK)
+	@echo "[run-openclaw] Starting OpenClaw container '$(OPENCLAW_CONTAINER_NAME)' ..."
+	@echo "[run-openclaw]   Image       : $(OPENCLAW_IMAGE_TAG)"
+	@echo "[run-openclaw]   vLLM URL    : $(VLLM_BASE_URL)"
+	@echo "[run-openclaw]   Model       : $(VLLM_MODEL_NAME)"
+	@echo "[run-openclaw]   Host port   : $(OPENCLAW_HOST_PORT) -> container $(OPENCLAW_PORT)"
+	$(CONTAINER_RUNTIME) run -d \
+		--name $(OPENCLAW_CONTAINER_NAME) \
+		--network $(DEMOCLAW_NETWORK) \
+		--hostname openclaw \
+		--network-alias openclaw \
+		--restart unless-stopped \
+		-p $(OPENCLAW_HOST_PORT):$(OPENCLAW_PORT) \
+		-e VLLM_BASE_URL=$(VLLM_BASE_URL) \
+		-e VLLM_API_KEY=$(VLLM_API_KEY) \
+		-e VLLM_MODEL_NAME=$(VLLM_MODEL_NAME) \
+		-e OPENCLAW_PORT=$(OPENCLAW_PORT) \
+		-e OPENAI_API_BASE=$(VLLM_BASE_URL) \
+		-e OPENAI_BASE_URL=$(VLLM_BASE_URL) \
+		-e OPENAI_API_KEY=$(VLLM_API_KEY) \
+		-e OPENAI_MODEL=$(VLLM_MODEL_NAME) \
+		-e OPENCLAW_LLM_PROVIDER=openai-compatible \
+		-e OPENCLAW_LLM_BASE_URL=$(VLLM_BASE_URL) \
+		-e OPENCLAW_LLM_API_KEY=$(VLLM_API_KEY) \
+		-e OPENCLAW_LLM_MODEL=$(VLLM_MODEL_NAME) \
+		--cap-drop ALL \
+		--security-opt no-new-privileges \
+		--read-only \
+		--tmpfs /tmp:rw,noexec,nosuid \
+		--tmpfs /app/config:rw,noexec,nosuid,uid=1000,gid=1000 \
+		$(OPENCLAW_IMAGE_TAG)
+	@echo "[run-openclaw] Container '$(OPENCLAW_CONTAINER_NAME)' started."
+	@echo "[run-openclaw] Dashboard   : http://localhost:$(OPENCLAW_HOST_PORT)"
+	@echo "[run-openclaw] Stream logs : $(CONTAINER_RUNTIME) logs -f $(OPENCLAW_CONTAINER_NAME)"
+
+## stop-vllm: Stop and remove the vLLM container
+stop-vllm:
+	@echo "[stop-vllm] Stopping and removing container '$(VLLM_CONTAINER_NAME)' ..."
+	@$(CONTAINER_RUNTIME) rm -f $(VLLM_CONTAINER_NAME) 2>/dev/null \
+		&& echo "[stop-vllm] Done." \
+		|| echo "[stop-vllm] Container '$(VLLM_CONTAINER_NAME)' not found — already removed."
+
+## stop-openclaw: Stop and remove the OpenClaw container
+stop-openclaw:
+	@echo "[stop-openclaw] Stopping and removing container '$(OPENCLAW_CONTAINER_NAME)' ..."
+	@$(CONTAINER_RUNTIME) rm -f $(OPENCLAW_CONTAINER_NAME) 2>/dev/null \
+		&& echo "[stop-openclaw] Done." \
+		|| echo "[stop-openclaw] Container '$(OPENCLAW_CONTAINER_NAME)' not found — already removed."
+
+## restart-vllm: Stop then restart the vLLM container (GPU validation + model pull + health wait)
+restart-vllm: stop-vllm start-vllm
+
+## restart-openclaw: Stop then restart the OpenClaw container (with health wait)
+restart-openclaw: stop-openclaw start-openclaw
 
 # =============================================================================
-# Development & Debugging targets
+##@ Monitoring & Logs
 # =============================================================================
 
-.PHONY: health-check ps follow follow-vllm follow-openclaw \
-        shell-vllm shell-openclaw inspect-vllm inspect-openclaw \
-        top-vllm top-openclaw env-check
+## status: Run healthchecks on all services
+status:
+	@bash "$(SCRIPTS_DIR)/healthcheck.sh"
+
+## health: Alias for 'status' — run all service healthchecks
+health: status
 
 ## health-check: Alias for 'status' — run all service healthchecks
 health-check: status
@@ -212,6 +406,32 @@ health-check: status
 ## validate-api: Validate vLLM OpenAI-compatible API endpoints (/health, /v1/models, /v1/chat/completions)
 validate-api:
 	@bash "$(SCRIPTS_DIR)/validate-api.sh"
+
+## validate-connection: Confirm vLLM provider connection is live from within/alongside the OpenClaw container
+validate-connection:
+	@bash "$(SCRIPTS_DIR)/validate_connection.sh" --exec
+
+## validate-connection-host: Confirm vLLM provider connection via the host-published port (localhost)
+validate-connection-host:
+	@bash "$(SCRIPTS_DIR)/validate_connection.sh" --host
+
+## logs: Tail the last 50 lines from both containers (use 'follow' for live streaming)
+logs:
+	@echo "=== vLLM logs (last 50 lines) ===" && \
+	$(CONTAINER_RUNTIME) logs --tail 50 $(VLLM_CONTAINER_NAME) 2>/dev/null || echo "(no vLLM container)"; \
+	echo ""; \
+	echo "=== OpenClaw logs (last 50 lines) ===" && \
+	$(CONTAINER_RUNTIME) logs --tail 50 $(OPENCLAW_CONTAINER_NAME) 2>/dev/null || echo "(no OpenClaw container)"; \
+	echo ""; \
+	echo "Tip: run 'make follow' to stream both containers in real time."
+
+## logs-vllm: Show last 50 lines of vLLM container logs
+logs-vllm:
+	@$(CONTAINER_RUNTIME) logs --tail 50 $(VLLM_CONTAINER_NAME)
+
+## logs-openclaw: Show last 50 lines of OpenClaw container logs
+logs-openclaw:
+	@$(CONTAINER_RUNTIME) logs --tail 50 $(OPENCLAW_CONTAINER_NAME)
 
 ## ps: Show DemoClaw container states
 ps:
@@ -242,6 +462,10 @@ follow-vllm:
 follow-openclaw:
 	@$(CONTAINER_RUNTIME) logs -f $(OPENCLAW_CONTAINER_NAME)
 
+# =============================================================================
+##@ Debugging
+# =============================================================================
+
 ## shell-vllm: Open an interactive shell inside the vLLM container
 shell-vllm:
 	@echo "Attaching shell to '$(VLLM_CONTAINER_NAME)' ..."
@@ -254,12 +478,12 @@ shell-openclaw:
 	@$(CONTAINER_RUNTIME) exec -it $(OPENCLAW_CONTAINER_NAME) /bin/bash \
 		|| $(CONTAINER_RUNTIME) exec -it $(OPENCLAW_CONTAINER_NAME) /bin/sh
 
-## inspect-vllm: Show detailed vLLM container information
+## inspect-vllm: Show detailed vLLM container information (JSON)
 inspect-vllm:
 	@$(CONTAINER_RUNTIME) inspect $(VLLM_CONTAINER_NAME) 2>/dev/null \
 		|| echo "Container '$(VLLM_CONTAINER_NAME)' not found."
 
-## inspect-openclaw: Show detailed OpenClaw container information
+## inspect-openclaw: Show detailed OpenClaw container information (JSON)
 inspect-openclaw:
 	@$(CONTAINER_RUNTIME) inspect $(OPENCLAW_CONTAINER_NAME) 2>/dev/null \
 		|| echo "Container '$(OPENCLAW_CONTAINER_NAME)' not found."
@@ -273,6 +497,10 @@ top-vllm:
 top-openclaw:
 	@$(CONTAINER_RUNTIME) stats --no-stream $(OPENCLAW_CONTAINER_NAME) 2>/dev/null \
 		|| echo "Container '$(OPENCLAW_CONTAINER_NAME)' is not running."
+
+## check-gpu: Validate NVIDIA GPU, CUDA driver, VRAM, and container toolkit (exits with error if absent)
+check-gpu:
+	@bash "$(SCRIPTS_DIR)/check-gpu.sh"
 
 ## env-check: Validate environment prerequisites (runtime, GPU, nvidia-smi)
 env-check:
@@ -302,60 +530,78 @@ env-check:
 	@echo ""
 
 # =============================================================================
-# Help
+##@ Help
 # =============================================================================
 
-## help: Show this help message
+## help: Show this help message (auto-generated from ## comments)
 help:
-	@echo ""
-	@echo "DemoClaw — Container Lifecycle Targets"
-	@echo "======================================="
-	@echo ""
-	@echo "Runtime: $(or $(CONTAINER_RUNTIME),(not found — install docker or podman))"
-	@echo ""
-	@echo "\033[1mLifecycle:\033[0m"
-	@echo "  \033[36mbuild\033[0m              Build both container images"
-	@echo "  \033[36mbuild-all\033[0m          Alias for build — build both container images"
-	@echo "  \033[36mstart\033[0m              Start the full DemoClaw stack (vLLM + OpenClaw)"
-	@echo "  \033[36mstop\033[0m               Stop and remove all DemoClaw containers"
-	@echo "  \033[36mrestart\033[0m            Stop then start the full stack"
-	@echo "  \033[36mclean\033[0m              Stop containers, remove images, and remove the network"
-	@echo ""
-	@echo "\033[1mPer-service:\033[0m"
-	@echo "  \033[36mbuild-vllm\033[0m         Build the vLLM container image"
-	@echo "  \033[36mbuild-openclaw\033[0m     Build the OpenClaw container image"
-	@echo "  \033[36mstart-vllm\033[0m         Start the vLLM container only"
-	@echo "  \033[36mstart-openclaw\033[0m     Start the OpenClaw container only"
-	@echo ""
-	@echo "\033[1mMonitoring & Logs:\033[0m"
-	@echo "  \033[36mstatus\033[0m             Run healthchecks on all services"
-	@echo "  \033[36mhealth-check\033[0m       Alias for 'status'"
-	@echo "  \033[36mvalidate-api\033[0m       Validate vLLM OpenAI-compatible API endpoints"
-	@echo "  \033[36mps\033[0m                 Show DemoClaw container states"
-	@echo "  \033[36mlogs\033[0m               Show last 20 lines from both containers"
-	@echo "  \033[36mlogs-vllm\033[0m          Show last 50 lines of vLLM logs"
-	@echo "  \033[36mlogs-openclaw\033[0m      Show last 50 lines of OpenClaw logs"
-	@echo "  \033[36mfollow\033[0m             Follow live logs from both containers"
-	@echo "  \033[36mfollow-vllm\033[0m        Follow vLLM logs in real time"
-	@echo "  \033[36mfollow-openclaw\033[0m    Follow OpenClaw logs in real time"
-	@echo ""
-	@echo "\033[1mDebugging:\033[0m"
-	@echo "  \033[36mshell-vllm\033[0m         Open interactive shell in vLLM container"
-	@echo "  \033[36mshell-openclaw\033[0m     Open interactive shell in OpenClaw container"
-	@echo "  \033[36minspect-vllm\033[0m       Show detailed vLLM container info (JSON)"
-	@echo "  \033[36minspect-openclaw\033[0m   Show detailed OpenClaw container info (JSON)"
-	@echo "  \033[36mtop-vllm\033[0m           Show vLLM container resource usage"
-	@echo "  \033[36mtop-openclaw\033[0m       Show OpenClaw container resource usage"
-	@echo "  \033[36menv-check\033[0m          Validate environment prerequisites"
-	@echo ""
-	@echo "\033[1mExamples:\033[0m"
-	@echo "  make start                          # Start full stack"
-	@echo "  make start CONTAINER_RUNTIME=podman  # Force podman"
-	@echo "  make validate-api                   # Validate vLLM API endpoints"
-	@echo "  make logs-vllm                      # Quick look at vLLM logs"
-	@echo "  make follow-vllm                    # Stream vLLM logs in real time"
-	@echo "  make shell-openclaw                 # Debug inside OpenClaw container"
-	@echo "  make env-check                      # Verify GPU & runtime setup"
-	@echo "  make restart                        # Restart everything"
-	@echo "  make clean                          # Remove everything"
-	@echo ""
+	@printf "\n\033[1mDemoClaw — Container Lifecycle Targets\033[0m\n"
+	@printf "=======================================\n"
+	@printf "Runtime : \033[36m%s\033[0m\n" \
+		"$(or $(CONTAINER_RUNTIME),(not found — install docker or podman))"
+	@printf "Override: make <target> \033[36mCONTAINER_RUNTIME=podman\033[0m\n\n"
+	@awk ' \
+		/^##@ / { \
+			gsub(/^##@ /, ""); \
+			printf "\n\033[1m%s\033[0m\n", $$0; \
+			next \
+		} \
+		/^## / { \
+			line = substr($$0, 4); \
+			colon = index(line, ":"); \
+			if (colon > 0) { \
+				tgt  = substr(line, 1, colon - 1); \
+				desc = substr(line, colon + 2); \
+				printf "  \033[36m%-22s\033[0m %s\n", tgt, desc \
+			} \
+			next \
+		} \
+	' $(MAKEFILE_LIST)
+	@printf "\n\033[1mQuick examples:\033[0m\n"
+	@printf "\n\033[1m  Lifecycle\033[0m\n"
+	@printf "  make start                            # Start full stack (health wait)\n"
+	@printf "  make start-all                        # Start both services in sequence\n"
+	@printf "  make stop                             # Stop & remove all DemoClaw containers\n"
+	@printf "  make stop-all                         # Graceful ordered teardown\n"
+	@printf "  make restart                          # Stop then start full stack\n"
+	@printf "  make restart-vllm                     # Restart just the vLLM container\n"
+	@printf "  make restart-openclaw                 # Restart just the OpenClaw container\n"
+	@printf "  make clean                            # Remove containers, images, volumes & network\n"
+	@printf "\n\033[1m  Logs & monitoring\033[0m\n"
+	@printf "  make logs                             # Tail last 50 lines from both containers\n"
+	@printf "  make logs-vllm                        # Tail last 50 lines of vLLM logs\n"
+	@printf "  make logs-openclaw                    # Tail last 50 lines of OpenClaw logs\n"
+	@printf "  make follow                           # Stream live logs from both containers\n"
+	@printf "  make follow-vllm                      # Stream vLLM logs in real time\n"
+	@printf "  make follow-openclaw                  # Stream OpenClaw logs in real time\n"
+	@printf "  make status                           # Run healthchecks on all services\n"
+	@printf "  make validate-api                     # Validate vLLM API endpoints\n"
+	@printf "  make validate-connection              # Confirm vLLM provider connection via OpenClaw container\n"
+	@printf "  make validate-connection-host         # Confirm vLLM provider connection via host port\n"
+	@printf "  make ps                               # Show DemoClaw container states\n"
+	@printf "\n\033[1m  Debug & diagnostics\033[0m\n"
+	@printf "  make check-gpu                        # Full GPU/CUDA preflight validation\n"
+	@printf "  make env-check                        # Verify GPU & runtime setup\n"
+	@printf "  make shell-vllm                       # Open shell inside vLLM container\n"
+	@printf "  make shell-openclaw                   # Open shell inside OpenClaw container\n"
+	@printf "  make inspect-vllm                     # Show vLLM container details (JSON)\n"
+	@printf "  make top-vllm                         # Show vLLM resource usage\n"
+	@printf "\n\033[1m  Build options\033[0m\n"
+	@printf "  make build                            # Build both images (auto-detect runtime)\n"
+	@printf "  make build NO_CACHE=1                 # Force clean image rebuild\n"
+	@printf "  make build-vllm VLLM_IMAGE_TAG=my/v   # Custom vLLM image tag\n"
+	@printf "  make build-docker                     # Build both images with docker\n"
+	@printf "  make build-podman                     # Build both images with podman\n"
+	@printf "  make build-vllm-docker                # Build vLLM image with docker\n"
+	@printf "  make build-vllm-podman                # Build vLLM image with podman\n"
+	@printf "  make build-openclaw-docker            # Build OpenClaw image with docker\n"
+	@printf "  make build-openclaw-podman            # Build OpenClaw image with podman\n"
+	@printf "\n\033[1m  Runtime override (any target accepts CONTAINER_RUNTIME)\033[0m\n"
+	@printf "  make start CONTAINER_RUNTIME=podman   # Force podman for any target\n"
+	@printf "  make run-vllm-docker                  # Run vLLM container with docker\n"
+	@printf "  make run-vllm-podman                  # Run vLLM container with podman\n"
+	@printf "  make run-openclaw-docker              # Run OpenClaw container with docker\n"
+	@printf "  make run-openclaw-podman              # Run OpenClaw container with podman\n"
+	@printf "  make start-docker                     # Start full stack with docker\n"
+	@printf "  make start-podman                     # Start full stack with podman\n"
+	@printf "\n"

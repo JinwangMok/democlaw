@@ -11,10 +11,14 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Lint shell scripts with ShellCheck
+  # Lint and syntax-check shell scripts (shellcheck + bash -n)
+  #
+  # Two complementary checks run for every shell script:
+  #   1. bash -n  — zero-dependency syntax validation (no external tools)
+  #   2. shellcheck — static analysis / linting with inline GitHub annotations
   # ---------------------------------------------------------------------------
   shellcheck:
-    name: ShellCheck
+    name: ShellCheck (lint + bash -n syntax)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -24,70 +28,118 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
+          echo "ShellCheck version: $(shellcheck --version | grep 'version:')"
 
-      - name: Find and lint shell scripts
+      - name: Discover shell scripts
+        id: discover
         run: |
-          scripts=$(find . -name '*.sh' -not -path './.git/*' -not -path './.omc/*' | sort)
-          if [ -z "$scripts" ]; then
-            echo "No shell scripts found — skipping."
-            exit 0
+          mapfile -t scripts < <(git ls-files '*.sh' | sort)
+          count="${#scripts[@]}"
+          echo "Found ${count} shell script(s):"
+          printf '  %s\n' "${scripts[@]}"
+          if [ "$count" -eq 0 ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=true"  >> "$GITHUB_OUTPUT"
+            echo "count=${count}" >> "$GITHUB_OUTPUT"
           fi
-          echo "Found shell scripts:"
-          echo "$scripts"
-          echo ""
+
+      - name: Syntax validation (bash -n)
+        if: steps.discover.outputs.found == 'true'
+        run: |
           exit_code=0
+          passed=0
+          failed=0
           while IFS= read -r script; do
-            echo "::group::Checking $script"
-            if shellcheck --severity=warning --shell=bash "$script"; then
-              echo "✓ $script passed"
+            echo "::group::bash -n ${script}"
+            if bash -n "${script}" 2>&1; then
+              echo "✓ ${script} — syntax OK"
+              passed=$((passed + 1))
             else
-              echo "✗ $script failed"
+              echo "✗ ${script} — syntax ERROR"
+              failed=$((failed + 1))
               exit_code=1
             fi
             echo "::endgroup::"
-          done <<< "$scripts"
-          exit "$exit_code"
+          done < <(git ls-files '*.sh' | sort)
+          echo ""
+          echo "bash -n: passed=${passed} failed=${failed} total=$((passed + failed))"
+          exit "${exit_code}"
+
+      - name: Static analysis (shellcheck)
+        if: steps.discover.outputs.found == 'true'
+        run: |
+          exit_code=0
+          passed=0
+          failed=0
+          while IFS= read -r script; do
+            echo "::group::shellcheck ${script}"
+            # --format=gcc emits GCC-style annotations rendered inline by GitHub.
+            # --source-path=scripts resolves `# shellcheck source=lib/runtime.sh`
+            # directives used in the top-level orchestration scripts.
+            if shellcheck \
+                --severity=warning \
+                --shell=bash \
+                --format=gcc \
+                --source-path=scripts \
+                "${script}"; then
+              echo "✓ ${script} — passed"
+              passed=$((passed + 1))
+            else
+              echo "✗ ${script} — failed"
+              failed=$((failed + 1))
+              exit_code=1
+            fi
+            echo "::endgroup::"
+          done < <(git ls-files '*.sh' | sort)
+          echo ""
+          echo "shellcheck: passed=${passed} failed=${failed} total=$((passed + failed))"
+          exit "${exit_code}"
 
   # ---------------------------------------------------------------------------
   # Lint Dockerfiles with hadolint
+  #
+  # Both the vLLM and OpenClaw Dockerfiles are linted explicitly by path.
+  # Project-specific rule suppressions live in .hadolint.yaml (repo root).
   # ---------------------------------------------------------------------------
   hadolint:
-    name: Hadolint
+    name: Hadolint (Dockerfile syntax)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install hadolint
+      - name: Install hadolint v2.12.0
         run: |
           HADOLINT_VERSION="v2.12.0"
-          curl -sL "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
+          sudo curl -sL \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-Linux-x86_64" \
             -o /usr/local/bin/hadolint
-          chmod +x /usr/local/bin/hadolint
+          sudo chmod +x /usr/local/bin/hadolint
           hadolint --version
 
-      - name: Find and lint Dockerfiles
+      - name: Show hadolint configuration
         run: |
-          dockerfiles=$(find . -name 'Dockerfile' -not -path './.git/*' -not -path './.omc/*' | sort)
-          if [ -z "$dockerfiles" ]; then
-            echo "No Dockerfiles found — skipping."
-            exit 0
+          if [ -f .hadolint.yaml ]; then
+            echo "=== Active .hadolint.yaml ==="
+            cat .hadolint.yaml
+          else
+            echo "No .hadolint.yaml found — using hadolint defaults."
           fi
-          echo "Found Dockerfiles:"
-          echo "$dockerfiles"
-          echo ""
-          exit_code=0
-          while IFS= read -r dockerfile; do
-            echo "::group::Checking $dockerfile"
-            if hadolint "$dockerfile"; then
-              echo "✓ $dockerfile passed"
-            else
-              echo "✗ $dockerfile failed"
-              exit_code=1
-            fi
-            echo "::endgroup::"
-          done <<< "$dockerfiles"
-          exit "$exit_code"
+
+      - name: Lint vllm/Dockerfile
+        run: |
+          echo "::group::hadolint vllm/Dockerfile"
+          hadolint vllm/Dockerfile
+          echo "::endgroup::"
+          echo "✓ vllm/Dockerfile — hadolint passed"
+
+      - name: Lint openclaw/Dockerfile
+        run: |
+          echo "::group::hadolint openclaw/Dockerfile"
+          hadolint openclaw/Dockerfile
+          echo "::endgroup::"
+          echo "✓ openclaw/Dockerfile — hadolint passed"
 
   # ---------------------------------------------------------------------------
   # Validate .env.example and Makefile syntax
@@ -327,3 +379,403 @@ jobs:
           grep -q "/v1/models" vllm/healthcheck.sh && \
             echo "✓ vllm/healthcheck.sh verifies /v1/models endpoint" || \
             { echo "✗ healthcheck.sh does not check /v1/models"; exit 1; }
+
+  # ---------------------------------------------------------------------------
+  # Test runtime auto-detection logic (docker/podman, no GPU required)
+  #
+  # Verifies that scripts/lib/runtime.sh correctly:
+  #   1. Prefers docker over podman when both are in PATH
+  #   2. Falls back to podman when docker is absent
+  #   3. Honours the CONTAINER_RUNTIME override env var
+  #   4. Exits with a clear error when no runtime is found
+  #   5. Reports RUNTIME_IS_PODMAN correctly for each runtime
+  #   6. Returns correct GPU passthrough flags per runtime
+  #   7. All orchestration scripts source lib/runtime.sh
+  #
+  # No GPU, container daemon, or real docker/podman required — fake binaries
+  # are injected via PATH manipulation in the test script.
+  # ---------------------------------------------------------------------------
+  runtime-detection:
+    name: Runtime auto-detection logic
+    runs-on: ubuntu-latest
+    needs: [shellcheck]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make test script executable
+        run: chmod +x scripts/test-runtime-detection.sh
+
+      - name: Run runtime detection unit tests
+        run: |
+          echo "=== Running scripts/test-runtime-detection.sh ==="
+          bash scripts/test-runtime-detection.sh
+
+      - name: Verify lib/runtime.sh exists and is a valid bash script
+        run: |
+          [ -f scripts/lib/runtime.sh ] && \
+            echo "✓ scripts/lib/runtime.sh exists" || \
+            { echo "✗ scripts/lib/runtime.sh missing"; exit 1; }
+          bash -n scripts/lib/runtime.sh && \
+            echo "✓ scripts/lib/runtime.sh has valid bash syntax" || \
+            { echo "✗ scripts/lib/runtime.sh has syntax errors"; exit 1; }
+
+      - name: Verify detect_runtime function is defined in lib/runtime.sh
+        run: |
+          grep -q "^detect_runtime()" scripts/lib/runtime.sh && \
+            echo "✓ detect_runtime() function defined" || \
+            { echo "✗ detect_runtime() not found in lib/runtime.sh"; exit 1; }
+
+      - name: Verify runtime_gpu_flags function is defined in lib/runtime.sh
+        run: |
+          grep -q "^runtime_gpu_flags()" scripts/lib/runtime.sh && \
+            echo "✓ runtime_gpu_flags() function defined" || \
+            { echo "✗ runtime_gpu_flags() not found in lib/runtime.sh"; exit 1; }
+
+      - name: Verify CONTAINER_RUNTIME override is supported
+        run: |
+          grep -q 'CONTAINER_RUNTIME' scripts/lib/runtime.sh && \
+            echo "✓ CONTAINER_RUNTIME override supported in lib/runtime.sh" || \
+            { echo "✗ CONTAINER_RUNTIME override not found in lib/runtime.sh"; exit 1; }
+
+      - name: Verify docker-first detection order in lib/runtime.sh
+        run: |
+          # The detection loop lists candidates as "docker podman" — docker must come first.
+          # We check that the candidate list line contains docker before podman.
+          candidate_line=$(grep 'docker.*podman\|podman.*docker' scripts/lib/runtime.sh \
+            | grep -v '^\s*#' | head -1)
+          echo "  Candidate iteration line: ${candidate_line}"
+          if echo "${candidate_line}" | grep -q 'docker.*podman'; then
+            echo "✓ docker appears before podman in the candidate iteration list"
+          else
+            echo "✗ Expected docker to appear before podman in the detection order" >&2
+            echo "  Found: ${candidate_line}" >&2
+            exit 1
+          fi
+
+      - name: Verify clear error message when no runtime found
+        run: |
+          # The error path must mention 'docker' and 'podman' so users know what to install
+          grep -A5 'No container runtime found\|not found in PATH' scripts/lib/runtime.sh \
+            | grep -qi 'docker\|podman' && \
+            echo "✓ Error message references docker/podman (actionable)" || \
+            { echo "✗ Error message does not mention docker or podman"; exit 1; }
+
+      - name: Verify all orchestration scripts source lib/runtime.sh
+        run: |
+          status=0
+          for script in \
+            scripts/start.sh \
+            scripts/start-vllm.sh \
+            scripts/start-openclaw.sh \
+            scripts/stop.sh \
+            scripts/healthcheck.sh \
+            scripts/check-gpu.sh; do
+            if grep -q "lib/runtime.sh" "${script}"; then
+              echo "✓ ${script} sources lib/runtime.sh"
+            else
+              echo "✗ ${script} does NOT source lib/runtime.sh" >&2
+              status=1
+            fi
+          done
+          exit "${status}"
+
+  # ---------------------------------------------------------------------------
+  # Validate the OpenAI-compatible API endpoints using scripts/validate-api.sh
+  # against a Python mock vLLM server.
+  #
+  # Covers Sub-AC 3: Validate the vLLM container starts correctly and the
+  # OpenAI-compatible API endpoint responds to a health-check or model-listing
+  # request.
+  #
+  # Three test scenarios — no GPU or container runtime required:
+  #   1. Full path   — /health + /v1/models + /v1/chat/completions all pass
+  #   2. Skip-infer  — only /health and /v1/models (SKIP_INFERENCE_TEST=true)
+  #   3. Failure     — no server running; script must exit non-zero
+  # ---------------------------------------------------------------------------
+  validate-api:
+    name: vLLM OpenAI API validation (mock server)
+    runs-on: ubuntu-latest
+    needs: [shellcheck]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make validate-api.sh executable
+        run: chmod +x scripts/validate-api.sh
+
+      # -----------------------------------------------------------------------
+      # Start mock vLLM server that handles all three endpoints
+      # -----------------------------------------------------------------------
+      - name: Start mock vLLM server on port 8000
+        run: |
+          python3 - <<'PYEOF' &
+          import http.server, json, os
+
+          MODEL = os.environ.get("MODEL_NAME", "Qwen/Qwen3.5-9B-AWQ")
+
+          class Handler(http.server.BaseHTTPRequestHandler):
+              def log_message(self, fmt, *args):
+                  print(f"[mock-vllm] {fmt % args}", flush=True)
+              def send_json(self, code, body):
+                  payload = json.dumps(body).encode()
+                  self.send_response(code)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(payload)))
+                  self.end_headers()
+                  self.wfile.write(payload)
+              def do_GET(self):
+                  if self.path == "/health":
+                      self.send_json(200, {})
+                  elif self.path == "/v1/models":
+                      self.send_json(200, {
+                          "object": "list",
+                          "data": [{"id": MODEL, "object": "model",
+                                    "created": 1700000000, "owned_by": "vllm"}]
+                      })
+                  else:
+                      self.send_response(404); self.end_headers()
+              def do_POST(self):
+                  if self.path == "/v1/chat/completions":
+                      length = int(self.headers.get("Content-Length", 0))
+                      self.rfile.read(length)
+                      self.send_json(200, {
+                          "id": "chatcmpl-mock-0001",
+                          "object": "chat.completion",
+                          "created": 1700000000,
+                          "model": MODEL,
+                          "choices": [{"index": 0,
+                                       "message": {"role": "assistant", "content": "Hello"},
+                                       "finish_reason": "stop"}],
+                          "usage": {"prompt_tokens": 12, "completion_tokens": 1, "total_tokens": 13}
+                      })
+                  else:
+                      self.send_response(404); self.end_headers()
+
+          http.server.HTTPServer(("127.0.0.1", 8000), Handler).serve_forever()
+          PYEOF
+          echo $! > /tmp/mock_vllm_api.pid
+
+      - name: Wait for mock server to be ready
+        run: |
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "Mock vLLM server ready."; break
+            fi
+            sleep 1
+          done
+          curl -sf http://localhost:8000/health > /dev/null || {
+            echo "ERROR: Mock server did not start"; exit 1
+          }
+
+      # -----------------------------------------------------------------------
+      # Happy path — full test: all 3 endpoints must pass
+      # -----------------------------------------------------------------------
+      - name: Run validate-api.sh — full test (expect exit 0)
+        env:
+          VLLM_BASE_URL: "http://localhost:8000"
+          MODEL_NAME: "Qwen/Qwen3.5-9B-AWQ"
+          CURL_TIMEOUT: "10"
+          INFERENCE_TIMEOUT: "15"
+          SKIP_INFERENCE_TEST: "false"
+        run: |
+          echo "=== Running scripts/validate-api.sh — all 3 endpoints ==="
+          ./scripts/validate-api.sh
+          echo "✓ validate-api.sh exited 0 — PASS"
+
+      # -----------------------------------------------------------------------
+      # Skip-inference path — only /health + /v1/models
+      # -----------------------------------------------------------------------
+      - name: Run validate-api.sh — skip-inference mode (expect exit 0)
+        env:
+          VLLM_BASE_URL: "http://localhost:8000"
+          MODEL_NAME: "Qwen/Qwen3.5-9B-AWQ"
+          CURL_TIMEOUT: "10"
+          SKIP_INFERENCE_TEST: "true"
+        run: |
+          echo "=== Running scripts/validate-api.sh — SKIP_INFERENCE_TEST=true ==="
+          ./scripts/validate-api.sh
+          echo "✓ validate-api.sh exited 0 — PASS"
+
+      - name: Stop mock vLLM server
+        run: |
+          [ -f /tmp/mock_vllm_api.pid ] && kill "$(cat /tmp/mock_vllm_api.pid)" 2>/dev/null || true
+          rm -f /tmp/mock_vllm_api.pid
+          echo "Mock server stopped."
+
+      # -----------------------------------------------------------------------
+      # Failure path — no server; script must exit non-zero
+      # -----------------------------------------------------------------------
+      - name: Run validate-api.sh — failure path (expect exit non-zero)
+        env:
+          VLLM_BASE_URL: "http://localhost:8000"
+          SKIP_INFERENCE_TEST: "true"
+        run: |
+          echo "=== Running scripts/validate-api.sh with no server running ==="
+          if ./scripts/validate-api.sh 2>/dev/null; then
+            echo "ERROR: script exited 0 but no server was running — FAIL"; exit 1
+          fi
+          echo "✓ validate-api.sh correctly exited non-zero — PASS"
+
+      # -----------------------------------------------------------------------
+      # Static checks: validate-api.sh covers all three required endpoints
+      # -----------------------------------------------------------------------
+      - name: Verify validate-api.sh checks /health endpoint
+        run: |
+          grep -q "/health" scripts/validate-api.sh && \
+            echo "✓ validate-api.sh checks /health endpoint" || \
+            { echo "✗ validate-api.sh missing /health check"; exit 1; }
+
+      - name: Verify validate-api.sh checks /v1/models endpoint
+        run: |
+          grep -q "/v1/models" scripts/validate-api.sh && \
+            echo "✓ validate-api.sh checks /v1/models endpoint" || \
+            { echo "✗ validate-api.sh missing /v1/models check"; exit 1; }
+
+      - name: Verify validate-api.sh checks /v1/chat/completions endpoint
+        run: |
+          grep -q "/v1/chat/completions" scripts/validate-api.sh && \
+            echo "✓ validate-api.sh checks /v1/chat/completions endpoint" || \
+            { echo "✗ validate-api.sh missing /v1/chat/completions check"; exit 1; }
+
+  # ---------------------------------------------------------------------------
+  # Test the GPU / CUDA validation logic in scripts/lib/gpu.sh
+  #
+  # Verifies that gpu.sh correctly:
+  #   1. Exits with a clear error when nvidia-smi is absent
+  #   2. Exits with a clear error when nvidia-smi cannot communicate with driver
+  #   3. Exits with a clear error when no GPU hardware is detected
+  #   4. Exits with a clear error when the NVIDIA driver version is too old
+  #   5. Exits with a clear error when the CUDA version is too old
+  #   6. Exits with a clear error when GPU VRAM is insufficient
+  #   7. Exits with a clear error when nvidia-ctk is not installed
+  #   8. Exits with a clear error when Docker NVIDIA runtime is not configured
+  #   9. Exits with a clear error when Podman CDI spec is missing
+  #  10. Passes all checks with a valid GPU configuration (via fake nvidia-smi)
+  #  11. validate_nvidia_gpu() fails fast (exits on first failed check)
+  #  12. version_gte() correctly compares dot-separated version strings
+  #  13. validate_nvidia_gpu() is called in all vLLM launch scripts
+  #  14. All vLLM launch scripts source lib/gpu.sh
+  #  15. lib/gpu.sh exists, has valid syntax, and defines all required functions
+  #  16. All error messages contain actionable remediation steps
+  #
+  # No real NVIDIA GPU is required — fake nvidia-smi / nvidia-ctk binaries are
+  # injected via PATH manipulation in the test script.  This satisfies the
+  # "No GPU runner E2E tests in CI" constraint.
+  # ---------------------------------------------------------------------------
+  gpu-validation-logic:
+    name: GPU validation logic (mock nvidia-smi, no GPU required)
+    runs-on: ubuntu-latest
+    needs: [shellcheck]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make test script executable
+        run: chmod +x scripts/test-gpu-validation.sh
+
+      - name: Run GPU validation unit tests
+        run: |
+          echo "=== Running scripts/test-gpu-validation.sh ==="
+          bash scripts/test-gpu-validation.sh
+
+      - name: Verify lib/gpu.sh exists and has valid bash syntax
+        run: |
+          [ -f scripts/lib/gpu.sh ] && \
+            echo "✓ scripts/lib/gpu.sh exists" || \
+            { echo "✗ scripts/lib/gpu.sh missing"; exit 1; }
+          bash -n scripts/lib/gpu.sh && \
+            echo "✓ scripts/lib/gpu.sh has valid bash syntax" || \
+            { echo "✗ scripts/lib/gpu.sh has syntax errors"; exit 1; }
+
+      - name: Verify validate_nvidia_gpu() function is defined
+        run: |
+          grep -q "^validate_nvidia_gpu()" scripts/lib/gpu.sh && \
+            echo "✓ validate_nvidia_gpu() function defined" || \
+            { echo "✗ validate_nvidia_gpu() not found in lib/gpu.sh"; exit 1; }
+
+      - name: Verify check_nvidia_smi() function is defined
+        run: |
+          grep -q "^check_nvidia_smi()" scripts/lib/gpu.sh && \
+            echo "✓ check_nvidia_smi() function defined" || \
+            { echo "✗ check_nvidia_smi() not found in lib/gpu.sh"; exit 1; }
+
+      - name: Verify check_cuda_driver() function is defined
+        run: |
+          grep -q "^check_cuda_driver()" scripts/lib/gpu.sh && \
+            echo "✓ check_cuda_driver() function defined" || \
+            { echo "✗ check_cuda_driver() not found in lib/gpu.sh"; exit 1; }
+
+      - name: Verify check_gpu_vram() function is defined
+        run: |
+          grep -q "^check_gpu_vram()" scripts/lib/gpu.sh && \
+            echo "✓ check_gpu_vram() function defined" || \
+            { echo "✗ check_gpu_vram() not found in lib/gpu.sh"; exit 1; }
+
+      - name: Verify check_nvidia_container_runtime() function is defined
+        run: |
+          grep -q "^check_nvidia_container_runtime()" scripts/lib/gpu.sh && \
+            echo "✓ check_nvidia_container_runtime() function defined" || \
+            { echo "✗ check_nvidia_container_runtime() not found in lib/gpu.sh"; exit 1; }
+
+      - name: Verify GPU validation fires before container launch in start.sh
+        run: |
+          grep -q "validate_nvidia_gpu" scripts/start.sh && \
+            echo "✓ start.sh calls validate_nvidia_gpu() before launching containers" || \
+            { echo "✗ start.sh does not call validate_nvidia_gpu()"; exit 1; }
+
+      - name: Verify GPU validation fires before container launch in start-vllm.sh
+        run: |
+          grep -q "validate_nvidia_gpu" scripts/start-vllm.sh && \
+            echo "✓ start-vllm.sh calls validate_nvidia_gpu() before launching vLLM" || \
+            { echo "✗ start-vllm.sh does not call validate_nvidia_gpu()"; exit 1; }
+
+      - name: Verify GPU validation fires before container launch in run_vllm.sh
+        run: |
+          grep -q "validate_nvidia_gpu" scripts/run_vllm.sh && \
+            echo "✓ run_vllm.sh calls validate_nvidia_gpu() before launching vLLM" || \
+            { echo "✗ run_vllm.sh does not call validate_nvidia_gpu()"; exit 1; }
+
+      - name: Verify minimum NVIDIA driver version is enforced (>= 520)
+        run: |
+          grep -q "520" scripts/lib/gpu.sh && \
+            echo "✓ Minimum NVIDIA driver version 520 enforced in lib/gpu.sh" || \
+            { echo "✗ Minimum driver version 520 not found in lib/gpu.sh"; exit 1; }
+
+      - name: Verify minimum CUDA version is enforced (>= 11.8)
+        run: |
+          grep -q "11.8" scripts/lib/gpu.sh && \
+            echo "✓ Minimum CUDA version 11.8 enforced in lib/gpu.sh" || \
+            { echo "✗ Minimum CUDA version 11.8 not found in lib/gpu.sh"; exit 1; }
+
+      - name: Verify minimum VRAM threshold is set (>= 7500 MiB)
+        run: |
+          grep -q "7500" scripts/lib/gpu.sh && \
+            echo "✓ Minimum VRAM threshold 7500 MiB found in lib/gpu.sh" || \
+            { echo "✗ Minimum VRAM threshold 7500 MiB not found in lib/gpu.sh"; exit 1; }
+
+      - name: Verify standalone check-gpu.sh script exists
+        run: |
+          [ -f scripts/check-gpu.sh ] && \
+            echo "✓ scripts/check-gpu.sh exists" || \
+            { echo "✗ scripts/check-gpu.sh is MISSING"; exit 1; }
+
+      - name: Verify check-gpu.sh sources lib/gpu.sh
+        run: |
+          grep -q "lib/gpu.sh" scripts/check-gpu.sh && \
+            echo "✓ check-gpu.sh sources lib/gpu.sh" || \
+            { echo "✗ check-gpu.sh does not source lib/gpu.sh"; exit 1; }
+
+      - name: Verify error messages contain remediation steps for missing nvidia-smi
+        run: |
+          grep -A5 "nvidia-smi not found" scripts/lib/gpu.sh | \
+            grep -qi "install\|apt\|dnf\|https://" && \
+            echo "✓ nvidia-smi missing error includes installation instructions" || \
+            { echo "✗ nvidia-smi missing error lacks installation instructions"; exit 1; }
+
+      - name: Verify error messages contain remediation steps for missing nvidia-ctk
+        run: |
+          grep -A5 "nvidia-ctk not found" scripts/lib/gpu.sh | \
+            grep -qi "install\|apt-get\|dnf\|toolkit\|https://" && \
+            echo "✓ nvidia-ctk missing error includes installation instructions" || \
+            { echo "✗ nvidia-ctk missing error lacks installation instructions"; exit 1; }

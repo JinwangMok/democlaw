@@ -181,7 +181,27 @@ Environment Check
 
 If `nvidia-smi` is not found or the NVIDIA runtime is missing, see the [Prerequisites](#prerequisites) section for installation instructions.
 
-### Step 4 — Launch with Docker
+### Step 4 — Build the container images
+
+Before launching, build both container images from the local Dockerfiles. This step is done automatically by `./scripts/start.sh` on the first run, but you can also build them explicitly:
+
+```bash
+# Build both images using the Makefile (recommended)
+make build
+
+# Or build each image individually
+make build-vllm      # builds democlaw/vllm:latest
+make build-openclaw  # builds democlaw/openclaw:latest
+
+# Or use the container runtime directly
+docker build -t democlaw/vllm:latest     vllm/
+docker build -t democlaw/openclaw:latest openclaw/
+# (substitute "docker" with "podman" if using Podman)
+```
+
+> **Tip:** If you just run `./scripts/start.sh` or `make start` without building first, images are built automatically on the first run and reused on subsequent runs. Explicit `make build` is useful when you want to pre-pull and build before running (e.g. in CI, on slow networks, or to verify the Dockerfiles before deployment).
+
+### Step 5 — Launch with Docker
 
 If Docker is your container runtime, run:
 
@@ -216,7 +236,7 @@ Expected final output:
 
 Open **http://localhost:18789** in your browser to access the OpenClaw dashboard.
 
-### Step 5 — Launch with Podman
+### Step 6 — Launch with Podman
 
 If Podman is your container runtime, the workflow is identical. Podman uses CDI (Container Device Interface) for GPU passthrough instead of Docker's `--gpus` flag.
 
@@ -245,20 +265,75 @@ CONTAINER_RUNTIME=podman ./scripts/start.sh
 
 Expected final output is the same as for Docker, with `Runtime: podman`.
 
-### Step 6 — Verify the installation
+### Step 7 — Verify the installation
 
-After the stack is running, confirm both services are healthy:
+Once `./scripts/start.sh` (or `make start`) exits with the **"Both services started successfully!"** banner, run the bundled healthcheck script to confirm both containers are fully operational:
 
 ```bash
-# Healthcheck all services
-make status
-# or
+# Run the full healthcheck (all services)
 ./scripts/healthcheck.sh
 
+# Or via the Makefile
+make health
+```
+
+**Expected output — everything healthy:**
+
+```
+======================================
+  DemoClaw Health Check
+======================================
+
+▶ Checking container runtime ...
+  ✓ Container runtime — docker available (Docker version 26.1.0, build a5ee5b1)
+▶ Checking container network ...
+  ✓ Container network — 'democlaw-net' exists
+▶ Checking vLLM service ...
+  ✓ vLLM container — 'democlaw-vllm' is running
+  ✓ vLLM container health — Docker HEALTHCHECK reports healthy
+▶ Checking vLLM health endpoint ...
+  ✓ vLLM /health endpoint — HTTP 200
+▶ Checking vLLM /v1/models endpoint ...
+  ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
+  ✓ vLLM model loaded — 'Qwen/Qwen3.5-9B-AWQ' found in /v1/models
+▶ Checking vLLM /v1/chat/completions (inference test) ...
+  ✓ vLLM chat completions — Inference working — HTTP 200 with valid response
+▶ Checking OpenClaw service ...
+  ✓ OpenClaw container — 'democlaw-openclaw' is running
+  ✓ OpenClaw dashboard reachable — HTTP 200 at http://localhost:18789
+  ✓ OpenClaw dashboard content — HTML content verified (42381 bytes)
+
+--------------------------------------
+  Results: 10 passed, 0 failed, 0 warnings (10 total)
+--------------------------------------
+  Overall: HEALTHY
+```
+
+Exit code: `0`
+
+> **First-launch timing:** On the first run, vLLM downloads ~5 GB of model weights. Running the healthcheck immediately after `start.sh` completes may show `Overall: DEGRADED` — the `⚠ vLLM container health — HEALTHCHECK still starting` warning is normal while the runtime's built-in health probe completes. All API endpoint checks (`/health`, `/v1/models`, `/v1/chat/completions`) should already pass. Wait 2–3 minutes and re-run to see `Overall: HEALTHY`.
+
+**Check vLLM only during model loading** (faster; skips the OpenClaw checks):
+
+```bash
+./scripts/healthcheck.sh --vllm-only
+```
+
+**Machine-readable JSON output** (useful for CI or monitoring):
+
+```bash
+./scripts/healthcheck.sh --json
+```
+
+For the full expected output for each healthcheck state (HEALTHY, DEGRADED, UNHEALTHY), JSON output format, exit codes, and all supported flags, see the [Healthchecks](#healthchecks) section.
+
+Additional verification commands:
+
+```bash
 # Validate the vLLM OpenAI-compatible API endpoints
-make validate-api
-# or
 ./scripts/validate-api.sh
+# or via Makefile
+make validate-api
 
 # Quick curl to confirm vLLM is responding
 curl http://localhost:8000/health                  # expects HTTP 200
@@ -266,9 +341,10 @@ curl http://localhost:8000/v1/models | python3 -m json.tool
 
 # Open the OpenClaw dashboard in your browser
 xdg-open http://localhost:18789   # Linux desktop
+# or navigate to http://localhost:18789 in any browser
 ```
 
-### Step 7 — Stop the stack
+### Step 8 — Stop the stack
 
 ```bash
 make stop
@@ -276,7 +352,7 @@ make stop
 ./scripts/stop.sh
 ```
 
-To also remove the built images and network (clean slate for next run):
+To also remove the built images and the shared network (clean slate for the next run):
 
 ```bash
 make clean
@@ -323,6 +399,69 @@ make help           # Show all available targets
 ./scripts/validate-api.sh                          # Full validation (including inference)
 SKIP_INFERENCE_TEST=true ./scripts/validate-api.sh # Skip inference test
 ```
+
+### Script execution order
+
+**Recommended order for a first-time deployment:**
+
+```
+Step 1  Verify GPU and runtime       make env-check
+                                  or ./scripts/check-gpu.sh
+
+Step 2  Build container images       make build
+                                  or docker build -t democlaw/vllm:latest     vllm/
+                                     docker build -t democlaw/openclaw:latest openclaw/
+
+Step 3  Start both services          make start
+         (recommended — handles     or ./scripts/start.sh
+          all sub-steps below)
+
+Step 4  Verify the stack is healthy  make status
+                                  or ./scripts/healthcheck.sh
+
+Step 5  Stop when finished           make stop
+                                  or ./scripts/stop.sh
+```
+
+`start.sh` handles Steps 3a–3d internally and in the correct order:
+
+```
+start.sh
+  ├── [1] Auto-detect container runtime (lib/runtime.sh)
+  ├── [2] Validate NVIDIA GPU / CUDA drivers (lib/gpu.sh)
+  │         → exits with error if GPU absent — no CPU fallback
+  ├── [3] Phase 1: start-vllm.sh
+  │         → pulls / starts vLLM container
+  │         → waits for /health endpoint (up to VLLM_HEALTH_TIMEOUT seconds)
+  ├── [4] Phase 2: start-openclaw.sh
+  │         → starts OpenClaw container
+  │         → waits for dashboard HTTP 200 (up to OPENCLAW_HEALTH_TIMEOUT seconds)
+  └── [5] Phase 3: healthcheck.sh
+            → runs full end-to-end health check on both services
+```
+
+**Manual step-by-step** (useful for debugging individual services):
+
+```bash
+# 1. GPU check — exits non-zero if GPU/CUDA absent
+./scripts/check-gpu.sh
+
+# 2. Start vLLM (includes GPU validation and health wait)
+./scripts/start-vllm.sh
+
+# 3. Start OpenClaw only after vLLM is healthy
+./scripts/start-openclaw.sh
+
+# 4. Verify both are running
+./scripts/healthcheck.sh
+
+# 5. Stop when finished
+./scripts/stop.sh
+```
+
+> **Important:** Always start `start-vllm.sh` before `start-openclaw.sh`.
+> OpenClaw polls the vLLM `/health` endpoint at startup and will time out
+> if vLLM is not reachable yet.
 
 ### Forcing a specific container runtime
 
@@ -473,9 +612,416 @@ For more detailed troubleshooting steps, see the [Troubleshooting](#troubleshoot
 
 ---
 
+## Healthchecks
+
+DemoClaw ships four healthcheck scripts that cover two scopes: **host-side orchestration** (run from your terminal to verify a running stack) and **in-container probes** (executed by the container runtime's built-in `HEALTHCHECK` instruction).
+
+### Running Healthchecks Manually After Starting
+
+After `./scripts/start.sh` (or `make start`) completes, run the following commands from the project root to verify both services are healthy:
+
+```bash
+# Full stack check — runtime, network, containers, and all API endpoints
+./scripts/healthcheck.sh
+
+# Via Makefile
+make health
+
+# Check vLLM only (useful while the model is still loading)
+./scripts/healthcheck.sh --vllm-only
+
+# JSON output for scripted/CI use
+./scripts/healthcheck.sh --json
+
+# Force a specific container runtime (if auto-detection is not desired)
+CONTAINER_RUNTIME=podman ./scripts/healthcheck.sh
+CONTAINER_RUNTIME=docker ./scripts/healthcheck.sh
+```
+
+The script exits `0` when all checks pass (or only warnings remain) and `1` when one or more checks fail.
+
+> **First-launch note:** On the very first run, vLLM downloads ~5 GB of model weights from HuggingFace. The in-container `HEALTHCHECK` may remain in the `starting` state for several minutes after the API endpoints are already serving requests. Running the healthcheck immediately after `start.sh` may show `Overall: DEGRADED` with a `⚠ HEALTHCHECK still starting` warning. This is expected — wait 2–3 minutes and re-run to see `Overall: HEALTHY`.
+
+### Overview
+
+| Script | Scope | Purpose |
+|--------|-------|---------|
+| `scripts/healthcheck.sh` | Host | Full stack check — runtime, network, both containers, all API endpoints |
+| `scripts/healthcheck_openclaw.sh` | Host | Poll-until-ready for the OpenClaw dashboard (used by start scripts) |
+| `vllm/healthcheck.sh` | In-container | Docker/Podman `HEALTHCHECK` for the vLLM container |
+| `openclaw/healthcheck.sh` | In-container | Docker/Podman `HEALTHCHECK` for the OpenClaw container |
+
+---
+
+### `scripts/healthcheck.sh` — Full stack health check
+
+The primary health-check script. Inspects the container runtime, the shared network, both containers, and all vLLM API endpoints.
+
+#### Usage
+
+```bash
+# Check all services (default)
+./scripts/healthcheck.sh
+
+# Check vLLM only (skip OpenClaw)
+./scripts/healthcheck.sh --vllm-only
+
+# Output results as machine-readable JSON
+./scripts/healthcheck.sh --json
+
+# Force a specific container runtime
+CONTAINER_RUNTIME=podman ./scripts/healthcheck.sh
+
+# Combine flags
+./scripts/healthcheck.sh --vllm-only --json
+
+# Via the Makefile (runs ./scripts/healthcheck.sh internally)
+make health
+make status
+make health-check
+```
+
+#### What is checked
+
+| # | Check | Description |
+|---|-------|-------------|
+| 1 | Container runtime | Verifies `docker` or `podman` is in `PATH` and responds |
+| 2 | Container network | Confirms `democlaw-net` exists |
+| 3 | vLLM container state | Container must be in `running` state |
+| 4 | vLLM container health | Docker/Podman `HEALTHCHECK` status (`healthy` / `starting` / `unhealthy`) |
+| 5 | `GET /health` | vLLM liveness endpoint — expects HTTP 200 |
+| 6 | `GET /v1/models` | OpenAI-compatible models list — expects HTTP 200 with ≥ 1 model |
+| 7 | Model loaded | Verifies `Qwen/Qwen3.5-9B-AWQ` appears in `/v1/models` response |
+| 8 | `POST /v1/chat/completions` | End-to-end inference smoke test — expects HTTP 200 with valid response |
+| 9 | OpenClaw container state | Container must be in `running` state |
+| 10 | OpenClaw dashboard | HTTP 2xx at `http://localhost:18789` with non-empty HTML content |
+
+> Checks 9–10 are skipped when `--vllm-only` is passed.
+
+#### Expected output — HEALTHY
+
+When all services are running and the model has finished loading:
+
+```
+======================================
+  DemoClaw Health Check
+======================================
+
+▶ Checking container runtime ...
+  ✓ Container runtime — docker available (Docker version 26.1.0, build a5ee5b1)
+▶ Checking container network ...
+  ✓ Container network — 'democlaw-net' exists
+▶ Checking vLLM service ...
+  ✓ vLLM container — 'democlaw-vllm' is running
+  ✓ vLLM container health — Docker HEALTHCHECK reports healthy
+▶ Checking vLLM health endpoint ...
+  ✓ vLLM /health endpoint — HTTP 200
+▶ Checking vLLM /v1/models endpoint ...
+  ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
+  ✓ vLLM model loaded — 'Qwen/Qwen3.5-9B-AWQ' found in /v1/models
+▶ Checking vLLM /v1/chat/completions (inference test) ...
+  ✓ vLLM chat completions — Inference working — HTTP 200 with valid response
+▶ Checking OpenClaw service ...
+  ✓ OpenClaw container — 'democlaw-openclaw' is running
+  ✓ OpenClaw dashboard reachable — HTTP 200 at http://localhost:18789
+  ✓ OpenClaw dashboard content — HTML content verified (42381 bytes)
+
+--------------------------------------
+  Results: 10 passed, 0 failed, 0 warnings (10 total)
+--------------------------------------
+  Overall: HEALTHY
+```
+
+Exit code: **`0`**
+
+#### Expected output — DEGRADED (warnings only)
+
+A `DEGRADED` result occurs when no checks outright fail but one or more produce warnings — for example, the container `HEALTHCHECK` is still in its initial `starting` phase (model loading) or the model ID in `/v1/models` does not match `MODEL_NAME`:
+
+```
+======================================
+  DemoClaw Health Check
+======================================
+
+▶ Checking container runtime ...
+  ✓ Container runtime — docker available (Docker version 26.1.0, ...)
+▶ Checking container network ...
+  ✓ Container network — 'democlaw-net' exists
+▶ Checking vLLM service ...
+  ✓ vLLM container — 'democlaw-vllm' is running
+  ⚠ vLLM container health — HEALTHCHECK still starting (model may be loading)
+▶ Checking vLLM health endpoint ...
+  ✓ vLLM /health endpoint — HTTP 200
+▶ Checking vLLM /v1/models endpoint ...
+  ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
+  ⚠ vLLM model loaded — 'Qwen/Qwen3.5-9B-AWQ' not found; available: my-other-model
+...
+
+--------------------------------------
+  Results: 8 passed, 0 failed, 2 warnings (10 total)
+--------------------------------------
+  Overall: DEGRADED
+```
+
+Exit code: **`0`**
+
+#### Expected output — UNHEALTHY (one or more failures)
+
+```
+======================================
+  DemoClaw Health Check
+======================================
+
+▶ Checking container runtime ...
+  ✓ Container runtime — docker available (Docker version 26.1.0, ...)
+▶ Checking container network ...
+  ✗ Container network — 'democlaw-net' not found
+▶ Checking vLLM service ...
+  ✗ vLLM container — Container 'democlaw-vllm' does not exist
+▶ Checking vLLM health endpoint ...
+  ✗ vLLM /health endpoint — HTTP 000 (expected 200) at http://localhost:8000/health
+▶ Checking OpenClaw service ...
+  ✗ OpenClaw container — Container 'democlaw-openclaw' does not exist
+  ✗ OpenClaw dashboard reachable — No response at http://localhost:18789 (port 18789)
+
+--------------------------------------
+  Results: 1 passed, 5 failed, 0 warnings (6 total)
+--------------------------------------
+  Overall: UNHEALTHY
+```
+
+Exit code: **`1`**
+
+#### JSON output mode (`--json`)
+
+Pass `--json` to get a single-line machine-readable JSON object instead of human-readable text.  Useful for CI pipelines, monitoring agents, or scripted checks.
+
+```bash
+./scripts/healthcheck.sh --json | python3 -m json.tool
+```
+
+Example JSON output (healthy):
+
+```json
+{
+  "status": "pass",
+  "checks_total": 10,
+  "checks_passed": 10,
+  "checks_failed": 0,
+  "checks_warned": 0,
+  "results": [
+    {"check": "Container runtime",        "status": "pass", "detail": "docker available (Docker version 26.1.0, ...)"},
+    {"check": "Container network",        "status": "pass", "detail": "'democlaw-net' exists"},
+    {"check": "vLLM container",           "status": "pass", "detail": "'democlaw-vllm' is running"},
+    {"check": "vLLM container health",    "status": "pass", "detail": "Docker HEALTHCHECK reports healthy"},
+    {"check": "vLLM /health endpoint",    "status": "pass", "detail": "HTTP 200"},
+    {"check": "vLLM /v1/models endpoint", "status": "pass", "detail": "HTTP 200 — 1 model(s) available"},
+    {"check": "vLLM model loaded",        "status": "pass", "detail": "'Qwen/Qwen3.5-9B-AWQ' found in /v1/models"},
+    {"check": "vLLM chat completions",    "status": "pass", "detail": "Inference working — HTTP 200 with valid response"},
+    {"check": "OpenClaw container",       "status": "pass", "detail": "'democlaw-openclaw' is running"},
+    {"check": "OpenClaw dashboard reachable", "status": "pass", "detail": "HTTP 200 at http://localhost:18789"},
+    {"check": "OpenClaw dashboard content",  "status": "pass", "detail": "HTML content verified (42381 bytes)"}
+  ]
+}
+```
+
+The top-level `"status"` field is `"pass"` (all checks passed), `"warn"` (warnings only), or `"fail"` (at least one failure).
+
+#### Exit codes
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | All checks passed **or** only warnings (HEALTHY / DEGRADED) |
+| `1` | One or more checks failed (UNHEALTHY) |
+| `1` | Runtime not found — script cannot proceed |
+
+#### Environment variables
+
+All defaults can be overridden via environment variables or a `.env` file:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CONTAINER_RUNTIME` | *(auto-detect)* | Force `docker` or `podman` |
+| `VLLM_HOST_PORT` | `8000` | Host port for vLLM API |
+| `OPENCLAW_HOST_PORT` | `18789` | Host port for OpenClaw dashboard |
+| `VLLM_CONTAINER_NAME` | `democlaw-vllm` | Name of the vLLM container |
+| `OPENCLAW_CONTAINER_NAME` | `democlaw-openclaw` | Name of the OpenClaw container |
+| `DEMOCLAW_NETWORK` | `democlaw-net` | Name of the shared container network |
+| `MODEL_NAME` | `Qwen/Qwen3.5-9B-AWQ` | Expected model ID in `/v1/models` |
+| `HEALTHCHECK_CURL_TIMEOUT` | `10` | Per-request curl timeout in seconds |
+
+---
+
+### `scripts/healthcheck_openclaw.sh` — Poll until OpenClaw is ready
+
+A focused polling script that repeatedly checks the OpenClaw dashboard URL until it responds with HTTP 200 or the timeout expires. Used internally by `scripts/start-openclaw.sh` after the container starts.
+
+#### Usage
+
+```bash
+# Poll with defaults (120 s timeout, 3 s interval)
+./scripts/healthcheck_openclaw.sh
+
+# Custom timeout and interval
+OPENCLAW_HEALTH_TIMEOUT=60 OPENCLAW_HEALTH_INTERVAL=5 ./scripts/healthcheck_openclaw.sh
+
+# Custom port
+OPENCLAW_HOST_PORT=18790 ./scripts/healthcheck_openclaw.sh
+```
+
+#### Expected output — Dashboard becomes ready
+
+```
+[healthcheck-openclaw] Polling OpenClaw dashboard at http://localhost:18789
+[healthcheck-openclaw]   Timeout   : 120s
+[healthcheck-openclaw]   Interval  : 3s
+[healthcheck-openclaw]   Per-request curl timeout: 5s
+[healthcheck-openclaw]   ... HTTP 000 — not ready yet (0s elapsed, 120s remaining)
+[healthcheck-openclaw]   ... HTTP 000 — not ready yet (3s elapsed, 117s remaining)
+[healthcheck-openclaw]   ... HTTP 200 — not ready yet (6s elapsed, ...)
+
+[healthcheck-openclaw] =============================================
+[healthcheck-openclaw]   OpenClaw dashboard is reachable!
+[healthcheck-openclaw]   URL  : http://localhost:18789
+[healthcheck-openclaw]   HTTP : 200
+[healthcheck-openclaw] =============================================
+```
+
+Exit code: **`0`**
+
+#### Expected output — Timeout exceeded
+
+```
+[healthcheck-openclaw] Polling OpenClaw dashboard at http://localhost:18789
+[healthcheck-openclaw]   Timeout   : 120s
+[healthcheck-openclaw]   Interval  : 3s
+[healthcheck-openclaw]   Per-request curl timeout: 5s
+[healthcheck-openclaw]   ... HTTP 000 — not ready yet (0s elapsed, 120s remaining)
+...
+[healthcheck-openclaw] WARNING:
+[healthcheck-openclaw] WARNING: OpenClaw dashboard did not respond with HTTP 200 within 120s.
+[healthcheck-openclaw] WARNING:   URL          : http://localhost:18789
+[healthcheck-openclaw] WARNING:   Last HTTP    : 000
+[healthcheck-openclaw] WARNING:
+[healthcheck-openclaw] WARNING: Possible causes:
+[healthcheck-openclaw] WARNING:   - The OpenClaw container is not running. Start it with:
+[healthcheck-openclaw] WARNING:       ./scripts/start-openclaw.sh
+[healthcheck-openclaw] WARNING:   - The container is still initialising. Increase OPENCLAW_HEALTH_TIMEOUT and retry.
+[healthcheck-openclaw] WARNING:   - The vLLM server is not reachable; OpenClaw may be waiting for it.
+[healthcheck-openclaw] WARNING:   - Port 18789 is blocked by a firewall or in use by another process.
+```
+
+Exit code: **`1`**
+
+#### Exit codes
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | Dashboard responded HTTP 200 within the timeout |
+| `1` | Timeout exceeded without a successful response |
+| `1` | `curl` is not found in `PATH` |
+
+#### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENCLAW_HOST_PORT` | `18789` | Port the OpenClaw dashboard is published on |
+| `OPENCLAW_HEALTH_TIMEOUT` | `120` | Total seconds to wait before giving up |
+| `OPENCLAW_HEALTH_INTERVAL` | `3` | Seconds between polling attempts |
+| `OPENCLAW_HEALTH_CURL_TIMEOUT` | `5` | Per-request curl timeout in seconds |
+
+---
+
+### In-container healthchecks
+
+Each container image bundles its own lightweight healthcheck script that the Docker/Podman `HEALTHCHECK` instruction calls at regular intervals (every 30 s by default). These run **inside** the container and are not meant to be invoked manually, but understanding them helps interpret `docker ps` / `podman ps` health status.
+
+#### `vllm/healthcheck.sh`
+
+Executed inside `democlaw-vllm`. Verifies:
+
+1. `GET /health` responds with HTTP 200 (liveness)
+2. `GET /v1/models` returns valid JSON with at least one loaded model
+
+```
+# Healthy — exits 0 (silent on success)
+
+# Unhealthy — message written to stderr, exits 1:
+UNHEALTHY: /health endpoint not responding
+UNHEALTHY: /v1/models endpoint not responding
+UNHEALTHY: /v1/models returned no models
+```
+
+View the current health status reported by the runtime:
+
+```bash
+docker inspect --format '{{.State.Health.Status}}' democlaw-vllm
+# → healthy  |  starting  |  unhealthy
+
+podman inspect --format '{{.State.Health.Status}}' democlaw-vllm
+```
+
+#### `openclaw/healthcheck.sh`
+
+Executed inside `democlaw-openclaw`. Verifies:
+
+1. The dashboard HTTP endpoint responds with a 2xx status code
+2. The response body contains non-empty HTML content
+
+```
+# Healthy — exits 0 (silent on success)
+
+# Unhealthy — message written to stderr, exits 1:
+UNHEALTHY: Dashboard not responding at http://localhost:18789/
+UNHEALTHY: Dashboard returned HTTP 503
+UNHEALTHY: Dashboard returned empty body
+UNHEALTHY: Dashboard response does not contain expected content
+```
+
+View the current health status:
+
+```bash
+docker inspect --format '{{.State.Health.Status}}' democlaw-openclaw
+# → healthy  |  starting  |  unhealthy
+```
+
+---
+
+### Interpreting healthcheck results
+
+| Container health status | Meaning | Action |
+|-------------------------|---------|--------|
+| `healthy` | All in-container checks pass | ✅ No action needed |
+| `starting` | Checks are still running (normal on first launch while model loads) | ⏳ Wait and retry |
+| `unhealthy` | At least one check failed | ❌ Check container logs |
+| `none` | No `HEALTHCHECK` configured or not supported by the runtime | — |
+
+Quick reference commands:
+
+```bash
+# Inspect both container health states at once
+docker inspect --format '{{.Name}}: {{.State.Health.Status}}' democlaw-vllm democlaw-openclaw
+
+# Full host-side health report (all checks + API endpoints)
+./scripts/healthcheck.sh
+
+# vLLM only (faster, useful during model loading)
+./scripts/healthcheck.sh --vllm-only
+
+# Machine-readable JSON (for CI or monitoring)
+./scripts/healthcheck.sh --json
+
+# Watch container states loop (Ctrl+C to stop)
+watch -n 5 'docker ps --filter "name=democlaw" --format "table {{.Names}}\t{{.Status}}"'
+```
+
+---
+
 ## vLLM OpenAI-Compatible API
 
 The vLLM server exposes a fully OpenAI-compatible REST API on **port 8000** (host default).  Any client that works with the OpenAI API — including the official Python/JS SDKs, `curl`, LangChain, LlamaIndex, and OpenClaw — can use it without modification by pointing at `http://localhost:8000/v1`.
+
+> **Full API reference:** [`docs/vllm-api.md`](docs/vllm-api.md) — base URLs, all endpoints, curl/Python/JS examples, authentication, and troubleshooting.
 
 ### Endpoints
 
@@ -781,28 +1327,36 @@ podman run --rm --device nvidia.com/gpu=all nvidia/cuda:12.0-base nvidia-smi  # 
 ```
 democlaw/
 ├── scripts/
-│   ├── start.sh              # Main orchestration script
-│   ├── start-vllm.sh         # Launch vLLM container
-│   ├── start-openclaw.sh     # Launch OpenClaw container
-│   ├── stop.sh               # Stop and remove containers
-│   ├── healthcheck.sh        # Verify both services are healthy
-│   ├── validate-api.sh       # Validate vLLM OpenAI-compatible API endpoints
+│   ├── start.sh                 # Main orchestration script (vLLM + OpenClaw)
+│   ├── start-vllm.sh            # Launch vLLM container (GPU validation, model pull, health wait)
+│   ├── start-openclaw.sh        # Launch OpenClaw container (with health wait)
+│   ├── stop.sh                  # Stop and remove all containers
+│   ├── healthcheck.sh           # Verify both services are healthy
+│   ├── healthcheck_vllm.sh      # Healthcheck for the vLLM service only
+│   ├── healthcheck_openclaw.sh  # Healthcheck for the OpenClaw service only
+│   ├── validate-api.sh          # Validate vLLM OpenAI-compatible API endpoints
+│   ├── check-gpu.sh             # Standalone NVIDIA GPU/CUDA preflight validation
+│   ├── run_vllm.sh              # Raw vLLM container launch (no health wait)
 │   └── lib/
-│       ├── runtime.sh        # Docker/Podman auto-detection library
-│       └── gpu.sh            # NVIDIA GPU/CUDA validation library
+│       ├── runtime.sh           # Docker/Podman auto-detection library
+│       └── gpu.sh               # NVIDIA GPU/CUDA validation library
 ├── vllm/
-│   ├── Dockerfile            # vLLM server image
-│   └── healthcheck.sh        # In-container healthcheck
+│   ├── Dockerfile               # vLLM server image (based on vllm/vllm-openai)
+│   ├── entrypoint.sh            # Container entrypoint with model arguments
+│   └── healthcheck.sh           # In-container healthcheck
 ├── openclaw/
-│   ├── Dockerfile            # OpenClaw image (Ubuntu 24.04 + Node.js)
-│   ├── entrypoint.sh         # Runtime config + vLLM wait logic
-│   ├── healthcheck.sh        # In-container healthcheck
-│   ├── config.json           # LLM provider config template
+│   ├── Dockerfile               # OpenClaw image (Ubuntu 24.04 + Node.js 20)
+│   ├── entrypoint.sh            # Runtime config + vLLM wait logic
+│   ├── healthcheck.sh           # In-container healthcheck
+│   ├── config.json              # LLM provider config template
 │   └── .dockerignore
-├── .env.example              # Configurable parameters template
-├── Makefile                  # Common operations shortcuts
-├── LICENSE                   # Project license
-└── README.md                 # This file
+├── .github/
+│   └── workflows/
+│       └── ci-shellcheck.yml    # CI: shellcheck linting (no GPU runner)
+├── .env.example                 # Configurable parameters template
+├── Makefile                     # Common operations shortcuts
+├── LICENSE                      # Project license
+└── README.md                    # This file
 ```
 
 ## License

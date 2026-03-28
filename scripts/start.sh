@@ -110,26 +110,39 @@ wait "${VLLM_PID}" || VLLM_EXIT=$?
 wait "${OPENCLAW_PID}" || OPENCLAW_EXIT=$?
 
 # ---------------------------------------------------------------------------
-# Phase 3: OpenClaw healthcheck — verify dashboard is reachable after start
+# Phase 3: Comprehensive healthcheck — verify both services end-to-end
 # ---------------------------------------------------------------------------
 log ""
-log "--- Phase 3: OpenClaw healthcheck ---"
+log "--- Phase 3: Comprehensive healthcheck ---"
 
 HEALTHCHECK_EXIT=0
-if [ "${OPENCLAW_EXIT}" -eq 0 ]; then
-    # Use a short timeout since start-openclaw.sh already waited for the
-    # dashboard; this is a final confirmation pass with a clear status line.
-    OPENCLAW_HEALTH_TIMEOUT="${OPENCLAW_HEALTH_TIMEOUT:-30}" \
-        bash "${SCRIPT_DIR}/healthcheck_openclaw.sh" || HEALTHCHECK_EXIT=$?
+
+if [ "${VLLM_EXIT}" -ne 0 ] || [ "${OPENCLAW_EXIT}" -ne 0 ]; then
+    # One or more containers failed to start — skip healthcheck and report.
+    HEALTHCHECK_EXIT=1
+    log "HEALTHCHECK SKIP: One or more containers failed to start."
+    [ "${VLLM_EXIT}"    -ne 0 ] && log "  vLLM exit code    : ${VLLM_EXIT}"
+    [ "${OPENCLAW_EXIT}" -ne 0 ] && log "  OpenClaw exit code: ${OPENCLAW_EXIT}"
+else
+    # Both containers started — run the comprehensive healthcheck.
+    # scripts/healthcheck.sh verifies:
+    #   - Container runtime availability
+    #   - Shared container network presence
+    #   - vLLM container running state and Docker HEALTHCHECK status
+    #   - vLLM /health endpoint (HTTP 200)
+    #   - vLLM /v1/models endpoint (valid JSON, expected model listed)
+    #   - vLLM /v1/chat/completions (end-to-end inference test)
+    #   - OpenClaw container running state
+    #   - OpenClaw dashboard (HTTP 2xx + HTML content check)
+    log "Both containers started; running comprehensive healthcheck ..."
+    bash "${SCRIPT_DIR}/healthcheck.sh" || HEALTHCHECK_EXIT=$?
 
     if [ "${HEALTHCHECK_EXIT}" -eq 0 ]; then
-        log "HEALTHCHECK PASS: OpenClaw dashboard is reachable at http://localhost:${OPENCLAW_HOST_PORT:-18789}"
+        log "HEALTHCHECK PASS: All services are healthy."
     else
-        log "HEALTHCHECK FAIL: OpenClaw dashboard did not respond within the timeout."
+        log "HEALTHCHECK FAIL: One or more checks did not pass. See report above for details."
+        log "  Re-run at any time with:  ./scripts/healthcheck.sh"
     fi
-else
-    HEALTHCHECK_EXIT=1
-    log "HEALTHCHECK FAIL: OpenClaw container did not start (exit code ${OPENCLAW_EXIT}); skipping dashboard poll."
 fi
 
 log ""
@@ -144,7 +157,7 @@ if [ "${VLLM_EXIT}" -eq 0 ] && [ "${OPENCLAW_EXIT}" -eq 0 ] && [ "${HEALTHCHECK_
 else
     [ "${VLLM_EXIT}" -ne 0 ]      && warn "vLLM start script exited with code ${VLLM_EXIT}"
     [ "${OPENCLAW_EXIT}" -ne 0 ]  && warn "OpenClaw start script exited with code ${OPENCLAW_EXIT}"
-    [ "${HEALTHCHECK_EXIT}" -ne 0 ] && warn "OpenClaw healthcheck exited with code ${HEALTHCHECK_EXIT}"
+    [ "${HEALTHCHECK_EXIT}" -ne 0 ] && warn "Comprehensive healthcheck exited with code ${HEALTHCHECK_EXIT}"
     log "========================================================"
     exit 1
 fi
