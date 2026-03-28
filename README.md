@@ -1,6 +1,6 @@
 # DemoClaw
 
-Shell-script orchestration for running [OpenClaw](https://github.com/openclaw) AI assistant with a self-hosted [vLLM](https://github.com/vllm-project/vllm) backend serving **Qwen2.5-7B AWQ 4-bit** on NVIDIA GPUs — no docker-compose required.
+Shell-script orchestration for running [OpenClaw](https://github.com/openclaw) AI assistant with a self-hosted [vLLM](https://github.com/vllm-project/vllm) backend serving **Qwen3-4B AWQ 4-bit** on NVIDIA GPUs — no docker-compose required.
 
 ## Overview
 
@@ -8,7 +8,7 @@ DemoClaw launches two containers on a shared network:
 
 | Container | Purpose | Host Port |
 |-----------|---------|-----------|
-| **vLLM** | Serves Qwen2.5-7B AWQ 4-bit via an OpenAI-compatible API | `localhost:8000` |
+| **vLLM** | Serves Qwen3-4B AWQ 4-bit via an OpenAI-compatible API | `localhost:8000` |
 | **OpenClaw** | AI assistant web dashboard connected to vLLM | `localhost:18789` |
 
 Both **Docker** and **Podman** are supported — the scripts auto-detect whichever runtime is available.
@@ -243,7 +243,7 @@ Open `.env` in your editor and review the settings. The defaults work out-of-the
 | Variable | Default | When to change |
 |----------|---------|----------------|
 | `CONTAINER_RUNTIME` | *(auto-detect)* | Set to `docker` or `podman` to force a specific runtime |
-| `MODEL_NAME` | `Qwen/Qwen2.5-7B-Instruct-AWQ` | Change only if you want a different AWQ 4-bit model |
+| `MODEL_NAME` | `Qwen/Qwen3-4B-AWQ` | Change only if you want a different AWQ 4-bit model |
 | `VLLM_HOST_PORT` | `8000` | Change if port 8000 is already in use on your machine |
 | `OPENCLAW_HOST_PORT` | `18789` | Change if port 18789 is already in use on your machine |
 | `MAX_MODEL_LEN` | `8192` | Reduce (e.g. `4096`) to lower VRAM usage |
@@ -308,7 +308,7 @@ This script checks (in order):
 | 3 | NVIDIA GPU | At least one physical GPU detected |
 | 4 | NVIDIA driver | Version ≥ 520 (exposes CUDA 11.8 driver API) |
 | 5 | CUDA version | ≥ 11.8, required by vLLM |
-| 6 | GPU VRAM | ≥ 7500 MiB (~7.3 GB) for Qwen2.5-7B AWQ 4-bit |
+| 6 | GPU VRAM | ≥ 7500 MiB (~7.3 GB) for Qwen3-4B AWQ 4-bit |
 | 7 | Container toolkit | `nvidia-container-toolkit` configured for detected runtime |
 
 **Expected output when all checks pass:**
@@ -395,7 +395,7 @@ CONTAINER_RUNTIME=docker ./scripts/start.sh
 What happens:
 1. The script detects Docker and validates your NVIDIA GPU/CUDA drivers.
 2. Both container images (`democlaw/vllm:latest` and `democlaw/openclaw:latest`) are built from the local Dockerfiles (first run only; subsequent runs reuse cached images).
-3. The vLLM server starts and downloads the Qwen2.5-7B AWQ 4-bit model weights from HuggingFace (~5 GB on first run; cached afterwards).
+3. The vLLM server starts and downloads the Qwen3-4B AWQ 4-bit model weights from HuggingFace (~5 GB on first run; cached afterwards).
 4. Once the vLLM `/health` endpoint responds, the OpenClaw container starts and connects to it.
 5. A final healthcheck confirms the OpenClaw dashboard is reachable.
 
@@ -462,10 +462,10 @@ CONTAINER_RUNTIME=podman ./scripts/start-vllm.sh
 |-------|--------|
 | 1 | Validates Linux host OS, container runtime, and NVIDIA GPU/CUDA drivers |
 | 2 | Builds `democlaw/vllm:latest` from `vllm/Dockerfile` (skipped if image exists) |
-| 3 | Downloads Qwen2.5-7B AWQ 4-bit weights from HuggingFace (~5 GB, first run only) |
+| 3 | Downloads Qwen3-4B AWQ 4-bit weights from HuggingFace (~5 GB, first run only) |
 | 4 | Starts the `democlaw-vllm` container on `democlaw-net` with GPU passthrough |
 | 5 | Polls `GET /health` every 5 s until the server responds (timeout: 300 s) |
-| 6 | Confirms `Qwen/Qwen2.5-7B-Instruct-AWQ` appears in `GET /v1/models`, then exits |
+| 6 | Confirms `Qwen/Qwen3-4B-AWQ` appears in `GET /v1/models`, then exits |
 
 **Expected output when the model is loaded and the server is healthy:**
 
@@ -475,10 +475,10 @@ CONTAINER_RUNTIME=podman ./scripts/start-vllm.sh
 [start-vllm]   ... waiting for /health (10/300s)
 ...
 [start-vllm] /health endpoint is responding.
-[start-vllm] Phase 2/2: Verifying /v1/models endpoint lists 'Qwen/Qwen2.5-7B-Instruct-AWQ' ...
+[start-vllm] Phase 2/2: Verifying /v1/models endpoint lists 'Qwen/Qwen3-4B-AWQ' ...
 [start-vllm] /v1/models responded successfully.
-[start-vllm]   Available models: Qwen/Qwen2.5-7B-Instruct-AWQ
-[start-vllm] Expected model 'Qwen/Qwen2.5-7B-Instruct-AWQ' confirmed.
+[start-vllm]   Available models: Qwen/Qwen3-4B-AWQ
+[start-vllm] Expected model 'Qwen/Qwen3-4B-AWQ' confirmed.
 [start-vllm]
 [start-vllm] vLLM server is healthy and ready to serve requests.
 [start-vllm]   API endpoint: http://localhost:8000/v1
@@ -492,7 +492,7 @@ CONTAINER_RUNTIME=podman ./scripts/start-vllm.sh
 # Liveness check — expects HTTP 200 (empty body)
 curl -sf http://localhost:8000/health && echo "vLLM is up"
 
-# List loaded models — confirm Qwen/Qwen2.5-7B-Instruct-AWQ appears
+# List loaded models — confirm Qwen/Qwen3-4B-AWQ appears
 curl http://localhost:8000/v1/models | python3 -m json.tool
 ```
 
@@ -552,7 +552,7 @@ CONTAINER_RUNTIME=podman ./scripts/start-openclaw.sh
 [start-openclaw]   Network    : democlaw-net (alias: openclaw)
 [start-openclaw]   Dashboard  : localhost:18789 -> container:18789
 [start-openclaw]   vLLM URL   : http://vllm:8000/v1
-[start-openclaw]   Model      : Qwen/Qwen2.5-7B-Instruct-AWQ
+[start-openclaw]   Model      : Qwen/Qwen3-4B-AWQ
 [start-openclaw] =======================================================
 [start-openclaw] Container 'democlaw-openclaw' started successfully.
 [start-openclaw] Waiting for OpenClaw dashboard at http://localhost:18789 (timeout: 120s) ...
@@ -609,7 +609,7 @@ make health
   ✓ vLLM /health endpoint — HTTP 200
 ▶ Checking vLLM /v1/models endpoint ...
   ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
-  ✓ vLLM model loaded — 'Qwen/Qwen2.5-7B-Instruct-AWQ' found in /v1/models
+  ✓ vLLM model loaded — 'Qwen/Qwen3-4B-AWQ' found in /v1/models
 ▶ Checking vLLM /v1/chat/completions (inference test) ...
   ✓ vLLM chat completions — Inference working — HTTP 200 with valid response
 ▶ Checking OpenClaw service ...
@@ -827,7 +827,7 @@ Expected output when everything is healthy:
   ✓ vLLM /health endpoint — HTTP 200
 ▶ Checking vLLM /v1/models endpoint ...
   ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
-  ✓ vLLM model loaded — 'Qwen/Qwen2.5-7B-Instruct-AWQ' found in /v1/models
+  ✓ vLLM model loaded — 'Qwen/Qwen3-4B-AWQ' found in /v1/models
 ▶ Checking vLLM /v1/chat/completions (inference test) ...
   ✓ vLLM chat completions — Inference working — HTTP 200 with valid response
 ▶ Checking OpenClaw service ...
@@ -1005,7 +1005,7 @@ make health-check
 | 4 | vLLM container health | Docker/Podman `HEALTHCHECK` status (`healthy` / `starting` / `unhealthy`) |
 | 5 | `GET /health` | vLLM liveness endpoint — expects HTTP 200 |
 | 6 | `GET /v1/models` | OpenAI-compatible models list — expects HTTP 200 with ≥ 1 model |
-| 7 | Model loaded | Verifies `Qwen/Qwen2.5-7B-Instruct-AWQ` appears in `/v1/models` response |
+| 7 | Model loaded | Verifies `Qwen/Qwen3-4B-AWQ` appears in `/v1/models` response |
 | 8 | `POST /v1/chat/completions` | End-to-end inference smoke test — expects HTTP 200 with valid response |
 | 9 | OpenClaw container state | Container must be in `running` state |
 | 10 | OpenClaw dashboard | HTTP 2xx at `http://localhost:18789` with non-empty HTML content |
@@ -1032,7 +1032,7 @@ When all services are running and the model has finished loading:
   ✓ vLLM /health endpoint — HTTP 200
 ▶ Checking vLLM /v1/models endpoint ...
   ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
-  ✓ vLLM model loaded — 'Qwen/Qwen2.5-7B-Instruct-AWQ' found in /v1/models
+  ✓ vLLM model loaded — 'Qwen/Qwen3-4B-AWQ' found in /v1/models
 ▶ Checking vLLM /v1/chat/completions (inference test) ...
   ✓ vLLM chat completions — Inference working — HTTP 200 with valid response
 ▶ Checking OpenClaw service ...
@@ -1068,7 +1068,7 @@ A `DEGRADED` result occurs when no checks outright fail but one or more produce 
   ✓ vLLM /health endpoint — HTTP 200
 ▶ Checking vLLM /v1/models endpoint ...
   ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
-  ⚠ vLLM model loaded — 'Qwen/Qwen2.5-7B-Instruct-AWQ' not found; available: my-other-model
+  ⚠ vLLM model loaded — 'Qwen/Qwen3-4B-AWQ' not found; available: my-other-model
 ...
 
 --------------------------------------
@@ -1130,7 +1130,7 @@ Example JSON output (healthy):
     {"check": "vLLM container health",    "status": "pass", "detail": "Docker HEALTHCHECK reports healthy"},
     {"check": "vLLM /health endpoint",    "status": "pass", "detail": "HTTP 200"},
     {"check": "vLLM /v1/models endpoint", "status": "pass", "detail": "HTTP 200 — 1 model(s) available"},
-    {"check": "vLLM model loaded",        "status": "pass", "detail": "'Qwen/Qwen2.5-7B-Instruct-AWQ' found in /v1/models"},
+    {"check": "vLLM model loaded",        "status": "pass", "detail": "'Qwen/Qwen3-4B-AWQ' found in /v1/models"},
     {"check": "vLLM chat completions",    "status": "pass", "detail": "Inference working — HTTP 200 with valid response"},
     {"check": "OpenClaw container",       "status": "pass", "detail": "'democlaw-openclaw' is running"},
     {"check": "OpenClaw dashboard reachable", "status": "pass", "detail": "HTTP 200 at http://localhost:18789"},
@@ -1161,7 +1161,7 @@ All defaults can be overridden via environment variables or a `.env` file:
 | `VLLM_CONTAINER_NAME` | `democlaw-vllm` | Name of the vLLM container |
 | `OPENCLAW_CONTAINER_NAME` | `democlaw-openclaw` | Name of the OpenClaw container |
 | `DEMOCLAW_NETWORK` | `democlaw-net` | Name of the shared container network |
-| `MODEL_NAME` | `Qwen/Qwen2.5-7B-Instruct-AWQ` | Expected model ID in `/v1/models` |
+| `MODEL_NAME` | `Qwen/Qwen3-4B-AWQ` | Expected model ID in `/v1/models` |
 | `HEALTHCHECK_CURL_TIMEOUT` | `10` | Per-request curl timeout in seconds |
 
 ---
@@ -1378,7 +1378,7 @@ Expected response shape:
   "object": "list",
   "data": [
     {
-      "id": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+      "id": "Qwen/Qwen3-4B-AWQ",
       "object": "model",
       "created": 1700000000,
       "owned_by": "vllm"
@@ -1393,7 +1393,7 @@ Expected response shape:
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+    "model": "Qwen/Qwen3-4B-AWQ",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user",   "content": "What is the capital of France?"}
@@ -1410,7 +1410,7 @@ Expected response shape:
   "id": "chatcmpl-...",
   "object": "chat.completion",
   "created": 1700000000,
-  "model": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+  "model": "Qwen/Qwen3-4B-AWQ",
   "choices": [
     {
       "index": 0,
@@ -1437,7 +1437,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="Qwen/Qwen2.5-7B-Instruct-AWQ",
+    model="Qwen/Qwen3-4B-AWQ",
     messages=[
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user",   "content": "Explain vLLM in one sentence."},
@@ -1456,7 +1456,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY")
 
 with client.chat.completions.create(
-    model="Qwen/Qwen2.5-7B-Instruct-AWQ",
+    model="Qwen/Qwen3-4B-AWQ",
     messages=[{"role": "user", "content": "Count to 5."}],
     max_tokens=64,
     stream=True,
@@ -1544,7 +1544,7 @@ Variables are grouped by the component they configure. All variables are **optio
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MODEL_NAME` | `Qwen/Qwen2.5-7B-Instruct-AWQ` | HuggingFace model repository ID. Must be an AWQ 4-bit quantized model to stay within the 8 GB VRAM budget. |
+| `MODEL_NAME` | `Qwen/Qwen3-4B-AWQ` | HuggingFace model repository ID. Must be an AWQ 4-bit quantized model to stay within the 8 GB VRAM budget. |
 | `QUANTIZATION` | `awq` | Quantization method passed to vLLM (`--quantization`). Must match the model format. |
 | `DTYPE` | `float16` | Weight data type (`--dtype`). `float16` is required for AWQ models on most consumer GPUs. |
 | `MAX_MODEL_LEN` | `8192` | Maximum context window in tokens (`--max-model-len`). Reduce (e.g. `4096`) to lower VRAM usage. |
@@ -1587,7 +1587,7 @@ These variables configure how OpenClaw connects to the vLLM backend. Three paral
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VLLM_BASE_URL` | `http://vllm:8000/v1` | Base URL of the vLLM OpenAI-compatible API. Uses the container hostname `vllm` which resolves inside the `democlaw-net` network. Change only if you rename the vLLM container or use a non-default port. |
-| `VLLM_MODEL_NAME` | `Qwen/Qwen2.5-7B-Instruct-AWQ` | Model ID that OpenClaw sends in API requests. Must exactly match `MODEL_NAME` as returned by `/v1/models`. |
+| `VLLM_MODEL_NAME` | `Qwen/Qwen3-4B-AWQ` | Model ID that OpenClaw sends in API requests. Must exactly match `MODEL_NAME` as returned by `/v1/models`. |
 | `VLLM_API_KEY` | `EMPTY` | Placeholder API key passed to OpenClaw. vLLM accepts any non-empty value in no-auth mode; set to your real secret if `VLLM_API_KEY` on the server side is a real key. |
 | `VLLM_MAX_TOKENS` | `4096` | Maximum tokens per LLM response requested by OpenClaw. |
 | `VLLM_TEMPERATURE` | `0.7` | Sampling temperature (0.0 = deterministic, 1.0+ = more random). |
@@ -1763,7 +1763,7 @@ See [`.env.example`](.env.example) for the complete annotated template with ever
 │  ┌────────────────┐       ┌────────────────────────┐ │
 │  │  vLLM Server   │       │  OpenClaw              │ │
 │  │                │       │                        │ │
-│  │  Qwen2.5-7B    │◄──────│  Web Dashboard         │ │
+│  │  Qwen3-4B    │◄──────│  Web Dashboard         │ │
 │  │  AWQ 4-bit     │ HTTP  │  (Node.js)             │ │
 │  │                │       │                        │ │
 │  │  :8000/v1      │       │  :18789                │ │
@@ -1780,7 +1780,7 @@ See [`.env.example`](.env.example) for the complete annotated template with ever
 
 **vLLM container** (`democlaw-vllm`):
 - Base image: `vllm/vllm-openai:v0.8.3`
-- Serves the Qwen2.5-7B AWQ 4-bit model
+- Serves the Qwen3-4B AWQ 4-bit model
 - OpenAI-compatible API at `/v1/chat/completions`, `/v1/models`, etc.
 - GPU passthrough via `--gpus all` (Docker) or CDI (Podman)
 - Built-in healthcheck on `/health` and `/v1/models`
@@ -1842,13 +1842,13 @@ The vLLM server exposes three endpoints you can probe directly:
 # 1. Liveness probe — expects HTTP 200 with an empty body
 curl -sf http://localhost:8000/health && echo "vLLM OK"
 
-# 2. List loaded models — confirm Qwen/Qwen2.5-7B-Instruct-AWQ appears
+# 2. List loaded models — confirm Qwen/Qwen3-4B-AWQ appears
 curl -s http://localhost:8000/v1/models | python3 -m json.tool
 
 # 3. End-to-end inference smoke test
 curl -s http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model":"Qwen/Qwen2.5-7B-Instruct-AWQ","messages":[{"role":"user","content":"Hi"}],"max_tokens":16}' \
+  -d '{"model":"Qwen/Qwen3-4B-AWQ","messages":[{"role":"user","content":"Hi"}],"max_tokens":16}' \
   | python3 -m json.tool
 
 # 4. Check the in-container HEALTHCHECK status
@@ -1863,7 +1863,7 @@ make logs-vllm
 
 The server is fully ready when:
 - `curl .../health` returns `HTTP 200`
-- `/v1/models` lists `Qwen/Qwen2.5-7B-Instruct-AWQ`
+- `/v1/models` lists `Qwen/Qwen3-4B-AWQ`
 - The container logs contain `INFO: Application startup complete.`
 
 #### Verify the OpenClaw dashboard is healthy
@@ -1944,7 +1944,7 @@ Driver ≥ 520 reports CUDA ≥ 11.8. Driver ≥ 535 reports CUDA ≥ 12.2.
 
 #### `ERROR: Insufficient GPU VRAM: 6144 MiB detected, but 7500 MiB required`
 
-The Qwen2.5-7B AWQ 4-bit model needs ~5–6 GB VRAM for weights plus overhead. A GPU with < 8 GB VRAM will likely fail.
+The Qwen3-4B AWQ 4-bit model needs ~5–6 GB VRAM for weights plus overhead. A GPU with < 8 GB VRAM will likely fail.
 
 Options:
 1. **Use a GPU with ≥ 8 GB VRAM** — RTX 3070, RTX 3080, RTX 4060 Ti, RTX 4080, A10, L40S, etc.
@@ -2271,7 +2271,7 @@ democlaw/
 | Project | Description | Links |
 |---------|-------------|-------|
 | **vLLM** | High-throughput LLM inference engine with OpenAI-compatible API | [GitHub](https://github.com/vllm-project/vllm) · [Docs](https://docs.vllm.ai) · [Docker Hub](https://hub.docker.com/r/vllm/vllm-openai) |
-| **Qwen2.5-7B-AWQ** | Alibaba's Qwen 2.5 series 7B model, AWQ 4-bit quantised for 8 GB VRAM | [HuggingFace](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ) · [Qwen GitHub](https://github.com/QwenLM/Qwen2.5) · [Model card](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ) |
+| **Qwen3-4B-AWQ** | Alibaba's Qwen 2.5 series 7B model, AWQ 4-bit quantised for 8 GB VRAM | [HuggingFace](https://huggingface.co/Qwen/Qwen3-4B-AWQ) · [Qwen GitHub](https://github.com/QwenLM/Qwen3) · [Model card](https://huggingface.co/Qwen/Qwen3-4B-AWQ) |
 | **OpenClaw** | Open-source AI assistant web dashboard | [GitHub](https://github.com/openclaw/openclaw) |
 | **NVIDIA Container Toolkit** | GPU passthrough for Docker and Podman | [GitHub](https://github.com/NVIDIA/nvidia-container-toolkit) · [Install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) |
 | **NVIDIA CDI** | Container Device Interface spec for Podman GPU passthrough | [CDI spec](https://github.com/cncf-tags/container-device-interface) · [nvidia-ctk cdi docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html) |
@@ -2285,12 +2285,12 @@ democlaw/
 - Docker Hub: <https://hub.docker.com/r/vllm/vllm-openai>
 - Supported models list: <https://docs.vllm.ai/en/latest/models/supported_models.html>
 
-### Qwen / Qwen2.5-7B-AWQ
+### Qwen / Qwen3-4B-AWQ
 
-[Qwen](https://github.com/QwenLM/Qwen2.5) is Alibaba Cloud's open-source large language model family. The **Qwen2.5-7B-AWQ** variant is a 7-billion-parameter model quantised to 4-bit using the [AWQ (Activation-aware Weight Quantization)](https://arxiv.org/abs/2306.00978) method, reducing the on-GPU memory footprint from ~14 GB (fp16) to ~5 GB while preserving most of the model quality.
+[Qwen](https://github.com/QwenLM/Qwen3) is Alibaba Cloud's open-source large language model family. The **Qwen3-4B-AWQ** variant is a 4-billion-parameter model quantised to 4-bit using the [AWQ (Activation-aware Weight Quantization)](https://arxiv.org/abs/2306.00978) method, reducing the on-GPU memory footprint from ~14 GB (fp16) to ~5 GB while preserving most of the model quality.
 
-- Model card: <https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ>
-- Qwen GitHub: <https://github.com/QwenLM/Qwen2.5>
+- Model card: <https://huggingface.co/Qwen/Qwen3-4B-AWQ>
+- Qwen GitHub: <https://github.com/QwenLM/Qwen3>
 - Qwen Blog: <https://qwenlm.github.io>
 - AWQ paper: <https://arxiv.org/abs/2306.00978>
 
@@ -2311,7 +2311,7 @@ The [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-container-toolki
 ### Further reading
 
 - [OpenAI API Reference](https://platform.openai.com/docs/api-reference) — the API contract that vLLM's `/v1/` endpoints implement
-- [AWQ: Activation-aware Weight Quantization](https://arxiv.org/abs/2306.00978) — the quantisation technique used by `Qwen2.5-7B-AWQ`
+- [AWQ: Activation-aware Weight Quantization](https://arxiv.org/abs/2306.00978) — the quantisation technique used by `Qwen3-4B-AWQ`
 - [PagedAttention paper](https://arxiv.org/abs/2309.06180) — the memory-management technique behind vLLM's efficiency
 - [HuggingFace model hub](https://huggingface.co/models?pipeline_tag=text-generation&sort=downloads) — browse other AWQ-quantised models compatible with vLLM
 

@@ -1,6 +1,6 @@
 # =============================================================================
 # vLLM Server Dockerfile
-# Serves Qwen/Qwen2.5-7B-Instruct-AWQ (AWQ 4-bit quantized) on NVIDIA GPU
+# Serves Qwen/Qwen3-4B-AWQ (AWQ 4-bit quantized) on NVIDIA GPU
 #
 # Base image: vllm/vllm-openai — official vLLM CUDA image (CUDA 12.x / Python 3.11)
 # Includes: vLLM inference engine, autoawq, triton, torch, flash-attn, etc.
@@ -12,7 +12,7 @@
 #
 # Build arguments (all overridable via --build-arg):
 #   VLLM_BASE_VERSION   — vLLM base image tag          (default: v0.8.3)
-#   MODEL_NAME          — default HuggingFace model ID  (default: Qwen/Qwen2.5-7B-Instruct-AWQ)
+#   MODEL_NAME          — default HuggingFace model ID  (default: Qwen/Qwen3-4B-AWQ)
 #   MAX_MODEL_LEN       — default context length        (default: 8192)
 #   QUANTIZATION        — default quantization backend  (default: awq)
 #   DTYPE               — default computation dtype     (default: float16)
@@ -25,8 +25,8 @@
 # Build-time arguments — all have safe defaults for direct docker/podman build
 # ---------------------------------------------------------------------------
 ARG VLLM_BASE_VERSION=v0.8.3
-ARG MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ
-ARG MAX_MODEL_LEN=8192
+ARG MODEL_NAME=Qwen/Qwen3-4B-AWQ
+ARG MAX_MODEL_LEN=4096
 ARG QUANTIZATION=awq
 ARG DTYPE=float16
 ARG VERSION=dev
@@ -45,9 +45,9 @@ ARG BUILD_DATE
 ARG GIT_COMMIT
 
 LABEL maintainer="democlaw"
-LABEL description="vLLM OpenAI-compatible server for Qwen2.5-7B AWQ 4-bit"
+LABEL description="vLLM OpenAI-compatible server for Qwen3-4B AWQ 4-bit"
 LABEL org.opencontainers.image.title="democlaw-vllm"
-LABEL org.opencontainers.image.description="Serves Qwen/Qwen2.5-7B-Instruct-AWQ via the vLLM OpenAI-compatible API"
+LABEL org.opencontainers.image.description="Serves Qwen/Qwen3-4B-AWQ via the vLLM OpenAI-compatible API"
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
@@ -87,7 +87,7 @@ ENV MODEL_NAME="${MODEL_NAME}" \
     VLLM_HOST="0.0.0.0" \
     VLLM_PORT="8000" \
     MAX_MODEL_LEN="${MAX_MODEL_LEN}" \
-    GPU_MEMORY_UTILIZATION="0.90" \
+    GPU_MEMORY_UTILIZATION="0.95" \
     QUANTIZATION="${QUANTIZATION}" \
     DTYPE="${DTYPE}" \
     HF_TOKEN="" \

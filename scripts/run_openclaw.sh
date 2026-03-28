@@ -32,7 +32,7 @@
 #   VLLM_BASE_URL             OpenAI-compatible endpoint inside the shared network
 #                             (default: http://vllm:8000/v1)
 #   VLLM_API_KEY              API key passed to OpenClaw (default: EMPTY)
-#   VLLM_MODEL_NAME           Model ID for OpenClaw to request (default: Qwen/Qwen2.5-7B-Instruct-AWQ)
+#   VLLM_MODEL_NAME           Model ID for OpenClaw to request (default: Qwen/Qwen3-4B-AWQ)
 #   VLLM_MAX_TOKENS           Max response tokens            (default: 4096)
 #   VLLM_TEMPERATURE          Sampling temperature           (default: 0.7)
 #   VLLM_HEALTH_RETRIES       Max attempts to reach vLLM     (default: 60)
@@ -115,7 +115,7 @@ fi
 # that container-to-container traffic stays on the shared bridge network.
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm:8000/v1}"
 VLLM_API_KEY="${VLLM_API_KEY:-EMPTY}"
-VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
 VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-4096}"
 VLLM_TEMPERATURE="${VLLM_TEMPERATURE:-0.7}"
 
@@ -554,7 +554,7 @@ warn "  OpenClaw logs : ${RUNTIME} logs -f ${CONTAINER_NAME}"
 warn "  vLLM logs     : ${RUNTIME} logs -f ${VLLM_CONTAINER_NAME}"
 warn "============================================="
 warn ""
-warn "The Qwen2.5-7B AWQ model can take several minutes to load on first run."
+warn "The Qwen3-4B AWQ model can take several minutes to load on first run."
 warn "Re-check the dashboard in a few minutes, or increase OPENCLAW_HEALTH_TIMEOUT:"
 warn "  OPENCLAW_HEALTH_TIMEOUT=300 ./scripts/run_openclaw.sh"
 warn ""

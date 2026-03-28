@@ -44,12 +44,12 @@ if exist "%ENV_FILE%" (
 if not defined VLLM_CONTAINER_NAME   set "VLLM_CONTAINER_NAME=democlaw-vllm"
 if not defined DEMOCLAW_NETWORK      set "DEMOCLAW_NETWORK=democlaw-net"
 if not defined VLLM_IMAGE_TAG        set "VLLM_IMAGE_TAG=democlaw/vllm:latest"
-if not defined MODEL_NAME            set "MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ"
+if not defined MODEL_NAME            set "MODEL_NAME=Qwen/Qwen3-4B-AWQ"
 if not defined VLLM_HOST             set "VLLM_HOST=0.0.0.0"
 if not defined VLLM_PORT             set "VLLM_PORT=8000"
 if not defined VLLM_HOST_PORT        set "VLLM_HOST_PORT=8000"
-if not defined MAX_MODEL_LEN         set "MAX_MODEL_LEN=8192"
-if not defined GPU_MEMORY_UTILIZATION set "GPU_MEMORY_UTILIZATION=0.90"
+if not defined MAX_MODEL_LEN         set "MAX_MODEL_LEN=4096"
+if not defined GPU_MEMORY_UTILIZATION set "GPU_MEMORY_UTILIZATION=0.95"
 if not defined QUANTIZATION          set "QUANTIZATION=awq"
 if not defined DTYPE                 set "DTYPE=float16"
 if not defined SKIP_MODEL_PULL       set "SKIP_MODEL_PULL=false"
@@ -302,7 +302,7 @@ if not defined VRAM_MIB (
 echo [start-vllm] Detected GPU VRAM: %VRAM_MIB% MiB
 if %VRAM_MIB% lss 7500 (
     echo [start-vllm] ERROR: Insufficient GPU VRAM: %VRAM_MIB% MiB detected, 7500 MiB required.
-    echo [start-vllm]   Qwen2.5-7B AWQ 4-bit requires ~8 GB VRAM.
+    echo [start-vllm]   Qwen3-4B AWQ 4-bit requires ~8 GB VRAM.
     exit /b 1
 )
 exit /b 0

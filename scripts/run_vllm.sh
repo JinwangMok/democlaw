@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # run_vllm.sh — Launch the vLLM container with NVIDIA GPU passthrough serving
-#               Qwen2.5-7B AWQ 4-bit via an OpenAI-compatible API.
+#               Qwen3-4B AWQ 4-bit via an OpenAI-compatible API.
 #
 # Supports both docker and podman on Linux hosts.
 # Requires: NVIDIA GPU with >= 8 GB VRAM, nvidia-container-toolkit installed.
@@ -12,14 +12,14 @@
 #   3. Validate NVIDIA GPU / CUDA prerequisites — exits with clear error if absent
 #   4. Create shared container network if it does not already exist
 #   5. Build the vLLM image if not already present
-#   6. Pre-pull Qwen2.5-7B AWQ 4-bit model weights from HuggingFace
+#   6. Pre-pull Qwen3-4B AWQ 4-bit model weights from HuggingFace
 #        • Uses huggingface-cli on the host if available (preferred)
 #        • Falls back to a temporary vLLM container if CLI not found
 #        • Idempotent: skips download if weights already cached locally
 #        • Set SKIP_MODEL_PULL=true to bypass entirely
 #   7. Launch the vLLM container with:
 #        • NVIDIA GPU passthrough (--gpus all / --device nvidia.com/gpu=all)
-#        • Qwen/Qwen2.5-7B-Instruct-AWQ model (AWQ 4-bit quantization)
+#        • Qwen/Qwen3-4B-AWQ model (AWQ 4-bit quantization)
 #        • OpenAI-compatible API server bound to a configurable host port
 #
 # Usage:
@@ -27,11 +27,11 @@
 #   VLLM_HOST_PORT=9000 ./scripts/run_vllm.sh        # expose API on host port 9000
 #   CONTAINER_RUNTIME=podman ./scripts/run_vllm.sh   # force podman
 #   SKIP_MODEL_PULL=true ./scripts/run_vllm.sh       # skip model download (cached)
-#   MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ ./scripts/run_vllm.sh
+#   MODEL_NAME=Qwen/Qwen3-4B-AWQ ./scripts/run_vllm.sh
 #
 # Key environment variables (all have sensible defaults):
 #   CONTAINER_RUNTIME       docker | podman  (auto-detected if unset)
-#   MODEL_NAME              HuggingFace model ID          (default: Qwen/Qwen2.5-7B-Instruct-AWQ)
+#   MODEL_NAME              HuggingFace model ID          (default: Qwen/Qwen3-4B-AWQ)
 #   QUANTIZATION            vLLM quantization method      (default: awq)
 #   DTYPE                   Weight data type              (default: float16)
 #   MAX_MODEL_LEN           Context window size (tokens)  (default: 8192)
@@ -83,8 +83,8 @@ fi
 # ---------------------------------------------------------------------------
 
 # --- Model ---
-# Qwen2.5-7B AWQ 4-bit — the only model variant that fits in 8 GB VRAM.
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+# Qwen3-4B AWQ 4-bit — the only model variant that fits in 8 GB VRAM.
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
 QUANTIZATION="${QUANTIZATION:-awq}"
 DTYPE="${DTYPE:-float16}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
@@ -214,7 +214,7 @@ fi
 # Step 5: Build the vLLM image if not already present
 #
 # The Dockerfile is located at <project_root>/vllm/Dockerfile and extends
-# vllm/vllm-openai with the Qwen2.5-7B AWQ entrypoint and healthcheck.
+# vllm/vllm-openai with the Qwen3-4B AWQ entrypoint and healthcheck.
 # ---------------------------------------------------------------------------
 if ! "${RUNTIME}" image inspect "${IMAGE_TAG}" > /dev/null 2>&1; then
     log "Image '${IMAGE_TAG}' not found — building from ${PROJECT_ROOT}/vllm ..."
@@ -228,7 +228,7 @@ fi
 mkdir -p "${HF_CACHE_DIR}"
 
 # ---------------------------------------------------------------------------
-# Step 6: Pre-pull Qwen2.5-7B AWQ 4-bit model weights from HuggingFace
+# Step 6: Pre-pull Qwen3-4B AWQ 4-bit model weights from HuggingFace
 #
 # Two-strategy approach (first succeeds wins):
 #   1. huggingface-cli on the host    — preferred; no extra container needed
@@ -247,7 +247,7 @@ pull_model_weights() {
     fi
 
     log "======================================================="
-    log "  Step: Pull Qwen2.5-7B AWQ 4-bit model weights"
+    log "  Step: Pull Qwen3-4B AWQ 4-bit model weights"
     log "  Model     : ${MODEL_NAME}"
     log "  Cache dir : ${HF_CACHE_DIR}"
     log "======================================================="
@@ -356,7 +356,7 @@ GPU_FLAGS=$(runtime_gpu_flags)
 #   --shm-size 1g               Shared memory for PyTorch tensor operations
 #   -p ${VLLM_HOST_PORT}:...    Publish API port on the Linux host
 #   -v ${HF_CACHE_DIR}:...      Bind-mount HuggingFace model cache
-#   -e MODEL_NAME               Qwen/Qwen2.5-7B-Instruct-AWQ — AWQ 4-bit model ID
+#   -e MODEL_NAME               Qwen/Qwen3-4B-AWQ — AWQ 4-bit model ID
 #   -e QUANTIZATION             awq — activates vLLM AWQ 4-bit kernel path
 #   -e VLLM_HOST                Bind address inside the container (0.0.0.0)
 #   -e VLLM_PORT                Container-internal API server port

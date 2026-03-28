@@ -80,7 +80,7 @@ OPENCLAW_BASE_IMAGE ?= ubuntu:24.04
 # ---------------------------------------------------------------------------
 # Model and port configuration (mirrors .env.example defaults)
 # ---------------------------------------------------------------------------
-MODEL_NAME             ?= Qwen/Qwen2.5-7B-Instruct-AWQ
+MODEL_NAME             ?= Qwen/Qwen3-4B-AWQ
 VLLM_PORT              ?= 8000
 VLLM_HOST_PORT         ?= 8000
 OPENCLAW_PORT          ?= 18789
@@ -91,7 +91,7 @@ QUANTIZATION           ?= awq
 DTYPE                  ?= float16
 VLLM_BASE_URL          ?= http://vllm:8000/v1
 VLLM_API_KEY           ?= EMPTY
-VLLM_MODEL_NAME        ?= Qwen/Qwen2.5-7B-Instruct-AWQ
+VLLM_MODEL_NAME        ?= Qwen/Qwen3-4B-AWQ
 HF_CACHE_DIR           ?= $(HOME)/.cache/huggingface
 HF_TOKEN               ?=
 
@@ -280,7 +280,7 @@ build-vllm: _require-runtime
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		--label "org.opencontainers.image.title=democlaw-vllm" \
-		--label "org.opencontainers.image.description=vLLM OpenAI-compatible server for Qwen2.5-7B AWQ 4-bit" \
+		--label "org.opencontainers.image.description=vLLM OpenAI-compatible server for Qwen3-4B AWQ 4-bit" \
 		--label "org.opencontainers.image.version=$(VERSION)" \
 		--label "org.opencontainers.image.created=$(BUILD_DATE)" \
 		--label "org.opencontainers.image.revision=$(GIT_COMMIT)" \

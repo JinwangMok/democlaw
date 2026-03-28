@@ -335,7 +335,7 @@ jobs:
           python3 - <<'PYEOF' &
           import http.server, json, os
 
-          MODEL = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-AWQ")
+          MODEL = os.environ.get("MODEL_NAME", "Qwen/Qwen3-4B-AWQ")
 
           class Handler(http.server.BaseHTTPRequestHandler):
               def log_message(self, fmt, *args):
@@ -565,7 +565,7 @@ jobs:
           python3 - <<'PYEOF' &
           import http.server, json, os
 
-          MODEL = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-AWQ")
+          MODEL = os.environ.get("MODEL_NAME", "Qwen/Qwen3-4B-AWQ")
 
           class Handler(http.server.BaseHTTPRequestHandler):
               def log_message(self, fmt, *args):
@@ -627,7 +627,7 @@ jobs:
       - name: Run validate-api.sh — full test (expect exit 0)
         env:
           VLLM_BASE_URL: "http://localhost:8000"
-          MODEL_NAME: "Qwen/Qwen2.5-7B-Instruct-AWQ"
+          MODEL_NAME: "Qwen/Qwen3-4B-AWQ"
           CURL_TIMEOUT: "10"
           INFERENCE_TIMEOUT: "15"
           SKIP_INFERENCE_TEST: "false"
@@ -642,7 +642,7 @@ jobs:
       - name: Run validate-api.sh — skip-inference mode (expect exit 0)
         env:
           VLLM_BASE_URL: "http://localhost:8000"
-          MODEL_NAME: "Qwen/Qwen2.5-7B-Instruct-AWQ"
+          MODEL_NAME: "Qwen/Qwen3-4B-AWQ"
           CURL_TIMEOUT: "10"
           SKIP_INFERENCE_TEST: "true"
         run: |

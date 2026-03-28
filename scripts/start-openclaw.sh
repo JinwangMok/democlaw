@@ -40,7 +40,7 @@ OPENCLAW_HOST_PORT="${OPENCLAW_HOST_PORT:-18789}"
 #
 #   VLLM_MODEL_NAME : Model ID that OpenClaw sends in every API request.
 #                     Must match the model served by vLLM.
-#                     Default: Qwen/Qwen2.5-7B-Instruct-AWQ  (AWQ 4-bit, 8 GB VRAM)
+#                     Default: Qwen/Qwen3-4B-AWQ  (AWQ 4-bit, 8 GB VRAM)
 #
 #   VLLM_API_KEY    : Placeholder API key.  vLLM accepts any non-empty value
 #                     by default; use "EMPTY" as the conventional placeholder.
@@ -61,7 +61,7 @@ OPENCLAW_HOST_PORT="${OPENCLAW_HOST_PORT:-18789}"
 # ---------------------------------------------------------------------------
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm:8000/v1}"
 VLLM_API_KEY="${VLLM_API_KEY:-EMPTY}"
-VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
 VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-4096}"
 VLLM_TEMPERATURE="${VLLM_TEMPERATURE:-0.7}"
 

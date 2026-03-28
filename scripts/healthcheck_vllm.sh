@@ -28,7 +28,7 @@
 #                               When set (default), exit 0 only when this exact
 #                               model ID is listed.  Set to empty ("") to
 #                               accept any model.
-#                               Default: Qwen/Qwen2.5-7B-Instruct-AWQ
+#                               Default: Qwen/Qwen3-4B-AWQ
 #
 #   VLLM_HEALTH_TIMEOUT         Maximum total seconds to wait before giving up.
 #                               Default: 600  (model loading can take minutes)
@@ -47,7 +47,7 @@
 # Usage:
 #   ./scripts/healthcheck_vllm.sh
 #   VLLM_HOST_PORT=8001 ./scripts/healthcheck_vllm.sh
-#   MODEL_NAME=Qwen/Qwen2.5-7B-Instruct-AWQ VLLM_HEALTH_TIMEOUT=900 ./scripts/healthcheck_vllm.sh
+#   MODEL_NAME=Qwen/Qwen3-4B-AWQ VLLM_HEALTH_TIMEOUT=900 ./scripts/healthcheck_vllm.sh
 #   MODEL_NAME="" ./scripts/healthcheck_vllm.sh   # accept any loaded model
 # =============================================================================
 set -euo pipefail
@@ -74,7 +74,7 @@ fi
 # ---------------------------------------------------------------------------
 VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://localhost:${VLLM_HOST_PORT}}"
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
 
 # Model loading on an 8 GB GPU can take 3-8 minutes; default to 10 minutes.
 VLLM_HEALTH_TIMEOUT="${VLLM_HEALTH_TIMEOUT:-600}"
@@ -292,7 +292,7 @@ warn "       ./scripts/start-vllm.sh"
 warn "  2. Model weights are still downloading or loading into GPU memory."
 warn "     First-time runs can take several minutes. Increase the timeout:"
 warn "       VLLM_HEALTH_TIMEOUT=900 ./scripts/healthcheck_vllm.sh"
-warn "  3. Insufficient VRAM. Qwen2.5-7B-AWQ requires ≥8 GB GPU VRAM."
+warn "  3. Insufficient VRAM. Qwen3-4B-AWQ requires ≥8 GB GPU VRAM."
 warn "     Check GPU memory usage: nvidia-smi"
 warn "  4. The container crashed or OOM-killed. Check container logs:"
 warn "       docker logs democlaw-vllm --tail 50"

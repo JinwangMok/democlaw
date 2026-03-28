@@ -46,12 +46,12 @@ if ! declare -f _gpu_error > /dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# Minimum VRAM required for Qwen2.5-7B AWQ 4-bit (in MiB)
+# Minimum VRAM required for Qwen3-4B AWQ 4-bit (in MiB)
 # ---------------------------------------------------------------------------
 DEFAULT_MIN_VRAM_MIB=7500
 
 # ---------------------------------------------------------------------------
-# Minimum NVIDIA driver and CUDA versions required by vLLM + Qwen2.5-7B AWQ
+# Minimum NVIDIA driver and CUDA versions required by vLLM + Qwen3-4B AWQ
 #
 # CUDA 11.8 requires NVIDIA driver >= 520.61.05 on Linux.
 # vLLM >= 0.3.x officially requires CUDA >= 11.8.
@@ -150,7 +150,7 @@ check_gpu_hardware() {
     sudo nvidia-smi -r               # Attempt driver reset
 
   This stack requires a physical NVIDIA CUDA GPU to run vLLM with
-  Qwen2.5-7B AWQ 4-bit quantisation. There is no CPU fallback.
+  Qwen3-4B AWQ 4-bit quantisation. There is no CPU fallback.
 "
     fi
 
@@ -256,7 +256,7 @@ check_cuda_driver() {
         _gpu_error "CUDA version ${cuda_ver} is too old.
 
   Minimum required CUDA version: ${min_cuda}
-  vLLM requires CUDA >= ${min_cuda} to run Qwen2.5-7B AWQ 4-bit.
+  vLLM requires CUDA >= ${min_cuda} to run Qwen3-4B AWQ 4-bit.
 
   Your current driver (${driver_ver}) only supports CUDA ${cuda_ver}.
 
@@ -303,7 +303,7 @@ check_gpu_vram() {
     if [ "${vram_mib}" -lt "${min_mib}" ]; then
         _gpu_error "Insufficient GPU VRAM: ${vram_mib} MiB detected, but ${min_mib} MiB required.
 
-  Qwen2.5-7B AWQ 4-bit requires approximately 8 GB (8192 MiB) of VRAM.
+  Qwen3-4B AWQ 4-bit requires approximately 8 GB (8192 MiB) of VRAM.
 
   Options:
     - Use a GPU with at least 8 GB VRAM
