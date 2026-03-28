@@ -1,0 +1,226 @@
+name: Healthcheck Logic
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "vllm/healthcheck.sh"
+      - "scripts/healthcheck.sh"
+      - ".github/workflows/ci-healthcheck.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "vllm/healthcheck.sh"
+      - "scripts/healthcheck.sh"
+      - ".github/workflows/ci-healthcheck.yml"
+
+permissions:
+  contents: read
+
+# ---------------------------------------------------------------------------
+# NOTE: No GPU runner is used.  All jobs test healthcheck *logic* by running
+# the scripts against a lightweight Python mock server that mimics the vLLM
+# OpenAI-compatible API.  End-to-end GPU tests are intentionally excluded.
+# ---------------------------------------------------------------------------
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Test the in-container healthcheck (vllm/healthcheck.sh) against a mock
+  # vLLM HTTP server that returns the expected /health and /v1/models responses.
+  # ---------------------------------------------------------------------------
+  vllm-healthcheck-script:
+    name: vLLM in-container healthcheck script
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make healthcheck script executable
+        run: chmod +x vllm/healthcheck.sh
+
+      # -----------------------------------------------------------------------
+      # Write mock vLLM server to a file so indentation is unambiguous in YAML.
+      # -----------------------------------------------------------------------
+      - name: Write mock vLLM server script
+        run: |
+          cat > /tmp/mock_vllm_server.py << 'PYEOF'
+          import http.server
+          import json
+          import os
+          import sys
+
+          MODEL_NAME = os.environ.get("MODEL_NAME", "Qwen/Qwen3.5-9B-AWQ")
+
+          class MockVllmHandler(http.server.BaseHTTPRequestHandler):
+              def log_message(self, fmt, *args):
+                  print(f"[mock-vllm] {fmt % args}", flush=True)
+
+              def send_json(self, code, body):
+                  payload = json.dumps(body).encode()
+                  self.send_response(code)
+                  self.send_header("Content-Type", "application/json")
+                  self.send_header("Content-Length", str(len(payload)))
+                  self.end_headers()
+                  self.wfile.write(payload)
+
+              def do_GET(self):
+                  if self.path == "/health":
+                      self.send_json(200, {})
+                  elif self.path == "/v1/models":
+                      self.send_json(200, {
+                          "object": "list",
+                          "data": [
+                              {
+                                  "id": MODEL_NAME,
+                                  "object": "model",
+                                  "created": 1700000000,
+                                  "owned_by": "vllm"
+                              }
+                          ]
+                      })
+                  else:
+                      self.send_response(404)
+                      self.end_headers()
+
+          server = http.server.HTTPServer(("127.0.0.1", 8000), MockVllmHandler)
+          print(f"[mock-vllm] Listening on port 8000 (model={MODEL_NAME})", flush=True)
+          server.serve_forever()
+          PYEOF
+          echo "Mock server script written to /tmp/mock_vllm_server.py"
+
+      # -----------------------------------------------------------------------
+      # Start mock vLLM server (happy path)
+      # -----------------------------------------------------------------------
+      - name: Start mock vLLM server
+        run: |
+          python3 /tmp/mock_vllm_server.py &
+          echo $! > /tmp/mock_vllm.pid
+          echo "Mock vLLM server started with PID $(cat /tmp/mock_vllm.pid)"
+
+      - name: Wait for mock vLLM server to be ready
+        run: |
+          for i in $(seq 1 15); do
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "Mock vLLM server is ready."
+              break
+            fi
+            echo "Waiting for mock server... attempt $i/15"
+            sleep 1
+          done
+          curl -sf http://localhost:8000/health > /dev/null || {
+            echo "ERROR: Mock vLLM server did not start in time."
+            exit 1
+          }
+
+      # -----------------------------------------------------------------------
+      # Happy path: script must exit 0 (healthy) when /v1/models returns model
+      # -----------------------------------------------------------------------
+      - name: Test healthcheck — happy path (expect exit 0)
+        env:
+          VLLM_PORT: "8000"
+        run: |
+          echo "=== Running vllm/healthcheck.sh against mock server ==="
+          ./vllm/healthcheck.sh
+          echo "=== healthcheck.sh exited 0 — PASS ==="
+
+      # -----------------------------------------------------------------------
+      # Verify /v1/models endpoint directly (belt-and-suspenders)
+      # -----------------------------------------------------------------------
+      - name: Verify /v1/models response format
+        run: |
+          echo "=== Checking /v1/models response ==="
+          response=$(curl -sf http://localhost:8000/v1/models)
+          echo "Response: $response"
+
+          # Must have HTTP 200 and "data" array with at least one entry
+          model_count=$(echo "$response" | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          print(len(data.get('data', [])))
+          ")
+          echo "Model count: $model_count"
+
+          if [ "$model_count" -lt 1 ]; then
+            echo "ERROR: /v1/models returned no models"
+            exit 1
+          fi
+          echo "✓ /v1/models returned $model_count model(s) — PASS"
+
+      # -----------------------------------------------------------------------
+      # Failure path: script must exit 1 when no server is running
+      # -----------------------------------------------------------------------
+      - name: Stop mock vLLM server
+        run: |
+          if [ -f /tmp/mock_vllm.pid ]; then
+            kill "$(cat /tmp/mock_vllm.pid)" 2>/dev/null || true
+            rm -f /tmp/mock_vllm.pid
+            echo "Mock vLLM server stopped."
+          fi
+
+      - name: Test healthcheck — failure path (expect exit 1)
+        env:
+          VLLM_PORT: "8000"
+        run: |
+          echo "=== Running vllm/healthcheck.sh with no server running ==="
+          if ./vllm/healthcheck.sh 2>/dev/null; then
+            echo "ERROR: healthcheck.sh exited 0 but no server was running — FAIL"
+            exit 1
+          else
+            echo "✓ healthcheck.sh correctly exited non-zero — PASS"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Validate the Dockerfile HEALTHCHECK instruction is correctly wired to the
+  # healthcheck script (static analysis — no container runtime required).
+  # ---------------------------------------------------------------------------
+  vllm-dockerfile-healthcheck:
+    name: vLLM Dockerfile HEALTHCHECK wired correctly
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify HEALTHCHECK directive exists in Dockerfile
+        run: |
+          echo "=== Checking vllm/Dockerfile for HEALTHCHECK directive ==="
+          if grep -q "^HEALTHCHECK" vllm/Dockerfile; then
+            echo "✓ HEALTHCHECK directive found in vllm/Dockerfile"
+          else
+            echo "✗ No HEALTHCHECK directive in vllm/Dockerfile"
+            exit 1
+          fi
+
+      - name: Verify HEALTHCHECK references the healthcheck script
+        run: |
+          if grep -q "healthcheck.sh" vllm/Dockerfile; then
+            echo "✓ Dockerfile HEALTHCHECK references healthcheck.sh"
+          else
+            echo "✗ Dockerfile HEALTHCHECK does not reference healthcheck.sh"
+            exit 1
+          fi
+
+      - name: Verify healthcheck script is copied into image
+        run: |
+          if grep -q "^COPY healthcheck.sh" vllm/Dockerfile; then
+            echo "✓ healthcheck.sh is COPY'd into the image"
+          else
+            echo "✗ healthcheck.sh is NOT copied into the image via COPY instruction"
+            exit 1
+          fi
+
+      - name: Verify healthcheck script checks /v1/models
+        run: |
+          if grep -q "/v1/models" vllm/healthcheck.sh; then
+            echo "✓ vllm/healthcheck.sh verifies /v1/models endpoint"
+          else
+            echo "✗ vllm/healthcheck.sh does not check /v1/models"
+            exit 1
+          fi
+
+      - name: Print HEALTHCHECK configuration
+        run: |
+          echo "=== HEALTHCHECK configuration in vllm/Dockerfile ==="
+          grep "HEALTHCHECK" vllm/Dockerfile
+          echo ""
+          echo "=== vllm/healthcheck.sh ==="
+          cat vllm/healthcheck.sh

@@ -12,6 +12,7 @@
 #   make restart        # Stop then start the full stack
 #   make clean          # Stop containers, remove images and network
 #   make status         # Run healthcheck on all services
+#   make validate-api   # Validate vLLM OpenAI-compatible API endpoints
 #   make logs           # Tail logs from both containers
 #
 # Individual service targets:
@@ -52,6 +53,42 @@ VLLM_IMAGE_TAG         ?= democlaw/vllm:latest
 OPENCLAW_IMAGE_TAG     ?= democlaw/openclaw:latest
 DEMOCLAW_NETWORK       ?= democlaw-net
 
+# ---------------------------------------------------------------------------
+# Model and port configuration (mirrors .env.example defaults)
+# ---------------------------------------------------------------------------
+MODEL_NAME             ?= Qwen/Qwen3.5-9B-AWQ
+VLLM_PORT              ?= 8000
+VLLM_HOST_PORT         ?= 8000
+OPENCLAW_PORT          ?= 18789
+OPENCLAW_HOST_PORT     ?= 18789
+MAX_MODEL_LEN          ?= 8192
+GPU_MEMORY_UTILIZATION ?= 0.90
+QUANTIZATION           ?= awq
+DTYPE                  ?= float16
+VLLM_BASE_URL          ?= http://vllm:8000/v1
+VLLM_API_KEY           ?= EMPTY
+VLLM_MODEL_NAME        ?= Qwen/Qwen3.5-9B-AWQ
+HF_CACHE_DIR           ?= $(HOME)/.cache/huggingface
+HF_TOKEN               ?=
+
+# ---------------------------------------------------------------------------
+# GPU passthrough flags
+# docker uses --gpus all (nvidia-container-toolkit OCI hook).
+# podman 4+ uses CDI: --device nvidia.com/gpu=all
+# podman <4 falls back to raw device nodes.
+# ---------------------------------------------------------------------------
+GPU_FLAGS ?= $(shell \
+	if [ "$(CONTAINER_RUNTIME)" = "podman" ]; then \
+		pv=$$($(CONTAINER_RUNTIME) --version 2>/dev/null | grep -oE '[0-9]+' | head -1); \
+		if [ "$${pv:-0}" -ge 4 ] 2>/dev/null; then \
+			echo "--device nvidia.com/gpu=all"; \
+		else \
+			echo "--device /dev/nvidia0 --device /dev/nvidiactl --device /dev/nvidia-uvm"; \
+		fi; \
+	else \
+		echo "--gpus all"; \
+	fi)
+
 # Export so shell scripts inherit these values
 export CONTAINER_RUNTIME
 export VLLM_CONTAINER_NAME
@@ -59,18 +96,37 @@ export OPENCLAW_CONTAINER_NAME
 export VLLM_IMAGE_TAG
 export OPENCLAW_IMAGE_TAG
 export DEMOCLAW_NETWORK
+export MODEL_NAME
+export VLLM_PORT
+export VLLM_HOST_PORT
+export OPENCLAW_PORT
+export OPENCLAW_HOST_PORT
+export MAX_MODEL_LEN
+export GPU_MEMORY_UTILIZATION
+export QUANTIZATION
+export DTYPE
+export VLLM_BASE_URL
+export VLLM_API_KEY
+export VLLM_MODEL_NAME
+export HF_CACHE_DIR
+export HF_TOKEN
+export GPU_FLAGS
 
 # =============================================================================
 # Composite targets
 # =============================================================================
 
-.PHONY: build start stop restart clean status logs help \
-       health-check ps follow follow-vllm follow-openclaw \
+.PHONY: build build-all start stop restart clean status logs help \
+       health-check validate-api ps follow follow-vllm follow-openclaw \
        shell-vllm shell-openclaw inspect-vllm inspect-openclaw \
-       top-vllm top-openclaw env-check
+       top-vllm top-openclaw env-check \
+       run-vllm run-openclaw start-all stop-vllm stop-openclaw stop-all
 
 ## build: Build both vLLM and OpenClaw container images
 build: build-vllm build-openclaw
+
+## build-all: Alias for build — build both vLLM and OpenClaw container images
+build-all: build-vllm build-openclaw
 
 ## start: Start the full DemoClaw stack (vLLM + OpenClaw)
 start:
@@ -79,6 +135,12 @@ start:
 ## stop: Stop and remove all DemoClaw containers
 stop:
 	@bash "$(SCRIPTS_DIR)/stop.sh"
+
+## start-all: Start the full DemoClaw stack (vLLM then OpenClaw, with validation and health checks)
+start-all: start-vllm start-openclaw
+
+## stop-all: Stop and remove all DemoClaw containers (OpenClaw first, then vLLM)
+stop-all: stop-openclaw stop-vllm
 
 ## restart: Stop then start the full stack
 restart: stop start
@@ -107,7 +169,8 @@ logs:
 # Individual service targets
 # =============================================================================
 
-.PHONY: build-vllm build-openclaw start-vllm start-openclaw logs-vllm logs-openclaw
+.PHONY: build-vllm build-openclaw start-vllm start-openclaw logs-vllm logs-openclaw \
+        run-vllm run-openclaw stop-vllm stop-openclaw
 
 ## build-vllm: Build the vLLM container image
 build-vllm:
@@ -145,6 +208,10 @@ logs-openclaw:
 
 ## health-check: Alias for 'status' — run all service healthchecks
 health-check: status
+
+## validate-api: Validate vLLM OpenAI-compatible API endpoints (/health, /v1/models, /v1/chat/completions)
+validate-api:
+	@bash "$(SCRIPTS_DIR)/validate-api.sh"
 
 ## ps: Show DemoClaw container states
 ps:
@@ -248,6 +315,7 @@ help:
 	@echo ""
 	@echo "\033[1mLifecycle:\033[0m"
 	@echo "  \033[36mbuild\033[0m              Build both container images"
+	@echo "  \033[36mbuild-all\033[0m          Alias for build — build both container images"
 	@echo "  \033[36mstart\033[0m              Start the full DemoClaw stack (vLLM + OpenClaw)"
 	@echo "  \033[36mstop\033[0m               Stop and remove all DemoClaw containers"
 	@echo "  \033[36mrestart\033[0m            Stop then start the full stack"
@@ -262,6 +330,7 @@ help:
 	@echo "\033[1mMonitoring & Logs:\033[0m"
 	@echo "  \033[36mstatus\033[0m             Run healthchecks on all services"
 	@echo "  \033[36mhealth-check\033[0m       Alias for 'status'"
+	@echo "  \033[36mvalidate-api\033[0m       Validate vLLM OpenAI-compatible API endpoints"
 	@echo "  \033[36mps\033[0m                 Show DemoClaw container states"
 	@echo "  \033[36mlogs\033[0m               Show last 20 lines from both containers"
 	@echo "  \033[36mlogs-vllm\033[0m          Show last 50 lines of vLLM logs"
@@ -282,6 +351,7 @@ help:
 	@echo "\033[1mExamples:\033[0m"
 	@echo "  make start                          # Start full stack"
 	@echo "  make start CONTAINER_RUNTIME=podman  # Force podman"
+	@echo "  make validate-api                   # Validate vLLM API endpoints"
 	@echo "  make logs-vllm                      # Quick look at vLLM logs"
 	@echo "  make follow-vllm                    # Stream vLLM logs in real time"
 	@echo "  make shell-openclaw                 # Debug inside OpenClaw container"

@@ -29,7 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---------------------------------------------------------------------------
 # Install OpenClaw globally via npm
 # ---------------------------------------------------------------------------
-RUN npm install -g openclaw
+RUN npm install -g --no-fund --no-audit openclaw \
+    && npm cache clean --force
 
 # ---------------------------------------------------------------------------
 # Create non-root user for running the application
@@ -57,7 +58,8 @@ RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh \
 #   3. Export OpenClaw-specific env vars (OPENCLAW_LLM_*)
 #   4. Wait for vLLM readiness before starting OpenClaw
 # ---------------------------------------------------------------------------
-ENV VLLM_BASE_URL="http://vllm:8000/v1" \
+ENV NODE_ENV="production" \
+    VLLM_BASE_URL="http://vllm:8000/v1" \
     VLLM_API_KEY="EMPTY" \
     VLLM_MODEL_NAME="Qwen/Qwen3.5-9B-AWQ" \
     VLLM_MAX_TOKENS=4096 \
@@ -93,4 +95,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD ["/app/healthcheck.sh"]
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["openclaw", "serve", "--port", "18789", "--host", "0.0.0.0"]
+# No default CMD args — the entrypoint resolves OPENCLAW_PORT / OPENCLAW_HOST
+# from env vars and starts OpenClaw automatically.
+# To override (e.g. for debugging):  docker run --rm -it <image> bash
+CMD []

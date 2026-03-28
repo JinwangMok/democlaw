@@ -145,37 +145,54 @@ record_warn() {
 }
 
 # ---------------------------------------------------------------------------
-# Detect container runtime
+# Source the shared runtime-detection library
+#
+# Define custom handlers before sourcing so the library uses them:
+#   - _rt_log  : silence library chatter in healthcheck output
+#   - _rt_warn : capture to stderr only
+#   - _rt_error: record error string but do NOT exit (healthcheck handles gracefully)
+#
+# _SKIP_RUNTIME_DETECT=true prevents the library from auto-running detect_runtime()
+# on source; check_runtime() below will call it explicitly.
 # ---------------------------------------------------------------------------
-detect_runtime() {
-    if [ -n "${CONTAINER_RUNTIME:-}" ]; then
-        if command -v "${CONTAINER_RUNTIME}" > /dev/null 2>&1; then
-            echo "${CONTAINER_RUNTIME}"
-            return
-        fi
-        echo ""
-        return
-    fi
-    for rt in docker podman; do
-        if command -v "${rt}" > /dev/null 2>&1; then
-            echo "${rt}"
-            return
-        fi
-    done
-    echo ""
-}
+_RUNTIME_DETECT_ERROR=""
+
+_rt_log()   { :; }  # silence info messages from the detection library
+_rt_warn()  { echo "[runtime] WARNING: $*" >&2; }
+# Override _rt_error so it records the error but does NOT call exit 1.
+# The empty-RUNTIME guard in check_runtime() handles the failure path.
+_rt_error() { _RUNTIME_DETECT_ERROR="$*"; echo "[runtime] ERROR: $*" >&2; }
+
+_SKIP_RUNTIME_DETECT=true
+# shellcheck source=lib/runtime.sh
+source "${SCRIPT_DIR}/lib/runtime.sh"
 
 # ---------------------------------------------------------------------------
 # Check: Container runtime available
+#
+# Uses the shared library's detect_runtime() which honours:
+#   1. $CONTAINER_RUNTIME env var  (explicit override)
+#   2. docker                       (if found in PATH)
+#   3. podman                       (if found in PATH)
 # ---------------------------------------------------------------------------
 check_runtime() {
     info "Checking container runtime ..."
-    RUNTIME="$(detect_runtime)"
-    if [ -z "${RUNTIME}" ]; then
-        record_fail "Container runtime" "Neither docker nor podman found in PATH"
+
+    _RUNTIME_DETECT_ERROR=""
+    RUNTIME=""
+
+    # detect_runtime sets RUNTIME / RUNTIME_IS_PODMAN globals (or records error)
+    detect_runtime 2>/dev/null || true
+
+    if [ -n "${_RUNTIME_DETECT_ERROR}" ] || [ -z "${RUNTIME:-}" ]; then
+        local detail="${_RUNTIME_DETECT_ERROR:-Neither docker nor podman found in PATH}"
+        record_fail "Container runtime" "${detail}"
         return 1
     fi
-    record_pass "Container runtime" "${RUNTIME} available"
+
+    local rt_ver
+    rt_ver=$("${RUNTIME}" --version 2>/dev/null | head -1 || echo "version unknown")
+    record_pass "Container runtime" "${RUNTIME} available (${rt_ver})"
     return 0
 }
 

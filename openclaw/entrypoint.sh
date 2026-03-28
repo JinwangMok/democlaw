@@ -120,7 +120,7 @@ fi
 # Verify the expected model is loaded on vLLM
 # ---------------------------------------------------------------------------
 echo "[openclaw-entrypoint] Verifying model '${VLLM_MODEL_NAME}' is available ..."
-MODEL_RESPONSE=$(curl -sf "${VLLM_BASE_URL}/v1/models" 2>/dev/null || echo "")
+MODEL_RESPONSE=$(curl -sf "${VLLM_BASE_URL}/models" 2>/dev/null || echo "")
 if [ -n "${MODEL_RESPONSE}" ]; then
     if echo "${MODEL_RESPONSE}" | grep -q "${VLLM_MODEL_NAME}"; then
         echo "[openclaw-entrypoint] Confirmed: model '${VLLM_MODEL_NAME}' is loaded on vLLM."
@@ -137,4 +137,14 @@ fi
 # Launch OpenClaw with config
 # ---------------------------------------------------------------------------
 echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPENCLAW_PORT}) ..."
-exec "$@"
+
+# If a custom command was supplied (CMD override or direct docker run args),
+# execute it directly — allows debugging (e.g. `docker run ... bash`).
+# Otherwise start OpenClaw using the resolved env-var values so that
+# OPENCLAW_PORT / OPENCLAW_HOST are always respected, even when overridden at
+# runtime via --env or .env, without requiring a matching CMD override.
+if [ $# -gt 0 ]; then
+    exec "$@"
+else
+    exec openclaw serve --port "${OPENCLAW_PORT}" --host "${OPENCLAW_HOST:-0.0.0.0}"
+fi

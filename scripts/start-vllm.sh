@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 # =============================================================================
-# start-vllm.sh — Launch the vLLM container serving Qwen3.5-9B AWQ 4-bit
+# start-vllm.sh — Pull the Qwen3.5-9B AWQ 4-bit model and launch the vLLM
+#                  container serving it via an OpenAI-compatible API.
 #
 # Supports both docker and podman on Linux hosts.
 # Requires: NVIDIA GPU with >= 8GB VRAM, nvidia-container-toolkit installed.
 #
+# Steps performed:
+#   1. Validate host OS, container runtime, and NVIDIA GPU/CUDA
+#   2. Build the vLLM image if not already present
+#   3. Pre-pull Qwen3.5-9B AWQ 4-bit weights from HuggingFace (skip if cached)
+#   4. Launch the vLLM server container with GPU passthrough and model config
+#   5. Wait for /health and /v1/models endpoints to confirm readiness
+#
 # Usage:
-#   ./scripts/start-vllm.sh              # auto-detect runtime
-#   CONTAINER_RUNTIME=podman ./scripts/start-vllm.sh   # force podman
+#   ./scripts/start-vllm.sh                          # auto-detect runtime
+#   CONTAINER_RUNTIME=podman ./scripts/start-vllm.sh # force podman
+#   SKIP_MODEL_PULL=true ./scripts/start-vllm.sh     # skip step 3 (model cached)
 # =============================================================================
 set -euo pipefail
 
@@ -54,6 +63,9 @@ DTYPE="${DTYPE:-float16}"
 
 # HuggingFace cache — share host cache to avoid re-downloading models
 HF_CACHE_DIR="${HF_CACHE_DIR:-${HOME}/.cache/huggingface}"
+
+# Set to "true" to skip the model pre-pull step (e.g. weights already cached)
+SKIP_MODEL_PULL="${SKIP_MODEL_PULL:-false}"
 
 # ---------------------------------------------------------------------------
 # Detect container runtime: prefer $CONTAINER_RUNTIME, then docker, then podman
@@ -144,6 +156,103 @@ build_image
 mkdir -p "${HF_CACHE_DIR}"
 
 # ---------------------------------------------------------------------------
+# pull_model_weights — Pre-download the Qwen3.5-9B AWQ 4-bit weights
+#
+# Runs a short-lived container using the built vLLM image (which already has
+# Python and huggingface_hub installed) to invoke `huggingface-cli download`.
+# The HF cache directory is bind-mounted so weights persist across runs.
+#
+# This step is idempotent: if the model snapshot is already present in the
+# cache, huggingface-cli detects the existing files and returns immediately.
+#
+# Set SKIP_MODEL_PULL=true to bypass this step entirely.
+# Set HF_TOKEN (or HUGGING_FACE_HUB_TOKEN) for gated/private models.
+# ---------------------------------------------------------------------------
+pull_model_weights() {
+    if [ "${SKIP_MODEL_PULL}" = "true" ]; then
+        log "SKIP_MODEL_PULL=true — skipping model pre-pull (assuming weights are cached)."
+        return 0
+    fi
+
+    log "======================================================="
+    log "  Step: Pull model weights from HuggingFace"
+    log "  Model      : ${MODEL_NAME}"
+    log "  Cache dir  : ${HF_CACHE_DIR}"
+    log "======================================================="
+    log "This may take several minutes on first run (~5 GB download)."
+    log "Subsequent runs will use the local cache and finish instantly."
+
+    # Build GPU flags (needed even for download container to share the image cleanly,
+    # though GPU is not strictly required just for downloading weights)
+    local gpu_flags
+    gpu_flags=$(runtime_gpu_flags)
+
+    # Compose HF_TOKEN env flags (pass only if non-empty)
+    local hf_token_flags=""
+    if [ -n "${HF_TOKEN:-}" ]; then
+        hf_token_flags="-e HF_TOKEN=${HF_TOKEN} -e HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}"
+    fi
+
+    log "Running model download container (democlaw-vllm-pull) ..."
+
+    # shellcheck disable=SC2086
+    "${RUNTIME}" run --rm \
+        --name "democlaw-vllm-pull" \
+        ${gpu_flags} \
+        --shm-size 1g \
+        -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
+        -e "HF_HUB_DISABLE_PROGRESS_BARS=0" \
+        ${hf_token_flags} \
+        "${IMAGE_TAG}" \
+        python3 -c "
+import sys, os
+# Show which cache directory is in use
+cache = os.environ.get('HF_HOME', os.path.expanduser('~/.cache/huggingface'))
+print(f'[pull] HuggingFace cache: {cache}')
+
+model_name = '${MODEL_NAME}'
+print(f'[pull] Downloading model: {model_name}')
+print('[pull] Checking local cache ...')
+
+try:
+    from huggingface_hub import snapshot_download, HfApi
+    api = HfApi()
+
+    # Check if the model is already fully cached
+    try:
+        local_path = snapshot_download(
+            repo_id=model_name,
+            local_files_only=True,
+        )
+        print(f'[pull] Model already cached at: {local_path}')
+        print('[pull] Skipping download.')
+        sys.exit(0)
+    except Exception:
+        pass  # not cached yet — proceed to download
+
+    print(f'[pull] Downloading {model_name} weights ...')
+    local_path = snapshot_download(
+        repo_id=model_name,
+        ignore_patterns=['*.pt', '*.bin'],  # prefer safetensors
+    )
+    print(f'[pull] Download complete. Weights stored at: {local_path}')
+except ImportError as e:
+    print(f'[pull] huggingface_hub not available: {e}', file=sys.stderr)
+    print('[pull] Falling back to vLLM startup download.', file=sys.stderr)
+    sys.exit(0)
+except Exception as e:
+    print(f'[pull] Download failed: {e}', file=sys.stderr)
+    print('[pull] The vLLM server will attempt to download on first start.', file=sys.stderr)
+    sys.exit(1)
+"
+
+    log "Model pre-pull step complete."
+    log "======================================================="
+}
+
+pull_model_weights
+
+# ---------------------------------------------------------------------------
 # Build GPU flags based on runtime (uses shared library helper)
 # ---------------------------------------------------------------------------
 GPU_FLAGS=$(runtime_gpu_flags)
@@ -151,6 +260,9 @@ GPU_FLAGS=$(runtime_gpu_flags)
 # ---------------------------------------------------------------------------
 # Launch the vLLM container
 # ---------------------------------------------------------------------------
+log "======================================================="
+log "  Step: Launch vLLM server container"
+log "======================================================="
 log "Starting vLLM container '${CONTAINER_NAME}' ..."
 log "  Model           : ${MODEL_NAME}"
 log "  Quantization    : ${QUANTIZATION}"
@@ -221,7 +333,7 @@ done
 
 if [ "${elapsed}" -ge "${HEALTH_TIMEOUT}" ]; then
     warn "vLLM /health did not respond within ${HEALTH_TIMEOUT}s."
-    warn "The container is still running — the model may still be downloading."
+    warn "The container is still running — the model may still be loading."
     warn "Check progress with: ${RUNTIME} logs -f ${CONTAINER_NAME}"
     exit 1
 fi

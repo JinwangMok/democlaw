@@ -109,9 +109,32 @@ OPENCLAW_EXIT=0
 wait "${VLLM_PID}" || VLLM_EXIT=$?
 wait "${OPENCLAW_PID}" || OPENCLAW_EXIT=$?
 
+# ---------------------------------------------------------------------------
+# Phase 3: OpenClaw healthcheck — verify dashboard is reachable after start
+# ---------------------------------------------------------------------------
+log ""
+log "--- Phase 3: OpenClaw healthcheck ---"
+
+HEALTHCHECK_EXIT=0
+if [ "${OPENCLAW_EXIT}" -eq 0 ]; then
+    # Use a short timeout since start-openclaw.sh already waited for the
+    # dashboard; this is a final confirmation pass with a clear status line.
+    OPENCLAW_HEALTH_TIMEOUT="${OPENCLAW_HEALTH_TIMEOUT:-30}" \
+        bash "${SCRIPT_DIR}/healthcheck_openclaw.sh" || HEALTHCHECK_EXIT=$?
+
+    if [ "${HEALTHCHECK_EXIT}" -eq 0 ]; then
+        log "HEALTHCHECK PASS: OpenClaw dashboard is reachable at http://localhost:${OPENCLAW_HOST_PORT:-18789}"
+    else
+        log "HEALTHCHECK FAIL: OpenClaw dashboard did not respond within the timeout."
+    fi
+else
+    HEALTHCHECK_EXIT=1
+    log "HEALTHCHECK FAIL: OpenClaw container did not start (exit code ${OPENCLAW_EXIT}); skipping dashboard poll."
+fi
+
 log ""
 log "========================================================"
-if [ "${VLLM_EXIT}" -eq 0 ] && [ "${OPENCLAW_EXIT}" -eq 0 ]; then
+if [ "${VLLM_EXIT}" -eq 0 ] && [ "${OPENCLAW_EXIT}" -eq 0 ] && [ "${HEALTHCHECK_EXIT}" -eq 0 ]; then
     log "  Both services started successfully!"
     log "  vLLM API     : http://localhost:${VLLM_HOST_PORT:-8000}/v1"
     log "  OpenClaw UI  : http://localhost:${OPENCLAW_HOST_PORT:-18789}"
@@ -119,8 +142,9 @@ if [ "${VLLM_EXIT}" -eq 0 ] && [ "${OPENCLAW_EXIT}" -eq 0 ]; then
     log "========================================================"
     exit 0
 else
-    [ "${VLLM_EXIT}" -ne 0 ]     && warn "vLLM start script exited with code ${VLLM_EXIT}"
-    [ "${OPENCLAW_EXIT}" -ne 0 ] && warn "OpenClaw start script exited with code ${OPENCLAW_EXIT}"
+    [ "${VLLM_EXIT}" -ne 0 ]      && warn "vLLM start script exited with code ${VLLM_EXIT}"
+    [ "${OPENCLAW_EXIT}" -ne 0 ]  && warn "OpenClaw start script exited with code ${OPENCLAW_EXIT}"
+    [ "${HEALTHCHECK_EXIT}" -ne 0 ] && warn "OpenClaw healthcheck exited with code ${HEALTHCHECK_EXIT}"
     log "========================================================"
     exit 1
 fi
