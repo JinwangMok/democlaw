@@ -2264,6 +2264,176 @@ democlaw/
 └── README.md                    # This file
 ```
 
+## 소형 모델 친화 스킬 / Small-Model-Friendly Skills
+
+DemoClaw는 소형 AI 모델(Qwen3-4B-AWQ)을 사용합니다. 이 크기의 모델은 여러 단계를 거쳐야 하는 복잡한 작업에서 자주 실패합니다. **[openclaw-simple-skills](https://github.com/JinwangMok/openclaw-simple-skills)**는 이런 소형 모델에서도 **한 번의 명령으로 안정적으로 실행**되도록 설계된 스킬 모음입니다.
+
+DemoClaw uses a small AI model (Qwen3-4B-AWQ). Models this size often fail on complex multi-step tasks. **[openclaw-simple-skills](https://github.com/JinwangMok/openclaw-simple-skills)** is a skill collection designed to run reliably in **a single command** on these small models.
+
+### 사용 가능한 스킬 / Available Skills
+
+| 스킬 | 하는 일 | Skill | Description |
+|------|---------|-------|-------------|
+| **word-count** | 파일의 줄 수, 단어 수, 글자 수를 셉니다 | **word-count** | Count lines, words, and characters |
+| **disk-usage** | 폴더가 차지하는 용량을 보여줍니다 | **disk-usage** | Show folder disk space usage |
+| **text-search** | 파일들 안에서 특정 단어를 찾습니다 | **text-search** | Find a word in files |
+| **simple-file-backup** | 파일을 날짜 붙여서 백업합니다 | **simple-file-backup** | Create a dated backup copy |
+| **simple-file-tree** | 폴더 안의 파일 목록을 트리로 보여줍니다 | **simple-file-tree** | Show folder contents as a tree |
+
+### 왜 이 스킬이 특별한가요? / Why Are These Skills Special?
+
+소형 AI 모델이 실수 없이 실행할 수 있도록, 엄격한 설계 규칙을 따릅니다:
+
+These skills follow strict design rules so small AI models can run them without mistakes:
+
+| 규칙 / Rule | 설명 / Description |
+|-------------|---------------------|
+| 한 번에 끝남 | 하나의 명령으로 완료됩니다. 여러 단계를 거치지 않습니다 / Completes in one command, no chaining |
+| 입력값 2개 이하 | 복잡한 옵션이 없습니다. 최대 2개만 입력하면 됩니다 / Max 2 inputs, no complex options |
+| 인터넷 불필요 | 네트워크 연결이나 API 키 없이 작동합니다 / Works without internet or API keys |
+| 결과가 항상 동일 | 같은 입력이면 같은 결과가 나옵니다 / Same input always gives same output |
+| 기본 도구만 사용 | Linux에 기본 설치된 `wc`, `du`, `grep`, `cp`, `find`만 사용합니다 / Uses only standard Linux tools |
+
+---
+
+### 사용 방법 A: OpenClaw 웹 대시보드에서 대화로 사용하기
+
+**가장 쉬운 방법입니다.** DemoClaw를 실행한 후 브라우저에서 AI에게 말로 요청하면 됩니다.
+
+This is the **easiest method**. After starting DemoClaw, just ask the AI in your browser.
+
+#### 1단계: 컨테이너 안에 스킬 설치하기 (최초 1회)
+
+DemoClaw를 시작한 뒤, 터미널에서 아래 명령을 실행하세요. 이 명령은 OpenClaw 컨테이너 안에 스킬 파일들을 다운로드합니다.
+
+After starting DemoClaw, run this in your terminal. It downloads the skill files into the OpenClaw container.
+
+```bash
+# Docker를 사용하는 경우 / If using Docker:
+docker exec democlaw-openclaw bash -c \
+  "cd /home/openclaw && git clone https://github.com/JinwangMok/openclaw-simple-skills.git"
+
+# Podman을 사용하는 경우 / If using Podman:
+podman exec democlaw-openclaw bash -c \
+  "cd /home/openclaw && git clone https://github.com/JinwangMok/openclaw-simple-skills.git"
+```
+
+> **참고**: `git`이 컨테이너에 없다면, 아래와 같이 설치할 수 있습니다:
+> ```bash
+> docker exec -u root democlaw-openclaw apt-get update
+> docker exec -u root democlaw-openclaw apt-get install -y git
+> ```
+
+#### 2단계: 브라우저에서 AI에게 요청하기
+
+**http://localhost:18789** 을 열고, 채팅창에 아래처럼 입력하세요:
+
+Open **http://localhost:18789** and type in the chat:
+
+| 이렇게 입력하세요 / Type this | 하는 일 / What it does |
+|------------------------------|----------------------|
+| `bash /home/openclaw/openclaw-simple-skills/word-count/run.sh /app/config/config.json` | config.json 파일의 줄 수/단어 수/글자 수를 셉니다 |
+| `bash /home/openclaw/openclaw-simple-skills/disk-usage/run.sh /home/openclaw` | 홈 디렉토리의 용량을 보여줍니다 |
+| `bash /home/openclaw/openclaw-simple-skills/text-search/run.sh "vllm" /app` | /app 폴더에서 "vllm"이라는 단어를 찾습니다 |
+| `bash /home/openclaw/openclaw-simple-skills/file-backup/run.sh /app/config/config.json` | config.json을 날짜 붙여서 백업합니다 |
+| `bash /home/openclaw/openclaw-simple-skills/file-tree/run.sh /app 2` | /app 폴더의 구조를 2단계 깊이까지 보여줍니다 |
+
+> **팁**: 자연어로도 요청할 수 있습니다. 예: *"config.json 파일이 몇 줄인지 세줘"* — 하지만 소형 모델에서는 정확한 명령어를 직접 입력하는 것이 더 확실합니다.
+>
+> **Tip**: You can also ask in natural language (e.g., *"Count lines in config.json"*), but with small models, typing the exact command is more reliable.
+
+---
+
+### 사용 방법 B: 컨테이너 터미널에서 직접 실행하기
+
+컨테이너 안에 들어가서 직접 스킬을 실행하는 방법입니다. 터미널 사용에 익숙하다면 이 방법이 더 자유롭습니다.
+
+Enter the container and run skills directly. If you're comfortable with the terminal, this gives you more control.
+
+#### 1단계: 컨테이너에 접속하기
+
+```bash
+# Docker
+docker exec -it democlaw-openclaw bash
+
+# Podman
+podman exec -it democlaw-openclaw bash
+```
+
+이제 컨테이너 안에 들어왔습니다. 프롬프트가 `openclaw@...:` 로 바뀐 것을 확인하세요.
+
+You are now inside the container. You should see the prompt change to `openclaw@...:`.
+
+#### 2단계: 스킬 다운로드하기 (최초 1회)
+
+```bash
+cd ~
+git clone https://github.com/JinwangMok/openclaw-simple-skills.git
+cd openclaw-simple-skills
+```
+
+#### 3단계: 스킬 실행해보기
+
+```bash
+# 이 파일이 몇 줄, 몇 단어인지 세기
+bash word-count/run.sh README.md
+
+# 현재 디렉토리의 용량 확인
+bash disk-usage/run.sh .
+
+# "skill"이라는 단어가 어디에 있는지 찾기
+bash text-search/run.sh "skill" .
+
+# README.md를 날짜 붙여서 백업하기
+bash file-backup/run.sh README.md
+
+# 폴더 구조를 트리로 보기
+bash file-tree/run.sh . 2
+```
+
+#### 4단계: 파일 편집이 필요할 때 (선택사항)
+
+컨테이너 안에서 파일을 만들거나 수정하고 싶다면, 기본 편집기를 설치하세요:
+
+If you want to create or edit files inside the container:
+
+```bash
+# 컨테이너 밖에서 (다른 터미널에서) 실행하세요:
+# Run this OUTSIDE the container (in another terminal):
+docker exec -u root democlaw-openclaw apt-get update
+docker exec -u root democlaw-openclaw apt-get install -y vim
+
+# 다시 컨테이너 안에서 파일 편집:
+# Then inside the container:
+vim my_notes.txt
+```
+
+#### 나올 때 / To exit
+
+```bash
+exit
+```
+
+---
+
+### ClawHub에서 설치하기 / Install from ClawHub
+
+OpenClaw의 스킬 마켓플레이스인 ClawHub에서도 설치할 수 있습니다:
+
+You can also install from ClawHub, OpenClaw's skill marketplace:
+
+```bash
+clawhub install word-count
+clawhub install disk-usage
+clawhub install text-search
+clawhub install simple-file-backup
+clawhub install simple-file-tree
+```
+
+> 각 스킬의 상세한 사용법과 한글/영어 매뉴얼은 [openclaw-simple-skills](https://github.com/JinwangMok/openclaw-simple-skills) 저장소의 각 스킬 폴더 안 `MANUAL.md`를 참고하세요.
+>
+> For detailed usage and bilingual manuals, see each skill's `MANUAL.md` in the [openclaw-simple-skills](https://github.com/JinwangMok/openclaw-simple-skills) repository.
+
 ## References
 
 ### Upstream projects
