@@ -1,17 +1,60 @@
 # =============================================================================
 # OpenClaw Container — Ubuntu 24.04 + Node.js + OpenClaw
 # Configured to use vLLM as its LLM provider via OpenAI-compatible endpoint
+#
+# Build arguments (all overridable via --build-arg):
+#   NODE_MAJOR           — Node.js major version to install (default: 20)
+#   OPENCLAW_NPM_VERSION — npm package version/tag to install (default: latest)
+#   VLLM_BASE_URL        — default vLLM backend URL   (default: http://vllm:8000/v1)
+#   VLLM_MODEL_NAME      — default model name          (default: Qwen/Qwen3.5-9B-AWQ)
+#   OPENCLAW_PORT        — port the dashboard listens on (default: 18789)
+#   VERSION              — image version label          (default: dev)
+#   BUILD_DATE           — ISO-8601 build timestamp     (default: unknown)
+#   GIT_COMMIT           — short git SHA                (default: unknown)
 # =============================================================================
+
+# ---------------------------------------------------------------------------
+# Build-time arguments — all have safe defaults for direct docker/podman build
+# ---------------------------------------------------------------------------
+ARG NODE_MAJOR=20
+ARG OPENCLAW_NPM_VERSION=latest
+ARG VLLM_BASE_URL=http://vllm:8000/v1
+ARG VLLM_MODEL_NAME=Qwen/Qwen3.5-9B-AWQ
+ARG OPENCLAW_PORT=18789
+ARG VERSION=dev
+ARG BUILD_DATE=unknown
+ARG GIT_COMMIT=unknown
+
 FROM ubuntu:24.04
+
+# Re-declare ARGs after FROM so they are visible in this build stage
+ARG NODE_MAJOR
+ARG OPENCLAW_NPM_VERSION
+ARG VLLM_BASE_URL
+ARG VLLM_MODEL_NAME
+ARG OPENCLAW_PORT
+ARG VERSION
+ARG BUILD_DATE
+ARG GIT_COMMIT
 
 LABEL maintainer="democlaw"
 LABEL description="OpenClaw AI assistant configured with vLLM backend"
+LABEL org.opencontainers.image.title="democlaw-openclaw"
+LABEL org.opencontainers.image.description="OpenClaw AI assistant configured with vLLM backend"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
+LABEL org.opencontainers.image.source="https://github.com/democlaw/democlaw"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.vendor="democlaw"
+LABEL democlaw.node-major="${NODE_MAJOR}"
+LABEL democlaw.vllm-url="${VLLM_BASE_URL}"
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ---------------------------------------------------------------------------
-# Install system dependencies + Node.js
+# Install system dependencies + Node.js (version controlled by NODE_MAJOR ARG)
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -21,21 +64,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
         | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
         > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
-# Install OpenClaw globally via npm
+# Install OpenClaw globally via npm (version controlled by OPENCLAW_NPM_VERSION ARG)
 # ---------------------------------------------------------------------------
-RUN npm install -g --no-fund --no-audit openclaw \
+RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" \
     && npm cache clean --force
 
 # ---------------------------------------------------------------------------
 # Create non-root user for running the application
 # ---------------------------------------------------------------------------
-RUN groupadd -r -g 1000 openclaw && useradd -r -u 1000 -g openclaw -m -s /bin/bash openclaw
+RUN groupadd -f -g 1000 openclaw && \
+    useradd -u 1000 -g 1000 -m -s /bin/bash openclaw 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Application configuration
