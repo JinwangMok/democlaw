@@ -109,7 +109,7 @@ SKIP_MODEL_PULL="${SKIP_MODEL_PULL:-false}"
 
 # --- Container / image ---
 CONTAINER_NAME="${VLLM_CONTAINER_NAME:-democlaw-vllm}"
-IMAGE_TAG="${VLLM_IMAGE_TAG:-democlaw/vllm:latest}"
+IMAGE_TAG="${VLLM_IMAGE_TAG:-jinwangmok/democlaw-vllm:v1.0.0}"
 NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
 
 # --- HuggingFace model cache ---

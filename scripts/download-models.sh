@@ -30,11 +30,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---------------------------------------------------------------------------
-# Logging helpers
+# Logging helpers with color support
 # ---------------------------------------------------------------------------
+_use_color() { [ -t 1 ] && [ "${NO_COLOR:-}" != "1" ]; }
+
 log()   { echo "[download-models] $*"; }
-warn()  { echo "[download-models] WARNING: $*" >&2; }
-error() { echo "[download-models] ERROR: $*" >&2; exit 1; }
+warn()  { if _use_color; then echo -e "\033[33m[download-models] WARNING: $*\033[0m" >&2; else echo "[download-models] WARNING: $*" >&2; fi; }
+error() { if _use_color; then echo -e "\033[31m[download-models] ERROR: $*\033[0m" >&2; else echo "[download-models] ERROR: $*" >&2; fi; exit 1; }
+ok()    { if _use_color; then echo -e "\033[32m[download-models] ✓ $*\033[0m"; else echo "[download-models] OK: $*"; fi; }
+info()  { if _use_color; then echo -e "\033[36m[download-models] $*\033[0m"; else echo "[download-models] $*"; fi; }
 
 # ---------------------------------------------------------------------------
 # Configuration (all overridable via environment)
@@ -74,13 +78,17 @@ fi
 CHECKSUM_LIB="${SCRIPT_DIR}/lib/checksum.sh"
 
 if [ -f "${CHECKSUM_LIB}" ]; then
-    # Override logging to match our prefix
+    # Override logging to match our prefix with color support
     _cksum_log()   { echo "[download-models] [checksum] $*"; }
-    _cksum_warn()  { echo "[download-models] [checksum] WARNING: $*" >&2; }
-    _cksum_error() { echo "[download-models] [checksum] ERROR: $*" >&2; }
+    _cksum_warn()  { if _use_color; then echo -e "\033[33m[download-models] [checksum] WARNING: $*\033[0m" >&2; else echo "[download-models] [checksum] WARNING: $*" >&2; fi; }
+    _cksum_error() { if _use_color; then echo -e "\033[31m[download-models] [checksum] ERROR: $*\033[0m" >&2; else echo "[download-models] [checksum] ERROR: $*" >&2; fi; }
 
     # shellcheck source=lib/checksum.sh
     source "${CHECKSUM_LIB}"
+else
+    warn "Checksum library not found at: ${SCRIPT_DIR}/lib/checksum.sh"
+    warn "Model integrity verification will be DISABLED."
+    warn "To enable checksums, ensure lib/checksum.sh is present."
 fi
 
 # ---------------------------------------------------------------------------
@@ -92,14 +100,25 @@ fi
 # ---------------------------------------------------------------------------
 if [ -f "${CHECKSUM_LIB}" ]; then
     log "======================================================="
-    log "  Step: Pre-download checksum verification"
+    info "  Step 1/3: Pre-download integrity check (SHA256)"
     log "======================================================="
+    log ""
+    log "Comparing cached model files against stored checksums ..."
+    log "This ensures no corrupt or tampered files are reused."
+    log ""
+
+    _verify_start=$(date +%s 2>/dev/null || echo 0)
 
     if ! checksum_model_needs_download "${HF_CACHE_DIR}" "${MODEL_NAME}"; then
-        log "All model files present and checksums verified — skipping download."
+        _verify_end=$(date +%s 2>/dev/null || echo 0)
+        _verify_elapsed=$(( _verify_end - _verify_start ))
+
+        log ""
+        ok "All model files present and SHA256 checksums verified!"
+        [ "${_verify_elapsed}" -gt 0 ] 2>/dev/null && log "  Verification completed in ${_verify_elapsed}s"
         log ""
         log "======================================================="
-        log "  Model download complete! (cached)"
+        ok "  Model ready! (verified from cache)"
         log ""
         log "  Model     : ${MODEL_NAME}"
         log "  Cache dir : ${HF_CACHE_DIR}"
@@ -110,7 +129,13 @@ if [ -f "${CHECKSUM_LIB}" ]; then
         exit 0
     fi
 
-    log "Download needed — proceeding with model acquisition."
+    _verify_end=$(date +%s 2>/dev/null || echo 0)
+    _verify_elapsed=$(( _verify_end - _verify_start ))
+    [ "${_verify_elapsed}" -gt 0 ] 2>/dev/null && log "  Check completed in ${_verify_elapsed}s"
+    log ""
+    warn "Checksum verification indicates model is missing or corrupted."
+    log "Proceeding with fresh download ..."
+    log ""
 fi
 
 # ---------------------------------------------------------------------------
@@ -204,7 +229,7 @@ fi
 log "Download step complete."
 
 # ---------------------------------------------------------------------------
-# Checksum verification and storage
+# Step 2/3: Post-download checksum verification
 #
 # Source lib/checksum.sh to access:
 #   checksum_verify_model_cache <cache_dir> <model_name>
@@ -215,38 +240,65 @@ log "Download step complete."
 # and verifies or generates SHA256 sidecars for all .safetensors + .json files.
 # ---------------------------------------------------------------------------
 log "======================================================="
-log "  Step: Checksum verification"
+info "  Step 2/3: Post-download integrity verification (SHA256)"
 log "======================================================="
+log ""
 
 if [ -f "${CHECKSUM_LIB}" ]; then
-    # Verify downloaded model files and store .sha256 sidecar checksums.
-    # checksum_verify_model_cache verifies existing sidecars or generates new ones.
+    _verify_start=$(date +%s 2>/dev/null || echo 0)
+
+    # Verify downloaded model files against any existing .sha256 sidecar checksums.
+    # On first download, sidecars won't exist yet — they are generated in Step 3.
+    log "Verifying downloaded model files ..."
     if checksum_verify_model_cache "${HF_CACHE_DIR}" "${MODEL_NAME}"; then
-        log "Post-download checksum verification passed."
+        ok "Post-download checksum verification passed."
     else
-        warn "Post-download checksum verification returned non-zero — see above for details."
+        warn "Post-download checksum verification returned non-zero."
+        warn "This is normal on first download (no prior checksums exist)."
+        warn "Checksums will be generated in the next step."
     fi
+
+    log ""
+    log "======================================================="
+    info "  Step 3/3: Storing SHA256 checksums for future runs"
+    log "======================================================="
+    log ""
 
     # Store checksums for all model files (idempotent: overwrites existing sidecars).
     # These .sha256 files enable checksum-verified skip on the next run.
+    log "Computing and storing SHA256 hashes for all model files ..."
+    log "Each file gets a .sha256 sidecar for future verification."
+    log ""
     if checksum_store_model_cache "${HF_CACHE_DIR}" "${MODEL_NAME}"; then
-        log "Checksums stored for future verification."
+        _verify_end=$(date +%s 2>/dev/null || echo 0)
+        _verify_elapsed=$(( _verify_end - _verify_start ))
+        ok "Checksums stored successfully."
+        [ "${_verify_elapsed}" -gt 0 ] 2>/dev/null && log "  Checksum operations completed in ${_verify_elapsed}s"
+        log ""
+        log "  On subsequent runs, these checksums will be verified before"
+        log "  downloading. If all files match, the download is skipped."
     else
-        warn "Failed to store some checksums — next run may re-download."
+        warn "Failed to store some checksums."
+        warn "Next run may need to re-download the model."
+        warn "This is non-fatal — the model files are still usable."
     fi
 else
     warn "Checksum library not found at: ${CHECKSUM_LIB}"
     warn "Skipping post-download checksum storage."
+    warn "Without checksums, the model will be re-downloaded on every run."
+    warn "To fix: ensure scripts/lib/checksum.sh is present."
 fi
 
 # ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
+log ""
 log "======================================================="
-log "  Model download complete!"
+ok "  Model download and verification complete!"
 log ""
 log "  Model     : ${MODEL_NAME}"
 log "  Cache dir : ${HF_CACHE_DIR}"
+log "  Checksum  : SHA256 sidecar files stored"
 log ""
 log "  vLLM will use this cache on next startup."
 log "  Start the stack with: ./scripts/start.sh"

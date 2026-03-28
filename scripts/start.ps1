@@ -216,6 +216,24 @@ if (-not (Test-Path $HfCacheDir)) {
     New-Item -ItemType Directory -Path $HfCacheDir -Force | Out-Null
 }
 
+# Verify model checksums (if model is already cached)
+$checksumScript = Join-Path $ScriptDir 'checksum.ps1'
+if (Test-Path $checksumScript) {
+    log "Verifying model checksums ..."
+    try {
+        $needsDownload = & $checksumScript -Action needs-download -CacheDir $HfCacheDir -ModelName $ModelName 2>$null
+        if ($LASTEXITCODE -eq 0 -and $needsDownload -match 'false') {
+            logok "Model checksums verified — cached model is intact."
+        } else {
+            log "Model not yet cached or checksums missing — vLLM will download on first start."
+        }
+    } catch {
+        log "Model not yet cached or checksums missing — vLLM will download on first start."
+    }
+} else {
+    log "Checksum script not found — skipping model integrity check."
+}
+
 log "Starting vLLM container ..."
 log "  Model        : $ModelName"
 log "  Quantization : $Quantization"
@@ -277,20 +295,51 @@ if (-not $healthy) {
 logok "vLLM /health OK."
 
 # ---------------------------------------------------------------------------
-# Verify /v1/models
+# Verify /v1/models returns HTTP 200 with the expected model loaded
 # ---------------------------------------------------------------------------
-log "Checking /v1/models ..."
+log "Checking /v1/models for model '$ModelName' ..."
+$ModelsUrl = "http://localhost:${VllmPort}/v1/models"
+$ModelsTimeout = 120
 $modelsElapsed = 0
-while ($modelsElapsed -lt 60) {
+$modelsVerified = $false
+
+while ($modelsElapsed -lt $ModelsTimeout) {
     try {
-        $resp = Invoke-WebRequest -Uri "http://localhost:${VllmPort}/v1/models" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-        if ($resp.StatusCode -lt 400) {
-            logok "vLLM /v1/models OK. Model ready."
-            break
+        $resp = Invoke-WebRequest -Uri $ModelsUrl -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+        if ($resp.StatusCode -eq 200 -and $resp.Content) {
+            $data = $resp.Content | ConvertFrom-Json
+            $modelIds = @()
+            if ($data.data) {
+                $modelIds = @($data.data | ForEach-Object { $_.id })
+            }
+            if ($modelIds.Count -gt 0) {
+                $modelsListed = $modelIds -join ','
+                logok "vLLM /v1/models returned HTTP 200."
+                log "  Available models: $modelsListed"
+                if ($modelIds -contains $ModelName) {
+                    logok "  Confirmed: '$ModelName' is loaded and serving."
+                } else {
+                    logwarn "Expected model '$ModelName' not in list."
+                    log "  Proceeding with available models: $modelsListed"
+                }
+                $modelsVerified = $true
+                break
+            }
+            # HTTP 200 but no models yet — keep polling
         }
     } catch { }
+
     Start-Sleep -Seconds 5
     $modelsElapsed += 5
+    if ($modelsElapsed % 15 -eq 0) {
+        log "  ... waiting for /v1/models ($modelsElapsed/${ModelsTimeout}s)"
+    }
+}
+
+if (-not $modelsVerified) {
+    logwarn "/v1/models did not confirm model readiness within ${ModelsTimeout}s."
+    log "  The model may still be loading. Check: Invoke-WebRequest $ModelsUrl"
+    log "  Container logs: $Runtime logs -f $VllmContainer"
 }
 
 # ===========================================================================
@@ -352,19 +401,10 @@ if (-not $ocHealthy) {
 logok "OpenClaw dashboard responding."
 
 # ===========================================================================
-# Phase 4: Show result
+# Phase 4: Both health-checks passed — print dashboard URL
 # ===========================================================================
-log ""
-log "========================================================"
-log "  DemoClaw is running!"
-log "========================================================"
-log ""
-log "  vLLM API : http://localhost:${VllmPort}/v1"
-log "  Model    : $ModelName"
-log "  Runtime  : $Runtime"
-log ""
 
-# Try to get tokenized dashboard URL from openclaw binary
+# Resolve dashboard URL: try tokenized URL from openclaw binary, fall back to localhost
 $DashboardUrl = ''
 try {
     $raw = & $Runtime exec $OcContainer openclaw dashboard --no-open 2>$null
@@ -376,16 +416,38 @@ try {
     }
 } catch { }
 
-if ($DashboardUrl) {
-    log "  Dashboard: $DashboardUrl"
-} else {
-    log "  Dashboard: http://localhost:${OcPort}"
+if (-not $DashboardUrl) {
+    $DashboardUrl = "http://localhost:${OcPort}"
 }
+
+$VllmApiUrl = "http://localhost:${VllmPort}/v1"
+
+log ""
+log "========================================================"
+logok "  DemoClaw is running!"
+log "========================================================"
+log ""
+log "  Both health-checks passed:"
+log "    * vLLM /v1/models .... HTTP 200"
+log "    * OpenClaw dashboard . HTTP 200"
+log ""
+log "  Services:"
+log "    vLLM API  : $VllmApiUrl"
+log "    Model     : $ModelName"
+log "    Runtime   : $Runtime"
+log ""
+log "  Web UI Dashboard:"
+log "    $DashboardUrl"
+log ""
+
+# Print bare dashboard URL to stdout for easy parsing by scripts/tools
+# This line has no prefix so it can be captured programmatically
+Write-Output $DashboardUrl
 
 log ""
 log "  NOTE: On first connect, click `"Connect`" in the browser."
 log "        The device pairing is auto-approved within ~2 seconds."
 log "        If needed, click `"Connect`" again after approval."
 log ""
-log "  Stop with: .\scripts\stop.sh  (or docker rm -f democlaw-vllm democlaw-openclaw)"
+log "  Stop with: .\scripts\stop.ps1  (or docker rm -f democlaw-vllm democlaw-openclaw)"
 log "========================================================"

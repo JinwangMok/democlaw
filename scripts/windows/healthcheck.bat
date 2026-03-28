@@ -183,22 +183,19 @@ if not defined HTTP_CODE set "HTTP_CODE=000"
 
 if "%HTTP_CODE%"=="000" (
     call :record_fail "OpenClaw dashboard reachable" "No response at %OPENCLAW_URL% (port %OPENCLAW_HOST_PORT%)"
-) else (
-    set /a "CODE_NUM=%HTTP_CODE%"
-    if !CODE_NUM! geq 200 if !CODE_NUM! lss 400 (
-        call :record_pass "OpenClaw dashboard reachable" "HTTP %HTTP_CODE% at %OPENCLAW_URL%"
-        :: Check for HTML content
-        if exist "%TMPFILE%" (
-            findstr /i /c:"<html" /c:"<!doctype" /c:"<head" /c:"<body" /c:"<div" "%TMPFILE%" >nul 2>&1
-            if not errorlevel 1 (
-                call :record_pass "OpenClaw dashboard content" "HTML content verified"
-            ) else (
-                call :record_pass "OpenClaw dashboard content" "Non-empty response received"
-            )
+) else if "%HTTP_CODE%"=="200" (
+    call :record_pass "OpenClaw dashboard reachable" "HTTP 200 at %OPENCLAW_URL%"
+    :: Check for HTML content
+    if exist "%TMPFILE%" (
+        findstr /i /c:"<html" /c:"<!doctype" /c:"<head" /c:"<body" /c:"<div" "%TMPFILE%" >nul 2>&1
+        if not errorlevel 1 (
+            call :record_pass "OpenClaw dashboard content" "HTML content verified"
+        ) else (
+            call :record_pass "OpenClaw dashboard content" "Non-empty response received"
         )
-    ) else (
-        call :record_fail "OpenClaw dashboard reachable" "HTTP %HTTP_CODE% (expected 2xx/3xx) at %OPENCLAW_URL%"
     )
+) else (
+    call :record_fail "OpenClaw dashboard reachable" "HTTP %HTTP_CODE% (expected 200) at %OPENCLAW_URL%"
 )
 if exist "%TMPFILE%" del /f /q "%TMPFILE%" >nul 2>&1
 

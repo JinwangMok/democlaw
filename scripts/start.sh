@@ -286,9 +286,10 @@ log "Starting OpenClaw container ..."
 log "OpenClaw container started. Waiting for dashboard ..."
 
 # ---------------------------------------------------------------------------
-# Wait for OpenClaw dashboard
+# Wait for OpenClaw dashboard — requires HTTP 200 to pass health-check
 # ---------------------------------------------------------------------------
 oc_elapsed=0
+oc_http_code="000"
 while [ "${oc_elapsed}" -lt "${OPENCLAW_HEALTH_TIMEOUT}" ]; do
     state=$("${RUNTIME}" container inspect --format '{{.State.Status}}' "${OPENCLAW_CONTAINER}" 2>/dev/null || echo "unknown")
     if [ "${state}" = "exited" ] || [ "${state}" = "dead" ]; then
@@ -297,43 +298,60 @@ while [ "${oc_elapsed}" -lt "${OPENCLAW_HEALTH_TIMEOUT}" ]; do
         exit 1
     fi
 
-    if curl -sf "http://localhost:${OPENCLAW_PORT}/" >/dev/null 2>&1; then
-        log "OpenClaw dashboard responding."
+    oc_http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+        --max-time 5 "http://localhost:${OPENCLAW_PORT}/" 2>/dev/null || echo "000")
+
+    if [ "${oc_http_code}" = "200" ]; then
+        log "OpenClaw dashboard health-check passed (HTTP 200)."
         break
     fi
 
     sleep 3
     oc_elapsed=$((oc_elapsed + 3))
     if [ $((oc_elapsed % 15)) -eq 0 ]; then
-        log "  ... waiting for OpenClaw (${oc_elapsed}/${OPENCLAW_HEALTH_TIMEOUT}s)"
+        log "  ... waiting for OpenClaw (${oc_elapsed}/${OPENCLAW_HEALTH_TIMEOUT}s, HTTP ${oc_http_code})"
     fi
 done
 
-if [ "${oc_elapsed}" -ge "${OPENCLAW_HEALTH_TIMEOUT}" ]; then
-    error "OpenClaw dashboard did not respond within ${OPENCLAW_HEALTH_TIMEOUT}s. Check logs: ${RUNTIME} logs ${OPENCLAW_CONTAINER}"
+if [ "${oc_http_code}" != "200" ]; then
+    error "OpenClaw dashboard did not return HTTP 200 within ${OPENCLAW_HEALTH_TIMEOUT}s (last: HTTP ${oc_http_code}). Check logs: ${RUNTIME} logs ${OPENCLAW_CONTAINER}"
 fi
 
 # ===========================================================================
-# Phase 4: Show result
+# Phase 4: Both health-checks passed — print dashboard URL
 # ===========================================================================
-log ""
-log "========================================================"
-log "  DemoClaw is running!"
-log "========================================================"
-log ""
-log "  vLLM API : http://localhost:${VLLM_PORT}/v1"
-log "  Model    : ${MODEL_NAME}"
-log "  Runtime  : ${RUNTIME}"
-log ""
 
+# Resolve dashboard URL: try tokenized URL from openclaw binary, fall back to localhost
 DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>/dev/null \
     | grep -oP 'https?://[^\s]+' | head -1 | sed 's/127\.0\.0\.1/localhost/' || true)
 
-if [ -n "${DASHBOARD_URL}" ]; then
-    log "  Dashboard: ${DASHBOARD_URL}"
-else
-    log "  Dashboard: http://localhost:${OPENCLAW_PORT}"
+if [ -z "${DASHBOARD_URL}" ]; then
+    DASHBOARD_URL="http://localhost:${OPENCLAW_PORT}"
 fi
+
+VLLM_API_URL="http://localhost:${VLLM_PORT}/v1"
+
+log ""
+log "========================================================"
+log "  ✅ DemoClaw is running!"
+log "========================================================"
+log ""
+log "  Both health-checks passed:"
+log "    • vLLM /v1/models .... HTTP 200 ✓"
+log "    • OpenClaw dashboard . HTTP 200 ✓"
+log ""
+log "  Services:"
+log "    vLLM API  : ${VLLM_API_URL}"
+log "    Model     : ${MODEL_NAME}"
+log "    Runtime   : ${RUNTIME}"
+log ""
+log "  Web UI Dashboard:"
+log "    ${DASHBOARD_URL}"
+log ""
+
+# Print bare dashboard URL to stdout for easy parsing by scripts/tools
+# This line has no prefix so it can be captured with: ./scripts/start.sh | grep '^http'
+echo "${DASHBOARD_URL}"
 
 log ""
 log "  NOTE: On first connect, click \"Connect\" in the browser."

@@ -2381,19 +2381,43 @@ The scripts download model weights to `~/.cache/huggingface` (Linux) or `%USERPR
 
 ## Custom Skills
 
-OpenClaw supports **custom skills** — Python scripts that extend the AI agent's capabilities. Skills let the agent call your code to perform tasks like querying databases, calling APIs, or running computations.
+OpenClaw supports **custom skills** — Python scripts that extend the AI agent's capabilities. Skills let the agent call your code to perform tasks like querying databases, calling external APIs, processing files, or running computations.
+
+This section is a complete user guide covering skill structure, a working example, the bundled template, step-by-step creation instructions, and testing.
 
 ### Skill Structure
 
-A skill consists of two files in a directory:
+Every skill lives in its own directory and contains exactly two files:
 
 ```
 my_skill/
-├── skill.yaml      # Skill manifest (name, description, I/O schema)
-└── my_script.py    # Python entry point
+├── skill.yaml      # Skill manifest — name, description, version, I/O schema
+└── my_script.py    # Python entry point — reads JSON stdin, writes JSON stdout
 ```
 
+| File | Purpose |
+|------|---------|
+| `skill.yaml` | Declares the skill's metadata and its input/output JSON schemas. OpenClaw reads this file to understand what the skill expects and returns. |
+| `*.py` (entry point) | The Python script that OpenClaw executes. It receives input as a JSON object on `stdin` and must print a JSON result to `stdout`. |
+
+### Skill I/O Protocol
+
+All skills follow a simple JSON-in / JSON-out protocol:
+
+```
+┌──────────┐   JSON stdin    ┌────────────┐   JSON stdout   ┌──────────┐
+│ OpenClaw │ ───────────────> │ skill.py   │ ───────────────> │ OpenClaw │
+│  agent   │                 │ (your code)│                  │  agent   │
+└──────────┘                 └────────────┘                  └──────────┘
+```
+
+- **Input**: OpenClaw passes a JSON object matching `input_schema` via `stdin`.
+- **Output**: The skill prints a JSON object matching `output_schema` to `stdout`.
+- **Errors**: On failure, write `{"status": "error", "error": "message"}` to `stderr` and exit with code `1`.
+
 ### Example: Hello World Skill
+
+A minimal working skill is bundled at `examples/skills/hello_world/`:
 
 **`examples/skills/hello_world/skill.yaml`**:
 
@@ -2436,37 +2460,241 @@ if __name__ == "__main__":
     main()
 ```
 
-### Creating Your Own Skill
+**Test it standalone** (no OpenClaw needed):
 
-1. **Copy the template**:
-   ```bash
-   cp -r examples/skills/template my_skills/my_new_skill
-   ```
+```bash
+# Default input (no name)
+echo '{}' | python examples/skills/hello_world/hello.py
+# → {"message": "Hello, World! This is a custom OpenClaw skill."}
 
-2. **Edit `skill.yaml`**: Set the name, description, input/output schemas.
+# Custom input
+echo '{"name": "Alice"}' | python examples/skills/hello_world/hello.py
+# → {"message": "Hello, Alice! This is a custom OpenClaw skill."}
+```
 
-3. **Implement `skill_template.py`**: Write your logic in the `run()` function. The script reads JSON from stdin and writes JSON to stdout.
+### Skill Template
 
-4. **Register with OpenClaw**: Place the skill directory where OpenClaw can discover it (see OpenClaw documentation for skill paths).
+A ready-to-copy template is provided at `examples/skills/template/`. It includes error handling, logging, and a clear `run()` function to fill in.
+
+**`examples/skills/template/skill.yaml`**:
+
+```yaml
+name: my_custom_skill
+description: "Describe what your skill does"
+version: "1.0.0"
+author: "Your Name"
+entry_point: skill_template.py
+input_schema:
+  type: object
+  properties:
+    param1:
+      type: string
+      description: "Description of parameter"
+output_schema:
+  type: object
+  properties:
+    status:
+      type: string
+    result:
+      type: string
+```
+
+**`examples/skills/template/skill_template.py`**:
+
+```python
+#!/usr/bin/env python3
+"""
+Custom Skill Template for OpenClaw
+===================================
+Copy this directory and modify to create your own skill.
+
+Input: JSON from stdin
+Output: JSON to stdout
+"""
+import sys
+import json
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def run(input_data: dict) -> dict:
+    """Main skill logic. Modify this function.
+
+    Args:
+        input_data: Input parameters from OpenClaw
+    Returns:
+        dict: Result to return to OpenClaw
+    """
+    # TODO: Implement your skill logic here
+    return {"status": "success", "result": "Replace this with your skill output"}
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+        result = run(input_data)
+        print(json.dumps(result))
+    except Exception as e:
+        error = {"status": "error", "error": str(e)}
+        print(json.dumps(error), file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Creating Your Own Skill — Step by Step
+
+#### Step 1 — Copy the template
+
+```bash
+# Create a skills directory and copy the template
+mkdir -p my_skills
+cp -r examples/skills/template my_skills/weather_lookup
+```
+
+#### Step 2 — Edit `skill.yaml`
+
+Rename and describe your skill, define the input parameters it accepts, and the output it returns:
+
+```yaml
+# my_skills/weather_lookup/skill.yaml
+name: weather_lookup
+description: "Look up current weather for a given city"
+version: "1.0.0"
+author: "Your Name"
+entry_point: weather.py
+input_schema:
+  type: object
+  properties:
+    city:
+      type: string
+      description: "City name (e.g. Seoul, New York)"
+  required:
+    - city
+output_schema:
+  type: object
+  properties:
+    status:
+      type: string
+    city:
+      type: string
+    temperature:
+      type: string
+    condition:
+      type: string
+```
+
+#### Step 3 — Implement the entry point
+
+Rename `skill_template.py` to match `entry_point` in your YAML, then implement the `run()` function:
+
+```python
+#!/usr/bin/env python3
+# my_skills/weather_lookup/weather.py
+"""Weather lookup skill for OpenClaw."""
+import sys
+import json
+import urllib.request
+import urllib.error
+
+def run(input_data: dict) -> dict:
+    city = input_data.get("city", "")
+    if not city:
+        return {"status": "error", "error": "city parameter is required"}
+
+    try:
+        url = f"https://wttr.in/{city}?format=j1"
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            data = json.loads(resp.read())
+        current = data["current_condition"][0]
+        return {
+            "status": "success",
+            "city": city,
+            "temperature": f"{current['temp_C']}°C / {current['temp_F']}°F",
+            "condition": current["weatherDesc"][0]["value"],
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+        result = run(input_data)
+        print(json.dumps(result))
+    except Exception as e:
+        print(json.dumps({"status": "error", "error": str(e)}), file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+```
+
+#### Step 4 — Test standalone
+
+Always test your skill outside OpenClaw first:
+
+```bash
+# Test with valid input
+echo '{"city": "Seoul"}' | python my_skills/weather_lookup/weather.py
+# → {"status": "success", "city": "Seoul", "temperature": "18°C / 64°F", "condition": "Partly cloudy"}
+
+# Test with missing input
+echo '{}' | python my_skills/weather_lookup/weather.py
+# → {"status": "error", "error": "city parameter is required"}
+
+# Test with pipe from curl (simulates OpenClaw invocation)
+echo '{"city": "London"}' | python my_skills/weather_lookup/weather.py | python -m json.tool
+```
+
+#### Step 5 — Mount into OpenClaw container
+
+To make your skill available to the running OpenClaw agent, mount your skills directory into the container. Add the volume mount to your `.env` or pass it directly:
+
+```bash
+# Option A — Set the skills path in .env
+echo 'OPENCLAW_SKILLS_DIR=./my_skills' >> .env
+./scripts/start.sh
+
+# Option B — Mount manually when running the container
+docker run -v "$(pwd)/my_skills:/app/skills:ro" democlaw/openclaw:latest
+```
+
+After mounting, restart OpenClaw (`./scripts/start.sh` handles this automatically) for the agent to discover the new skill.
+
+### Skill Manifest Reference (`skill.yaml`)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes | Unique skill identifier (lowercase, underscores allowed) |
+| `description` | Yes | Human-readable description shown to the AI agent |
+| `version` | Yes | Semantic version string (e.g. `"1.0.0"`) |
+| `author` | No | Author name or organization |
+| `entry_point` | Yes | Python filename to execute (relative to skill directory) |
+| `input_schema` | Yes | JSON Schema defining accepted input parameters |
+| `output_schema` | Yes | JSON Schema defining the returned result structure |
 
 ### Skill Development Tips
 
-- **Input**: Always read JSON from `sys.stdin`
-- **Output**: Always write JSON to `sys.stdout`
-- **Errors**: Write error JSON to `sys.stderr` and exit with code 1
-- **Dependencies**: Keep skills self-contained; include a `requirements.txt` if needed
-- **Testing**: Test standalone: `echo '{"name":"Alice"}' | python hello.py`
+- **Input**: Always read JSON from `sys.stdin` — OpenClaw passes input as a single JSON object
+- **Output**: Always write JSON to `sys.stdout` — OpenClaw parses the result as JSON
+- **Errors**: Write error JSON to `sys.stderr` and exit with code `1`; OpenClaw will report the error to the user
+- **Dependencies**: Keep skills self-contained where possible. If you need third-party packages, include a `requirements.txt` in the skill directory
+- **Testing**: Always test standalone before mounting: `echo '{"key":"value"}' | python your_skill.py`
+- **Idempotency**: Skills may be called multiple times with the same input — ensure your logic is safe to repeat
+- **Timeouts**: Long-running skills should handle timeouts gracefully; OpenClaw enforces a per-skill execution timeout
+- **No side-channel output**: Do not print non-JSON text to `stdout` — it will break parsing. Use `logging` (writes to `stderr`) for debug messages
 
 ---
 
 ## ClawHub — Skill Marketplace
 
-[ClawHub](https://clawhub.com) is the community marketplace for OpenClaw skills. You can browse, download, and publish skills.
+[ClawHub](https://clawhub.com) is the community marketplace for OpenClaw skills. You can browse, download, and publish reusable skills created by the community.
 
 ### Installing ClawHub CLI
 
 ```bash
-# Install via npm (requires Node.js)
+# Install via npm (requires Node.js ≥ 18)
 npm install -g clawhub
 
 # Verify installation
@@ -2476,33 +2704,74 @@ clawhub --version
 ### Downloading Skills from ClawHub
 
 ```bash
-# Search for skills
+# Search for skills by keyword
 clawhub search "weather"
+clawhub search "database"
+clawhub search "summarize"
 
-# Download a skill
+# Download and install a skill into your skills directory
 clawhub install weather-lookup
+clawhub install text-summarizer
 
-# List installed skills
+# Install a specific version
+clawhub install weather-lookup@1.2.0
+
+# List all installed skills
 clawhub list
 
-# Update all installed skills
+# Update all installed skills to their latest versions
 clawhub update
+
+# Update a specific skill
+clawhub update weather-lookup
+
+# Remove an installed skill
+clawhub uninstall weather-lookup
+```
+
+Installed skills are placed in the `~/.openclaw/skills/` directory by default. To use a different directory:
+
+```bash
+# Set a custom skills directory
+clawhub config set skills_dir ./my_skills
+
+# Or specify per-command
+clawhub install weather-lookup --dir ./my_skills
 ```
 
 ### Publishing Skills to ClawHub
 
+Share your custom skills with the community:
+
 ```bash
-# Initialize a skill for publishing
-cd my_skills/my_new_skill
+# Navigate to your skill directory
+cd my_skills/weather_lookup
+
+# Initialize for publishing (creates .clawhub metadata)
 clawhub init
 
-# Publish
+# Validate the skill structure before publishing
+clawhub validate
+
+# Publish to ClawHub (requires a ClawHub account)
+clawhub login
 clawhub publish
 ```
 
-### Using Downloaded Skills
+### Using Downloaded Skills with DemoClaw
 
-Skills installed via ClawHub are automatically placed in OpenClaw's skill discovery path. After installing a skill, restart OpenClaw (or run `./scripts/start.sh` again) for the agent to pick it up.
+Skills installed via ClawHub are automatically placed in OpenClaw's skill discovery path. To integrate them with your DemoClaw setup:
+
+1. **Install skills** using `clawhub install <skill-name>`
+2. **Point OpenClaw to the skills directory** — set `OPENCLAW_SKILLS_DIR` in your `.env`:
+   ```bash
+   # Use the default ClawHub install path
+   OPENCLAW_SKILLS_DIR=~/.openclaw/skills
+   ```
+3. **Restart the stack** — run `./scripts/start.sh` (idempotent: destroys and recreates containers)
+4. **Verify** — the agent will list available skills when you ask it "what skills do you have?"
+
+> **Tip:** You can mix ClawHub-installed skills with your own custom skills by symlinking or copying them into the same directory.
 
 ---
 

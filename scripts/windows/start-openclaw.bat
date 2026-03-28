@@ -41,7 +41,7 @@ if exist "%ENV_FILE%" (
 :: ---------------------------------------------------------------------------
 if not defined OPENCLAW_CONTAINER_NAME set "OPENCLAW_CONTAINER_NAME=democlaw-openclaw"
 if not defined DEMOCLAW_NETWORK        set "DEMOCLAW_NETWORK=democlaw-net"
-if not defined OPENCLAW_IMAGE_TAG      set "OPENCLAW_IMAGE_TAG=democlaw/openclaw:latest"
+if not defined OPENCLAW_IMAGE_TAG      set "OPENCLAW_IMAGE_TAG=jinwangmok/democlaw-openclaw:v1.0.0"
 if not defined OPENCLAW_PORT           set "OPENCLAW_PORT=18789"
 if not defined OPENCLAW_HOST_PORT      set "OPENCLAW_HOST_PORT=18789"
 if not defined VLLM_BASE_URL           set "VLLM_BASE_URL=http://vllm:8000/v1"

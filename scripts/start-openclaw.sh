@@ -21,7 +21,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 CONTAINER_NAME="${OPENCLAW_CONTAINER_NAME:-democlaw-openclaw}"
 NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
-IMAGE_TAG="${OPENCLAW_IMAGE_TAG:-democlaw/openclaw:latest}"
+IMAGE_TAG="${OPENCLAW_IMAGE_TAG:-jinwangmok/democlaw-openclaw:v1.0.0}"
 
 # Port mapping — container listens on OPENCLAW_PORT, host exposes OPENCLAW_HOST_PORT
 OPENCLAW_PORT="${OPENCLAW_PORT:-18789}"
@@ -335,8 +335,9 @@ while [ "${elapsed}" -lt "${HEALTH_TIMEOUT}" ]; do
         error "Container '${CONTAINER_NAME}' has stopped (state: ${container_state}). Check logs:\n  ${RUNTIME} logs ${CONTAINER_NAME}"
     fi
 
-    # Try to reach the dashboard on the published host port
-    if curl -sf -o /dev/null -w '' "${DASHBOARD_URL}" 2>/dev/null; then
+    # Try to reach the dashboard on the published host port — require HTTP 200
+    oc_http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "${DASHBOARD_URL}/" 2>/dev/null || echo "000")
+    if [ "${oc_http_code}" = "200" ]; then
         log ""
         log "============================================="
         log "  OpenClaw dashboard is ready!"

@@ -29,8 +29,10 @@ for %%i in ("%SCRIPT_DIR%\..\..") do set "PROJECT_ROOT=%%~fi"
 :: ---------------------------------------------------------------------------
 :: Configuration
 :: ---------------------------------------------------------------------------
-set "VLLM_IMAGE=democlaw/vllm:latest"
-set "OPENCLAW_IMAGE=democlaw/openclaw:latest"
+if not defined DEMOCLAW_VLLM_IMAGE    set "DEMOCLAW_VLLM_IMAGE=jinwangmok/democlaw-vllm:v1.0.0"
+if not defined DEMOCLAW_OPENCLAW_IMAGE set "DEMOCLAW_OPENCLAW_IMAGE=jinwangmok/democlaw-openclaw:v1.0.0"
+set "VLLM_IMAGE=%DEMOCLAW_VLLM_IMAGE%"
+set "OPENCLAW_IMAGE=%DEMOCLAW_OPENCLAW_IMAGE%"
 set "NETWORK=democlaw-net"
 set "VLLM_CONTAINER=democlaw-vllm"
 set "OPENCLAW_CONTAINER=democlaw-openclaw"

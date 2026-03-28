@@ -446,20 +446,20 @@ check_openclaw_dashboard() {
         --max-time "${CURL_TIMEOUT}" \
         "${OPENCLAW_URL}/" 2>/dev/null || echo "000")
 
-    # Check 1: HTTP status code — dashboard must be reachable
+    # Check 1: HTTP status code — dashboard must return HTTP 200
     if [ "${http_code}" = "000" ]; then
         record_fail "OpenClaw dashboard reachable" "No response at ${OPENCLAW_URL} (port ${OPENCLAW_HOST_PORT})"
         rm -f "${tmpfile}"
         return 1
     fi
 
-    if ! { [ "${http_code}" -ge 200 ] && [ "${http_code}" -lt 400 ]; } 2>/dev/null; then
-        record_fail "OpenClaw dashboard reachable" "HTTP ${http_code} (expected 2xx/3xx) at ${OPENCLAW_URL}"
+    if [ "${http_code}" != "200" ]; then
+        record_fail "OpenClaw dashboard reachable" "HTTP ${http_code} (expected 200) at ${OPENCLAW_URL}"
         rm -f "${tmpfile}"
         return 1
     fi
 
-    record_pass "OpenClaw dashboard reachable" "HTTP ${http_code} at ${OPENCLAW_URL}"
+    record_pass "OpenClaw dashboard reachable" "HTTP 200 at ${OPENCLAW_URL}"
 
     # Check 2: Response body is non-empty
     local body_size
@@ -501,7 +501,7 @@ check_openclaw_dashboard_with_retry() {
             --max-time "${CURL_TIMEOUT}" \
             "${OPENCLAW_URL}/" 2>/dev/null || echo "000")
 
-        if { [ "${http_code}" -ge 200 ] && [ "${http_code}" -lt 400 ]; } 2>/dev/null; then
+        if [ "${http_code}" = "200" ]; then
             # Dashboard is up — run the full content check
             check_openclaw_dashboard
             return $?
