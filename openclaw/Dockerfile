@@ -34,7 +34,7 @@ RUN npm install -g openclaw
 # ---------------------------------------------------------------------------
 # Create non-root user for running the application
 # ---------------------------------------------------------------------------
-RUN groupadd -r openclaw && useradd -r -g openclaw -m -s /bin/bash openclaw
+RUN groupadd -r -g 1000 openclaw && useradd -r -u 1000 -g openclaw -m -s /bin/bash openclaw
 
 # ---------------------------------------------------------------------------
 # Application configuration

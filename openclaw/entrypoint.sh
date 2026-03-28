@@ -120,7 +120,7 @@ fi
 # Verify the expected model is loaded on vLLM
 # ---------------------------------------------------------------------------
 echo "[openclaw-entrypoint] Verifying model '${VLLM_MODEL_NAME}' is available ..."
-MODEL_RESPONSE=$(curl -sf "${VLLM_BASE_URL}/models" 2>/dev/null || echo "")
+MODEL_RESPONSE=$(curl -sf "${VLLM_BASE_URL}/v1/models" 2>/dev/null || echo "")
 if [ -n "${MODEL_RESPONSE}" ]; then
     if echo "${MODEL_RESPONSE}" | grep -q "${VLLM_MODEL_NAME}"; then
         echo "[openclaw-entrypoint] Confirmed: model '${VLLM_MODEL_NAME}' is loaded on vLLM."
