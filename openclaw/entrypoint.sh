@@ -145,10 +145,26 @@ fi
 # Launch OpenClaw with config
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
+# Run onboard if not already done (creates workspace + pairs gateway)
+# ---------------------------------------------------------------------------
+if [ ! -f "${HOME}/.openclaw/openclaw.json" ]; then
+    echo "[openclaw-entrypoint] Running initial onboard (vLLM provider) ..."
+    openclaw onboard \
+        --non-interactive \
+        --accept-risk \
+        --mode local \
+        --auth-choice vllm \
+        --custom-base-url "${VLLM_BASE_URL}" \
+        --custom-model-id "${VLLM_MODEL_NAME}" \
+        2>/dev/null || true
+fi
+
+# ---------------------------------------------------------------------------
 # Configure gateway settings via CLI (these write to OpenClaw's own config store)
 # ---------------------------------------------------------------------------
 openclaw config set gateway.mode local 2>/dev/null || true
 openclaw config set gateway.bind lan 2>/dev/null || true
+openclaw config set gateway.auth.mode token 2>/dev/null || true
 openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
 
 echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPENCLAW_PORT}) ..."
