@@ -78,8 +78,16 @@ RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" \
 # ---------------------------------------------------------------------------
 # Create non-root user for running the application
 # ---------------------------------------------------------------------------
-RUN groupadd -f -g 1000 openclaw && \
-    useradd -u 1000 -g 1000 -m -s /bin/bash openclaw 2>/dev/null || true
+RUN if id -u openclaw >/dev/null 2>&1; then \
+        echo "User openclaw already exists"; \
+    elif id -u 1000 >/dev/null 2>&1; then \
+        echo "UID 1000 taken by $(id -un 1000), renaming to openclaw"; \
+        usermod -l openclaw -d /home/openclaw -m "$(id -un 1000)"; \
+        groupmod -n openclaw "$(id -gn 1000)"; \
+    else \
+        groupadd -g 1000 openclaw && \
+        useradd -u 1000 -g openclaw -m -s /bin/bash openclaw; \
+    fi
 
 # ---------------------------------------------------------------------------
 # Application configuration
