@@ -2793,6 +2793,429 @@ DEMOCLAW_VLLM_IMAGE=democlaw/vllm:local DEMOCLAW_OPENCLAW_IMAGE=democlaw/opencla
 
 ---
 
+## 커스텀 스킬 실습 가이드 (Hands-on Tutorial)
+
+이 가이드는 OpenClaw에서 커스텀 스킬을 만들고 등록하는 과정을 단계별로 실습합니다.
+
+> **사전 조건**: DemoClaw 스택이 실행 중이어야 합니다.
+> ```bash
+> ./scripts/start.sh   # Linux
+> .\scripts\start.ps1  # Windows
+> ```
+
+### 실습 1: Hello World 스킬 이해하기
+
+프로젝트에 포함된 예제 스킬의 구조를 먼저 살펴봅시다.
+
+#### 1-1. 스킬 디렉토리 구조 확인
+
+```bash
+tree examples/skills/
+# examples/skills/
+# ├── hello_world/
+# │   ├── hello.py         ← Python 스크립트 (실행 코드)
+# │   └── skill.yaml       ← 스킬 매니페스트 (메타데이터)
+# └── template/
+#     ├── skill_template.py ← 템플릿 스크립트
+#     └── skill.yaml        ← 템플릿 매니페스트
+```
+
+#### 1-2. 스킬 매니페스트 (skill.yaml) 이해
+
+```yaml
+name: hello_world                    # 스킬 고유 이름 (영문 소문자 + 밑줄)
+description: "간단한 인사 스킬"        # AI가 스킬 선택시 참고하는 설명
+version: "1.0.0"                     # 시맨틱 버전
+author: "DemoClaw"                   # 작성자
+entry_point: hello.py                # 실행할 Python 파일
+input_schema:                        # 입력 JSON 스키마
+  type: object
+  properties:
+    name:
+      type: string
+      description: "인사할 대상 이름"
+      default: "World"
+output_schema:                       # 출력 JSON 스키마
+  type: object
+  properties:
+    message:
+      type: string
+      description: "인사 메시지"
+```
+
+**핵심 포인트:**
+- `entry_point`: AI가 이 스킬을 호출하면 실행되는 파일
+- `input_schema`: AI가 어떤 파라미터를 넘겨야 하는지 정의
+- `output_schema`: AI가 받을 결과의 형태 정의
+- `description`: AI가 "이 스킬을 사용할지 말지" 판단할 때 참고
+
+#### 1-3. Python 스크립트 (hello.py) 이해
+
+```python
+#!/usr/bin/env python3
+"""Hello World 커스텀 스킬"""
+import sys
+import json
+
+def main():
+    # 1. stdin에서 JSON 입력 읽기 (OpenClaw이 전달)
+    input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+
+    # 2. 입력에서 파라미터 추출
+    name = input_data.get("name", "World")
+
+    # 3. 결과를 JSON으로 stdout에 출력 (OpenClaw이 수신)
+    result = {"message": f"Hello, {name}! This is a custom OpenClaw skill."}
+    print(json.dumps(result))
+
+if __name__ == "__main__":
+    main()
+```
+
+**핵심 패턴: `stdin → 처리 → stdout`**
+- **입력**: `sys.stdin`에서 JSON 읽기
+- **출력**: `print(json.dumps(result))`로 JSON 쓰기
+- **에러**: `sys.stderr`에 쓰고 `sys.exit(1)`
+
+#### 1-4. 로컬에서 테스트
+
+스킬을 OpenClaw에 등록하기 전에, 단독으로 테스트할 수 있습니다:
+
+```bash
+# 기본 테스트 (입력 없음 → "World" 사용)
+echo '{}' | python3 examples/skills/hello_world/hello.py
+# 출력: {"message": "Hello, World! This is a custom OpenClaw skill."}
+
+# 이름 지정 테스트
+echo '{"name": "Alice"}' | python3 examples/skills/hello_world/hello.py
+# 출력: {"message": "Hello, Alice! This is a custom OpenClaw skill."}
+
+# 한글 테스트
+echo '{"name": "진왕"}' | python3 examples/skills/hello_world/hello.py
+# 출력: {"message": "Hello, 진왕! This is a custom OpenClaw skill."}
+```
+
+---
+
+### 실습 2: 나만의 스킬 만들기 — 계산기 스킬
+
+간단한 계산기 스킬을 직접 만들어 봅시다.
+
+#### 2-1. 스킬 디렉토리 생성
+
+```bash
+mkdir -p my_skills/calculator
+```
+
+#### 2-2. Python 스크립트 작성
+
+`my_skills/calculator/calculator.py` 파일을 만듭니다:
+
+```python
+#!/usr/bin/env python3
+"""
+계산기 스킬 — 두 숫자의 사칙연산을 수행합니다.
+
+입력 예시: {"a": 10, "b": 3, "op": "add"}
+출력 예시: {"result": 13, "expression": "10 + 3 = 13"}
+"""
+import sys
+import json
+
+OPERATIONS = {
+    "add":      lambda a, b: a + b,
+    "subtract": lambda a, b: a - b,
+    "multiply": lambda a, b: a * b,
+    "divide":   lambda a, b: a / b if b != 0 else None,
+}
+
+SYMBOLS = {"add": "+", "subtract": "-", "multiply": "*", "divide": "/"}
+
+def run(input_data: dict) -> dict:
+    a = input_data.get("a", 0)
+    b = input_data.get("b", 0)
+    op = input_data.get("op", "add")
+
+    if op not in OPERATIONS:
+        return {"error": f"지원하지 않는 연산: {op}. 사용 가능: {list(OPERATIONS.keys())}"}
+
+    if op == "divide" and b == 0:
+        return {"error": "0으로 나눌 수 없습니다."}
+
+    result = OPERATIONS[op](a, b)
+    symbol = SYMBOLS[op]
+    return {
+        "result": result,
+        "expression": f"{a} {symbol} {b} = {result}"
+    }
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+        output = run(input_data)
+        print(json.dumps(output, ensure_ascii=False))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}, ensure_ascii=False), file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+```
+
+#### 2-3. 매니페스트 작성
+
+`my_skills/calculator/skill.yaml` 파일을 만듭니다:
+
+```yaml
+name: calculator
+description: "두 숫자의 사칙연산(덧셈, 뺄셈, 곱셈, 나눗셈)을 수행하는 계산기"
+version: "1.0.0"
+author: "실습자"
+entry_point: calculator.py
+input_schema:
+  type: object
+  required: ["a", "b"]
+  properties:
+    a:
+      type: number
+      description: "첫 번째 숫자"
+    b:
+      type: number
+      description: "두 번째 숫자"
+    op:
+      type: string
+      description: "연산 종류"
+      enum: ["add", "subtract", "multiply", "divide"]
+      default: "add"
+output_schema:
+  type: object
+  properties:
+    result:
+      type: number
+      description: "계산 결과"
+    expression:
+      type: string
+      description: "수식 표현 (예: 10 + 3 = 13)"
+    error:
+      type: string
+      description: "에러 메시지 (실패시)"
+```
+
+#### 2-4. 로컬 테스트
+
+```bash
+# 덧셈
+echo '{"a": 10, "b": 3, "op": "add"}' | python3 my_skills/calculator/calculator.py
+# 출력: {"result": 13, "expression": "10 + 3 = 13"}
+
+# 곱셈
+echo '{"a": 7, "b": 8, "op": "multiply"}' | python3 my_skills/calculator/calculator.py
+# 출력: {"result": 56, "expression": "7 * 8 = 56"}
+
+# 나눗셈
+echo '{"a": 100, "b": 3, "op": "divide"}' | python3 my_skills/calculator/calculator.py
+# 출력: {"result": 33.333..., "expression": "100 / 3 = 33.333..."}
+
+# 0으로 나누기 (에러 처리 확인)
+echo '{"a": 5, "b": 0, "op": "divide"}' | python3 my_skills/calculator/calculator.py
+# 출력: {"error": "0으로 나눌 수 없습니다."}
+```
+
+---
+
+### 실습 3: 외부 API를 호출하는 스킬 — 날씨 조회
+
+실제 API를 호출하는 스킬을 만들어 봅시다. (무료 API 사용)
+
+#### 3-1. 스킬 생성
+
+```bash
+mkdir -p my_skills/weather
+```
+
+`my_skills/weather/weather.py`:
+
+```python
+#!/usr/bin/env python3
+"""
+날씨 조회 스킬 — wttr.in 무료 API를 사용합니다.
+API 키가 필요 없어 실습에 적합합니다.
+
+입력: {"city": "Seoul"}
+출력: {"city": "Seoul", "temperature": "15°C", "condition": "Partly cloudy", ...}
+"""
+import sys
+import json
+import urllib.request
+import urllib.error
+
+def get_weather(city: str) -> dict:
+    """wttr.in API로 날씨 조회"""
+    url = f"https://wttr.in/{city}?format=j1"
+
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "DemoClaw-Skill/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as e:
+        return {"error": f"API 요청 실패: {e}"}
+    except json.JSONDecodeError:
+        return {"error": "API 응답을 파싱할 수 없습니다."}
+
+    current = data.get("current_condition", [{}])[0]
+    area = data.get("nearest_area", [{}])[0]
+
+    return {
+        "city": area.get("areaName", [{"value": city}])[0]["value"],
+        "country": area.get("country", [{"value": ""}])[0]["value"],
+        "temperature": f"{current.get('temp_C', '?')}°C",
+        "feels_like": f"{current.get('FeelsLikeC', '?')}°C",
+        "condition": current.get("weatherDesc", [{"value": "?"}])[0]["value"],
+        "humidity": f"{current.get('humidity', '?')}%",
+        "wind": f"{current.get('windspeedKmph', '?')} km/h",
+    }
+
+def main():
+    try:
+        input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+        city = input_data.get("city", "Seoul")
+        result = get_weather(city)
+        print(json.dumps(result, ensure_ascii=False))
+    except Exception as e:
+        print(json.dumps({"error": str(e)}, ensure_ascii=False), file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+```
+
+`my_skills/weather/skill.yaml`:
+
+```yaml
+name: weather
+description: "도시 이름으로 현재 날씨를 조회합니다 (기온, 습도, 체감온도, 바람)"
+version: "1.0.0"
+author: "실습자"
+entry_point: weather.py
+input_schema:
+  type: object
+  properties:
+    city:
+      type: string
+      description: "날씨를 조회할 도시 이름 (영문)"
+      default: "Seoul"
+output_schema:
+  type: object
+  properties:
+    city:
+      type: string
+    country:
+      type: string
+    temperature:
+      type: string
+    feels_like:
+      type: string
+    condition:
+      type: string
+    humidity:
+      type: string
+    wind:
+      type: string
+```
+
+#### 3-2. 테스트
+
+```bash
+# 서울 날씨
+echo '{"city": "Seoul"}' | python3 my_skills/weather/weather.py
+# 출력 예: {"city": "Seoul", "temperature": "15°C", "condition": "Partly cloudy", ...}
+
+# 도쿄 날씨
+echo '{"city": "Tokyo"}' | python3 my_skills/weather/weather.py
+
+# 뉴욕 날씨
+echo '{"city": "New York"}' | python3 my_skills/weather/weather.py
+```
+
+---
+
+### 실습 4: 스킬을 OpenClaw에 등록하기
+
+만든 스킬을 OpenClaw 컨테이너에 등록하는 방법입니다.
+
+#### 4-1. 스킬 파일을 컨테이너에 복사
+
+```bash
+# 계산기 스킬 복사
+docker cp my_skills/calculator democlaw-openclaw:/app/skills/calculator
+
+# 날씨 스킬 복사
+docker cp my_skills/weather democlaw-openclaw:/app/skills/weather
+
+# 복사 확인
+docker exec democlaw-openclaw ls /app/skills/
+```
+
+#### 4-2. OpenClaw에서 스킬 확인
+
+```bash
+# 등록된 스킬 목록 확인
+docker exec democlaw-openclaw openclaw skills list 2>/dev/null || \
+  echo "스킬 목록 명령이 없으면 웹 대시보드에서 확인하세요."
+```
+
+#### 4-3. 웹 대시보드에서 테스트
+
+1. 브라우저에서 대시보드 열기: `http://localhost:18789`
+2. 채팅창에서 AI에게 스킬 사용 요청:
+   - `"서울 날씨 알려줘"` → 날씨 스킬 호출
+   - `"123 곱하기 456 계산해줘"` → 계산기 스킬 호출
+
+---
+
+### 실습 5: 나만의 스킬 아이디어
+
+다음 아이디어를 참고하여 자신만의 스킬을 만들어 보세요:
+
+| 난이도 | 스킬 아이디어 | 힌트 |
+|--------|--------------|------|
+| ★☆☆ | **주사위 굴리기** | `random.randint(1, 6)` |
+| ★☆☆ | **문자열 뒤집기** | `text[::-1]` |
+| ★★☆ | **환율 변환기** | 무료 API: `api.exchangerate-api.com` |
+| ★★☆ | **해시 생성기** | `hashlib.sha256(text.encode()).hexdigest()` |
+| ★★★ | **뉴스 요약** | RSS 피드 파싱 + 텍스트 요약 |
+| ★★★ | **DB 조회** | `sqlite3` 모듈로 로컬 DB 쿼리 |
+
+#### 스킬 개발 체크리스트
+
+- [ ] `skill.yaml` 작성 (name, description, entry_point, input/output schema)
+- [ ] Python 스크립트 작성 (stdin JSON → stdout JSON 패턴)
+- [ ] 에러 처리 추가 (try/except → stderr + exit 1)
+- [ ] 로컬 테스트 통과 (`echo '...' | python3 my_skill.py`)
+- [ ] 컨테이너에 복사 (`docker cp`)
+- [ ] 대시보드에서 동작 확인
+
+---
+
+### 자주 묻는 질문 (FAQ)
+
+**Q: 스킬에서 pip 패키지를 사용하고 싶은데요?**
+A: `requirements.txt`를 스킬 디렉토리에 넣고, 컨테이너 안에서 설치합니다:
+```bash
+docker exec democlaw-openclaw pip install -r /app/skills/my_skill/requirements.txt
+```
+
+**Q: 스킬이 호출되지 않아요.**
+A: `description`을 구체적으로 작성하세요. AI는 description을 보고 어떤 스킬을 쓸지 판단합니다.
+
+**Q: 스킬 디버깅은 어떻게 하나요?**
+A: 로컬에서 `echo '입력' | python3 script.py`로 테스트하세요. `logging` 모듈로 디버그 로그를 stderr에 출력하면 OpenClaw 로그에서 볼 수 있습니다.
+
+**Q: 스킬끼리 데이터를 공유할 수 있나요?**
+A: 파일 시스템이나 환경 변수를 통해 공유할 수 있습니다. 스킬 간 직접 호출은 지원되지 않습니다.
+
+---
+
 ## License
 
 This project is licensed under the terms of the [MIT License](LICENSE).
