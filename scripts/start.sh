@@ -24,8 +24,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-VLLM_IMAGE="democlaw/vllm:latest"
-OPENCLAW_IMAGE="democlaw/openclaw:latest"
+VLLM_IMAGE="${DEMOCLAW_VLLM_IMAGE:-jinwangmok/democlaw-vllm:v1.0.0}"
+OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-jinwangmok/democlaw-openclaw:v1.0.0}"
 NETWORK="democlaw-net"
 VLLM_CONTAINER="democlaw-vllm"
 OPENCLAW_CONTAINER="democlaw-openclaw"
@@ -99,18 +99,21 @@ if "${RUNTIME}" network inspect "${NETWORK}" >/dev/null 2>&1; then
 fi
 
 # ===========================================================================
-# Phase 1: Build images (always rebuild to pick up changes)
+# Phase 1: Acquire images (pull from Docker Hub first; local build fallback)
 # ===========================================================================
 log ""
-log "--- Phase 1: Build images ---"
+log "--- Phase 1: Acquire images ---"
 
-log "Building vLLM image ..."
-"${RUNTIME}" build -t "${VLLM_IMAGE}" "${PROJECT_ROOT}/vllm" || error "Failed to build vLLM image."
+# Source the shared image acquisition library
+_img_log()   { log "$@"; }
+_img_warn()  { log "WARNING: $*"; }
+_img_error() { error "$@"; }
+source "${SCRIPT_DIR}/lib/image.sh"
 
-log "Building OpenClaw image ..."
-"${RUNTIME}" build -t "${OPENCLAW_IMAGE}" "${PROJECT_ROOT}/openclaw" || error "Failed to build OpenClaw image."
+ensure_image "${VLLM_IMAGE}" "${PROJECT_ROOT}/vllm"
+ensure_image "${OPENCLAW_IMAGE}" "${PROJECT_ROOT}/openclaw"
 
-log "Images built."
+log "Images ready."
 
 # ===========================================================================
 # Phase 2: Create network + start vLLM
@@ -122,6 +125,19 @@ log "Creating network '${NETWORK}' ..."
 "${RUNTIME}" network create "${NETWORK}" || error "Failed to create network."
 
 mkdir -p "${HF_CACHE_DIR}"
+
+# Source checksum library for model integrity verification
+_cksum_log()   { log "$@"; }
+_cksum_warn()  { log "WARNING: $*"; }
+_cksum_error() { log "ERROR: $*"; }
+source "${SCRIPT_DIR}/lib/checksum.sh"
+
+# Verify model checksums (if model is already cached)
+if ! checksum_model_needs_download "${HF_CACHE_DIR}" "${MODEL_NAME}"; then
+    log "Model checksums verified — cached model is intact."
+else
+    log "Model not yet cached or checksums missing — vLLM will download on first start."
+fi
 
 log "Starting vLLM container ..."
 log "  Model        : ${MODEL_NAME}"
@@ -179,18 +195,71 @@ if [ "${elapsed}" -ge "${VLLM_HEALTH_TIMEOUT}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Verify /v1/models
+# Verify /v1/models returns HTTP 200 with the expected model loaded
 # ---------------------------------------------------------------------------
-log "Checking /v1/models ..."
+log "Checking /v1/models for model '${MODEL_NAME}' ..."
+MODELS_URL="http://localhost:${VLLM_PORT}/v1/models"
+MODELS_TIMEOUT=120
 models_elapsed=0
-while [ "${models_elapsed}" -lt 60 ]; do
-    if curl -sf "http://localhost:${VLLM_PORT}/v1/models" >/dev/null 2>&1; then
-        log "vLLM /v1/models OK. Model ready."
-        break
+models_verified=false
+
+while [ "${models_elapsed}" -lt "${MODELS_TIMEOUT}" ]; do
+    # Capture both HTTP status code and response body
+    tmpfile=$(mktemp)
+    http_code=$(curl -sf -o "${tmpfile}" -w "%{http_code}" \
+        --max-time 10 "${MODELS_URL}" 2>/dev/null || echo "000")
+    response=$(cat "${tmpfile}" 2>/dev/null || echo "")
+    rm -f "${tmpfile}"
+
+    if [ "${http_code}" = "200" ] && [ -n "${response}" ]; then
+        # Parse model list and verify expected model is present
+        model_check=$(echo "${response}" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    models = [m.get('id','') for m in data.get('data', [])]
+    if models:
+        print('found:' + ','.join(models))
+    else:
+        print('empty')
+except Exception:
+    print('error')
+" 2>/dev/null || echo "error")
+
+        case "${model_check}" in
+            found:*)
+                models_listed="${model_check#found:}"
+                log "vLLM /v1/models returned HTTP 200."
+                log "  Available models: ${models_listed}"
+                if echo "${models_listed}" | grep -qF "${MODEL_NAME}"; then
+                    log "  Confirmed: '${MODEL_NAME}' is loaded and serving."
+                    models_verified=true
+                else
+                    log "  WARNING: Expected model '${MODEL_NAME}' not in list."
+                    log "  Proceeding with available models: ${models_listed}"
+                    models_verified=true
+                fi
+                break
+                ;;
+            empty)
+                # HTTP 200 but no models yet — keep polling
+                ;;
+        esac
     fi
+
     sleep 5
     models_elapsed=$((models_elapsed + 5))
+    if [ $((models_elapsed % 15)) -eq 0 ]; then
+        log "  ... waiting for /v1/models (${models_elapsed}/${MODELS_TIMEOUT}s, HTTP ${http_code})"
+    fi
 done
+
+if [ "${models_verified}" != "true" ]; then
+    log "WARNING: /v1/models did not confirm model readiness within ${MODELS_TIMEOUT}s."
+    log "  Last HTTP status: ${http_code:-000}"
+    log "  The model may still be loading. Check: curl ${MODELS_URL}"
+    log "  Container logs: ${RUNTIME} logs -f ${VLLM_CONTAINER}"
+fi
 
 # ===========================================================================
 # Phase 3: Start OpenClaw

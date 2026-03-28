@@ -40,7 +40,7 @@ OPENCLAW_HOST_PORT="${OPENCLAW_HOST_PORT:-18789}"
 #
 #   VLLM_MODEL_NAME : Model ID that OpenClaw sends in every API request.
 #                     Must match the model served by vLLM.
-#                     Default: Qwen/Qwen3-4B-AWQ  (AWQ 4-bit, 8 GB VRAM)
+#                     Default: Qwen/Qwen3.5-9B-AWQ  (AWQ 4-bit, 8 GB VRAM)
 #
 #   VLLM_API_KEY    : Placeholder API key.  vLLM accepts any non-empty value
 #                     by default; use "EMPTY" as the conventional placeholder.
@@ -61,7 +61,7 @@ OPENCLAW_HOST_PORT="${OPENCLAW_HOST_PORT:-18789}"
 # ---------------------------------------------------------------------------
 VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm:8000/v1}"
 VLLM_API_KEY="${VLLM_API_KEY:-EMPTY}"
-VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
+VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen3.5-9B-AWQ}"
 VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-4096}"
 VLLM_TEMPERATURE="${VLLM_TEMPERATURE:-0.7}"
 
@@ -190,7 +190,12 @@ verify_vllm_network_membership() {
 verify_vllm_network_membership
 
 # ---------------------------------------------------------------------------
-# Handle existing container (idempotent — safe to re-run)
+# Handle existing container (idempotent destroy-and-recreate)
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Idempotent container teardown: ALWAYS destroy and recreate.
+# This ensures every run produces an identical end-state regardless of prior
+# state — running, stopped, paused, or dead containers are all removed.
 # ---------------------------------------------------------------------------
 handle_existing_container() {
     if "${RUNTIME}" container inspect "${CONTAINER_NAME}" > /dev/null 2>&1; then
@@ -198,33 +203,26 @@ handle_existing_container() {
         state=$("${RUNTIME}" container inspect --format '{{.State.Status}}' "${CONTAINER_NAME}" 2>/dev/null \
                || "${RUNTIME}" container inspect --format '{{.State.Status}}' "${CONTAINER_NAME}")
 
-        if [ "${state}" = "running" ]; then
-            log "Container '${CONTAINER_NAME}' is already running."
-            log "Dashboard should be available at: http://localhost:${OPENCLAW_HOST_PORT}"
-            log "To restart, run: ${RUNTIME} rm -f ${CONTAINER_NAME} && $0"
-            exit 0
-        else
-            log "Removing stopped container '${CONTAINER_NAME}' ..."
-            "${RUNTIME}" rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
-        fi
+        log "Removing existing container '${CONTAINER_NAME}' (state: ${state}) for fresh recreation ..."
+        "${RUNTIME}" rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
     fi
 }
 
 handle_existing_container
 
 # ---------------------------------------------------------------------------
-# Build the OpenClaw image if not already present
+# Acquire OpenClaw image (pull from Docker Hub first; local build fallback)
+#
+# Strategy: Always attempt to pull the pre-built image from Docker Hub.
+# If pull fails (non-zero exit), fall back to building from the local
+# Dockerfile at <project_root>/openclaw/Dockerfile.
 # ---------------------------------------------------------------------------
-build_image() {
-    if ! "${RUNTIME}" image inspect "${IMAGE_TAG}" > /dev/null 2>&1; then
-        log "Building OpenClaw image '${IMAGE_TAG}' ..."
-        "${RUNTIME}" build -t "${IMAGE_TAG}" "${PROJECT_ROOT}/openclaw"
-    else
-        log "Image '${IMAGE_TAG}' already exists. Use '${RUNTIME} rmi ${IMAGE_TAG}' to rebuild."
-    fi
-}
+_img_log()   { log "$@"; }
+_img_warn()  { warn "$@"; }
+_img_error() { error "$@"; }
+source "${SCRIPT_DIR}/lib/image.sh"
 
-build_image
+ensure_image "${IMAGE_TAG}" "${PROJECT_ROOT}/openclaw"
 
 # ---------------------------------------------------------------------------
 # Launch the OpenClaw container
@@ -311,6 +309,7 @@ log "======================================================="
     --read-only \
     --tmpfs /tmp:rw,noexec,nosuid \
     --tmpfs /app/config:rw,noexec,nosuid,uid=1000,gid=1000 \
+    --tmpfs /home/openclaw:rw,noexec,nosuid,uid=1000,gid=1000 \
     "${IMAGE_TAG}"
 
 log "Container '${CONTAINER_NAME}' started successfully."

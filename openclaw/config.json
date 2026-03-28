@@ -4,7 +4,7 @@
     "baseUrl": "http://vllm:8000/v1",
     "apiKey": "EMPTY",
     "_apiKey_note": "Set to match VLLM_API_KEY in .env. 'EMPTY' (or any value) works when vLLM runs in no-auth mode (VLLM_API_KEY unset/EMPTY). When VLLM_API_KEY is a real secret, set apiKey to that same value so OpenClaw sends 'Authorization: Bearer <key>'.",
-    "model": "Qwen/Qwen3-4B-AWQ",
+    "model": "Qwen/Qwen3.5-9B-AWQ",
     "maxTokens": 4096,
     "temperature": 0.7
   },

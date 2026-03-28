@@ -121,7 +121,12 @@ validate_nvidia_gpu "${RUNTIME}"
 runtime_ensure_network "${NETWORK_NAME}"
 
 # ---------------------------------------------------------------------------
-# Handle existing container (idempotent)
+# Handle existing container (idempotent destroy-and-recreate)
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Idempotent container teardown: ALWAYS destroy and recreate.
+# This ensures every run produces an identical end-state regardless of prior
+# state — running, stopped, paused, or dead containers are all removed.
 # ---------------------------------------------------------------------------
 handle_existing_container() {
     if "${RUNTIME}" container inspect "${CONTAINER_NAME}" > /dev/null 2>&1; then
@@ -129,37 +134,41 @@ handle_existing_container() {
         state=$("${RUNTIME}" container inspect --format '{{.State.Status}}' "${CONTAINER_NAME}" 2>/dev/null \
                || "${RUNTIME}" container inspect --format '{{.State.Status}}' "${CONTAINER_NAME}")
 
-        if [ "${state}" = "running" ]; then
-            log "Container '${CONTAINER_NAME}' is already running."
-            log "To restart, run: ${RUNTIME} rm -f ${CONTAINER_NAME} && $0"
-            exit 0
-        else
-            log "Removing stopped container '${CONTAINER_NAME}' ..."
-            "${RUNTIME}" rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
-        fi
+        log "Removing existing container '${CONTAINER_NAME}' (state: ${state}) for fresh recreation ..."
+        "${RUNTIME}" rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
     fi
 }
 
 handle_existing_container
 
 # ---------------------------------------------------------------------------
-# Build the vLLM image if not already present
+# Acquire vLLM image (pull from Docker Hub first; local build fallback)
+#
+# Strategy: Always attempt to pull the pre-built image from Docker Hub.
+# If pull fails (non-zero exit), fall back to building from the local
+# Dockerfile at <project_root>/vllm/Dockerfile.
 # ---------------------------------------------------------------------------
-build_image() {
-    if ! "${RUNTIME}" image inspect "${IMAGE_TAG}" > /dev/null 2>&1; then
-        log "Building vLLM image '${IMAGE_TAG}' ..."
-        "${RUNTIME}" build -t "${IMAGE_TAG}" "${PROJECT_ROOT}/vllm"
-    else
-        log "Image '${IMAGE_TAG}' already exists. Use '${RUNTIME} rmi ${IMAGE_TAG}' to rebuild."
-    fi
-}
+_img_log()   { log "$@"; }
+_img_warn()  { warn "$@"; }
+_img_error() { error "$@"; }
+source "${SCRIPT_DIR}/lib/image.sh"
 
-build_image
+ensure_image "${IMAGE_TAG}" "${PROJECT_ROOT}/vllm"
 
 # ---------------------------------------------------------------------------
 # Prepare HuggingFace cache directory on the host
 # ---------------------------------------------------------------------------
 mkdir -p "${HF_CACHE_DIR}"
+
+# ---------------------------------------------------------------------------
+# Source checksum library for model integrity verification
+# ---------------------------------------------------------------------------
+_cksum_log()   { log "$@"; }
+_cksum_warn()  { warn "$@"; }
+_cksum_error() { echo "[start-vllm] ERROR: $*" >&2; }
+
+# shellcheck source=lib/checksum.sh
+source "${SCRIPT_DIR}/lib/checksum.sh"
 
 # ---------------------------------------------------------------------------
 # pull_model_weights — Pre-download the Qwen3-4B AWQ 4-bit weights
@@ -168,8 +177,11 @@ mkdir -p "${HF_CACHE_DIR}"
 # Python and huggingface_hub installed) to invoke `huggingface-cli download`.
 # The HF cache directory is bind-mounted so weights persist across runs.
 #
-# This step is idempotent: if the model snapshot is already present in the
-# cache, huggingface-cli detects the existing files and returns immediately.
+# Checksum-verified idempotency:
+#   1. Before download: check existing files against stored .sha256 checksums
+#   2. If ALL checksums match → skip download entirely (verified cache hit)
+#   3. If any mismatch or missing → proceed with (re-)download
+#   4. After download: compute and store new .sha256 sidecar files
 #
 # Set SKIP_MODEL_PULL=true to bypass this step entirely.
 # Set HF_TOKEN (or HUGGING_FACE_HUB_TOKEN) for gated/private models.
@@ -185,8 +197,19 @@ pull_model_weights() {
     log "  Model      : ${MODEL_NAME}"
     log "  Cache dir  : ${HF_CACHE_DIR}"
     log "======================================================="
+
+    # ------------------------------------------------------------------
+    # Checksum verification: skip download if all files pass
+    # ------------------------------------------------------------------
+    if ! checksum_model_needs_download "${HF_CACHE_DIR}" "${MODEL_NAME}"; then
+        log "Checksum verification passed — model files are intact."
+        log "Skipping download."
+        log "======================================================="
+        return 0
+    fi
+
     log "This may take several minutes on first run (~5 GB download)."
-    log "Subsequent runs will use the local cache and finish instantly."
+    log "Subsequent runs with verified checksums will skip instantly."
 
     # Build GPU flags (needed even for download container to share the image cleanly,
     # though GPU is not strictly required just for downloading weights)
@@ -218,23 +241,9 @@ print(f'[pull] HuggingFace cache: {cache}')
 
 model_name = '${MODEL_NAME}'
 print(f'[pull] Downloading model: {model_name}')
-print('[pull] Checking local cache ...')
 
 try:
-    from huggingface_hub import snapshot_download, HfApi
-    api = HfApi()
-
-    # Check if the model is already fully cached
-    try:
-        local_path = snapshot_download(
-            repo_id=model_name,
-            local_files_only=True,
-        )
-        print(f'[pull] Model already cached at: {local_path}')
-        print('[pull] Skipping download.')
-        sys.exit(0)
-    except Exception:
-        pass  # not cached yet — proceed to download
+    from huggingface_hub import snapshot_download
 
     print(f'[pull] Downloading {model_name} weights ...')
     local_path = snapshot_download(
@@ -251,6 +260,15 @@ except Exception as e:
     print('[pull] The vLLM server will attempt to download on first start.', file=sys.stderr)
     sys.exit(1)
 "
+
+    # ------------------------------------------------------------------
+    # Post-download: store checksums for all model files
+    # These .sha256 sidecars enable checksum-verified skipping on next run.
+    # ------------------------------------------------------------------
+    log "Storing checksums for downloaded model files ..."
+    checksum_store_model_cache "${HF_CACHE_DIR}" "${MODEL_NAME}" || {
+        warn "Failed to store model checksums. Download will not be skipped on next run."
+    }
 
     log "Model pre-pull step complete."
     log "======================================================="

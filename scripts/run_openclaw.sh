@@ -233,43 +233,38 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 4: Handle existing container (idempotent)
+# Step 4: Handle existing container (idempotent destroy-and-recreate)
 #
-# If a container with this name is already running, report its status and
-# exit cleanly.  If a stopped/failed container exists, remove it so the
-# fresh launch can proceed.
+# Every run must produce an identical end-state. Any pre-existing container
+# — running, stopped, paused, or dead — is unconditionally removed so a
+# fresh container is always created with the latest configuration.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Idempotent container teardown: ALWAYS destroy and recreate.
+# This ensures every run produces an identical end-state regardless of prior
+# state — running, stopped, paused, or dead containers are all removed.
 # ---------------------------------------------------------------------------
 if "${RUNTIME}" container inspect "${CONTAINER_NAME}" > /dev/null 2>&1; then
     container_state=$("${RUNTIME}" container inspect \
         --format '{{.State.Status}}' "${CONTAINER_NAME}" 2>/dev/null || echo "unknown")
 
-    case "${container_state}" in
-        running)
-            log "Container '${CONTAINER_NAME}' is already running."
-            log "  Dashboard: http://localhost:${OPENCLAW_HOST_PORT}"
-            log "  To restart: ${RUNTIME} rm -f ${CONTAINER_NAME} && $0"
-            exit 0
-            ;;
-        *)
-            log "Removing existing container '${CONTAINER_NAME}' (state: ${container_state}) ..."
-            "${RUNTIME}" rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
-            ;;
-    esac
+    log "Removing existing container '${CONTAINER_NAME}' (state: ${container_state}) for fresh recreation ..."
+    "${RUNTIME}" rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: Build the OpenClaw image if not already present
+# Step 5: Acquire OpenClaw image (pull from Docker Hub first; local build fallback)
 #
-# The Dockerfile is at <project_root>/openclaw/Dockerfile and builds an
-# Ubuntu 24.04 image with Node.js and the openclaw npm package.
+# Strategy: Always attempt to pull the pre-built image from Docker Hub.
+# If pull fails (non-zero exit), fall back to building from the local
+# Dockerfile at <project_root>/openclaw/Dockerfile.
 # ---------------------------------------------------------------------------
-if ! "${RUNTIME}" image inspect "${IMAGE_TAG}" > /dev/null 2>&1; then
-    log "Image '${IMAGE_TAG}' not found — building from ${PROJECT_ROOT}/openclaw ..."
-    "${RUNTIME}" build -t "${IMAGE_TAG}" "${PROJECT_ROOT}/openclaw"
-    log "Image '${IMAGE_TAG}' built successfully."
-else
-    log "Image '${IMAGE_TAG}' already exists."
-fi
+_img_log()   { log "$@"; }
+_img_warn()  { warn "$@"; }
+_img_error() { error "$@"; }
+source "${SCRIPT_DIR}/lib/image.sh"
+
+ensure_image "${IMAGE_TAG}" "${PROJECT_ROOT}/openclaw"
 
 # ---------------------------------------------------------------------------
 # Step 6: Launch the OpenClaw container
@@ -356,6 +351,7 @@ log "======================================================="
     --read-only \
     --tmpfs /tmp:rw,noexec,nosuid \
     --tmpfs /app/config:rw,noexec,nosuid,uid=1000,gid=1000 \
+    --tmpfs /home/openclaw:rw,noexec,nosuid,uid=1000,gid=1000 \
     "${IMAGE_TAG}"
 
 log "Container '${CONTAINER_NAME}' started."

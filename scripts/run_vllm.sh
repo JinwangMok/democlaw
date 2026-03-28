@@ -186,46 +186,51 @@ log "Ensuring shared network '${NETWORK_NAME}' exists ..."
 runtime_ensure_network "${NETWORK_NAME}"
 
 # ---------------------------------------------------------------------------
-# Step 4: Handle existing container (idempotent)
+# Step 4: Handle existing container (idempotent destroy-and-recreate)
 #
-# If a container with this name is already running, report its status and
-# exit cleanly (the API is already available).  If a stopped/failed container
-# exists, remove it so the fresh launch can proceed.
+# Every run must produce an identical end-state. Any pre-existing container
+# — running, stopped, paused, or dead — is unconditionally removed so a
+# fresh container is always created with the latest configuration.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Idempotent container teardown: ALWAYS destroy and recreate.
+# This ensures every run produces an identical end-state regardless of prior
+# state — running, stopped, paused, or dead containers are all removed.
 # ---------------------------------------------------------------------------
 if "${RUNTIME}" container inspect "${CONTAINER_NAME}" > /dev/null 2>&1; then
     container_state=$("${RUNTIME}" container inspect \
         --format '{{.State.Status}}' "${CONTAINER_NAME}" 2>/dev/null || echo "unknown")
 
-    case "${container_state}" in
-        running)
-            log "Container '${CONTAINER_NAME}' is already running."
-            log "  API: http://localhost:${VLLM_HOST_PORT}/v1"
-            log "  To restart: ${RUNTIME} rm -f ${CONTAINER_NAME} && $0"
-            exit 0
-            ;;
-        *)
-            log "Removing existing container '${CONTAINER_NAME}' (state: ${container_state}) ..."
-            "${RUNTIME}" rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
-            ;;
-    esac
+    log "Removing existing container '${CONTAINER_NAME}' (state: ${container_state}) for fresh recreation ..."
+    "${RUNTIME}" rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: Build the vLLM image if not already present
+# Step 5: Acquire vLLM image (pull from Docker Hub first; local build fallback)
 #
-# The Dockerfile is located at <project_root>/vllm/Dockerfile and extends
-# vllm/vllm-openai with the Qwen3-4B AWQ entrypoint and healthcheck.
+# Strategy: Always attempt to pull the pre-built image from Docker Hub.
+# If pull fails (non-zero exit), fall back to building from the local
+# Dockerfile at <project_root>/vllm/Dockerfile.
 # ---------------------------------------------------------------------------
-if ! "${RUNTIME}" image inspect "${IMAGE_TAG}" > /dev/null 2>&1; then
-    log "Image '${IMAGE_TAG}' not found — building from ${PROJECT_ROOT}/vllm ..."
-    "${RUNTIME}" build -t "${IMAGE_TAG}" "${PROJECT_ROOT}/vllm"
-    log "Image '${IMAGE_TAG}' built successfully."
-else
-    log "Image '${IMAGE_TAG}' already exists."
-fi
+_img_log()   { log "$@"; }
+_img_warn()  { warn "$@"; }
+_img_error() { error "$@"; }
+source "${SCRIPT_DIR}/lib/image.sh"
+
+ensure_image "${IMAGE_TAG}" "${PROJECT_ROOT}/vllm"
 
 # Ensure the HuggingFace cache directory exists on the host
 mkdir -p "${HF_CACHE_DIR}"
+
+# ---------------------------------------------------------------------------
+# Source checksum library for model integrity verification
+# ---------------------------------------------------------------------------
+_cksum_log()   { log "$@"; }
+_cksum_warn()  { warn "$@"; }
+_cksum_error() { echo "[run_vllm] ERROR: $*" >&2; }
+
+# shellcheck source=lib/checksum.sh
+source "${SCRIPT_DIR}/lib/checksum.sh"
 
 # ---------------------------------------------------------------------------
 # Step 6: Pre-pull Qwen3-4B AWQ 4-bit model weights from HuggingFace
@@ -234,8 +239,11 @@ mkdir -p "${HF_CACHE_DIR}"
 #   1. huggingface-cli on the host    — preferred; no extra container needed
 #   2. Temporary container (vLLM image) — fallback; guarantees correct tooling
 #
-# Both strategies are idempotent: if weights are already cached the step
-# completes in seconds without any network traffic.
+# Checksum-verified idempotency:
+#   1. Before download: check existing files against stored .sha256 checksums
+#   2. If ALL checksums match → skip download entirely (verified cache hit)
+#   3. If any mismatch or missing → proceed with (re-)download
+#   4. After download: compute and store new .sha256 sidecar files
 #
 # To skip this step entirely (e.g. weights pre-cached on a shared NFS path):
 #   SKIP_MODEL_PULL=true ./scripts/run_vllm.sh
@@ -251,24 +259,38 @@ pull_model_weights() {
     log "  Model     : ${MODEL_NAME}"
     log "  Cache dir : ${HF_CACHE_DIR}"
     log "======================================================="
-    log "First-run download is ~5 GB. Subsequent runs use the local cache."
+
+    # ------------------------------------------------------------------
+    # Checksum verification: skip download if all files pass
+    # ------------------------------------------------------------------
+    if ! checksum_model_needs_download "${HF_CACHE_DIR}" "${MODEL_NAME}"; then
+        log "Checksum verification passed — model files are intact."
+        log "Skipping download."
+        log "======================================================="
+        return 0
+    fi
+
+    log "First-run download is ~5 GB. Subsequent runs with verified checksums will skip instantly."
 
     # ------------------------------------------------------------------
     # Strategy 1: huggingface-cli present on the host.
     # Preferred path — no extra container launch required.
     # ------------------------------------------------------------------
+    local download_succeeded=false
+
     if command -v huggingface-cli > /dev/null 2>&1; then
         log "huggingface-cli found on host — using CLI download ..."
 
-        HF_HOME="${HF_CACHE_DIR}" \
+        if HF_HOME="${HF_CACHE_DIR}" \
             huggingface-cli download \
                 "${MODEL_NAME}" \
                 --ignore-patterns "*.pt" "*.bin" \
-                --local-dir-use-symlinks False \
-        && log "Model weights cached successfully." \
-        && return 0
-
-        log "huggingface-cli download failed — falling back to container method ..."
+                --local-dir-use-symlinks False; then
+            log "Model weights downloaded successfully."
+            download_succeeded=true
+        else
+            log "huggingface-cli download failed — falling back to container method ..."
+        fi
     fi
 
     # ------------------------------------------------------------------
@@ -276,24 +298,25 @@ pull_model_weights() {
     # Uses the same image that will serve inference, so the Python /
     # huggingface_hub versions are guaranteed to be compatible.
     # ------------------------------------------------------------------
-    log "Downloading model weights via temporary vLLM container ..."
+    if [ "${download_succeeded}" = "false" ]; then
+        log "Downloading model weights via temporary vLLM container ..."
 
-    local hf_token_flags=""
-    if [ -n "${HF_TOKEN:-}" ]; then
-        hf_token_flags="-e HF_TOKEN=${HF_TOKEN} -e HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}"
-    fi
+        local hf_token_flags=""
+        if [ -n "${HF_TOKEN:-}" ]; then
+            hf_token_flags="-e HF_TOKEN=${HF_TOKEN} -e HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}"
+        fi
 
-    # SC2086: GPU_FLAGS and hf_token_flags must word-split into separate args.
-    # shellcheck disable=SC2086,SC2046
-    "${RUNTIME}" run --rm \
-        --name "democlaw-vllm-pull" \
-        $(runtime_gpu_flags) \
-        --shm-size 1g \
-        -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
-        -e "HF_HUB_DISABLE_PROGRESS_BARS=0" \
-        ${hf_token_flags} \
-        "${IMAGE_TAG}" \
-        python3 -c "
+        # SC2086: GPU_FLAGS and hf_token_flags must word-split into separate args.
+        # shellcheck disable=SC2086,SC2046
+        "${RUNTIME}" run --rm \
+            --name "democlaw-vllm-pull" \
+            $(runtime_gpu_flags) \
+            --shm-size 1g \
+            -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
+            -e "HF_HUB_DISABLE_PROGRESS_BARS=0" \
+            ${hf_token_flags} \
+            "${IMAGE_TAG}" \
+            python3 -c "
 import sys, os
 
 model_name = '${MODEL_NAME}'
@@ -303,14 +326,6 @@ print(f'[pull] Cache : {cache}')
 
 try:
     from huggingface_hub import snapshot_download
-
-    # Check local cache first — exits immediately if weights already present
-    try:
-        local_path = snapshot_download(repo_id=model_name, local_files_only=True)
-        print(f'[pull] Already cached at: {local_path}')
-        sys.exit(0)
-    except Exception:
-        pass  # not cached yet — proceed to download
 
     print('[pull] Downloading AWQ 4-bit weights (this may take several minutes) ...')
     local_path = snapshot_download(
@@ -327,6 +342,16 @@ except Exception as exc:
     print(f'[pull] Download failed: {exc}', file=sys.stderr)
     sys.exit(1)
 "
+    fi
+
+    # ------------------------------------------------------------------
+    # Post-download: store checksums for all model files
+    # These .sha256 sidecars enable checksum-verified skipping on next run.
+    # ------------------------------------------------------------------
+    log "Storing checksums for downloaded model files ..."
+    checksum_store_model_cache "${HF_CACHE_DIR}" "${MODEL_NAME}" || {
+        warn "Failed to store model checksums. Download will not be skipped on next run."
+    }
 
     log "Model pre-pull complete."
     log "======================================================="

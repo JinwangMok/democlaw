@@ -130,7 +130,31 @@ runtime_ensure_network() {
 }
 
 # ---------------------------------------------------------------------------
+# runtime_force_remove — Unconditionally destroy a container regardless of state
+#
+# Idempotent: returns 0 whether the container existed or not.
+# This is the preferred teardown method — every run should destroy and recreate
+# containers to guarantee identical end-state.
+#
+# Usage: runtime_force_remove <container_name>
+# ---------------------------------------------------------------------------
+runtime_force_remove() {
+    local cname="${1:?container name required}"
+    if "${RUNTIME}" container inspect "${cname}" > /dev/null 2>&1; then
+        local state
+        state=$("${RUNTIME}" container inspect --format '{{.State.Status}}' "${cname}" 2>/dev/null || echo "unknown")
+        _rt_log "Removing container '${cname}' (state: ${state}) for fresh recreation ..."
+        "${RUNTIME}" rm -f "${cname}" > /dev/null 2>&1 || true
+    fi
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # runtime_remove_if_stopped — Remove a container only if it exists and is not running
+#
+# DEPRECATED: Prefer runtime_force_remove() for idempotent destroy-and-recreate.
+# This function is kept for backward compatibility but new code should use
+# runtime_force_remove() to ensure containers are always recreated.
 #
 # Usage: runtime_remove_if_stopped <container_name>
 # Returns 0 if container was removed or didn't exist, 1 if still running.

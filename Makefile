@@ -487,6 +487,7 @@ run-openclaw: _require-runtime
 		--read-only \
 		--tmpfs /tmp:rw,noexec,nosuid \
 		--tmpfs /app/config:rw,noexec,nosuid,uid=1000,gid=1000 \
+		--tmpfs /home/openclaw:rw,noexec,nosuid,uid=1000,gid=1000 \
 		$(OPENCLAW_IMAGE_TAG)
 	@echo "[run-openclaw] Container '$(OPENCLAW_CONTAINER_NAME)' started."
 	@echo "[run-openclaw] Dashboard   : http://localhost:$(OPENCLAW_HOST_PORT)"

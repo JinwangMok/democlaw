@@ -26,7 +26,7 @@ DemoClaw requires a **Linux x86_64** host. The following distributions are teste
 | **Fedora** | 38 | |
 | **RHEL / CentOS Stream / Rocky / AlmaLinux** | 9 | |
 
-> macOS and Windows are **not supported**. WSL2 on Windows is unsupported and untested.
+> macOS is **not supported**. Windows is supported via **Docker Desktop** (which uses WSL2 backend) — see [Windows Quick Start](#windows-quick-start).
 
 ### Required software
 
@@ -194,7 +194,7 @@ nvidia-ctk cdi list
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-org/democlaw.git
+git clone https://github.com/JinwangMok/democlaw.git
 cd democlaw
 
 # 2. (Optional) Copy and edit the environment file
@@ -226,7 +226,7 @@ This guide walks you through every step required to get DemoClaw running on a fr
 ### Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/your-org/democlaw.git
+git clone https://github.com/JinwangMok/democlaw.git
 cd democlaw
 ```
 
@@ -2314,6 +2314,213 @@ The [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-container-toolki
 - [AWQ: Activation-aware Weight Quantization](https://arxiv.org/abs/2306.00978) — the quantisation technique used by `Qwen3-4B-AWQ`
 - [PagedAttention paper](https://arxiv.org/abs/2309.06180) — the memory-management technique behind vLLM's efficiency
 - [HuggingFace model hub](https://huggingface.co/models?pipeline_tag=text-generation&sort=downloads) — browse other AWQ-quantised models compatible with vLLM
+
+## Windows Quick Start
+
+DemoClaw supports Windows via **Docker Desktop** (WSL2 backend). PowerShell and batch scripts are provided.
+
+### Prerequisites (Windows)
+
+| Requirement | Details |
+|-------------|---------|
+| **Docker Desktop** | [Install](https://docs.docker.com/desktop/install/windows-install/) with WSL2 backend enabled |
+| **NVIDIA GPU** | 8 GB+ VRAM with latest [Game Ready / Studio driver](https://www.nvidia.com/Download/index.aspx) |
+| **Git** | [Git for Windows](https://git-scm.com/download/win) |
+
+### Launch (Windows)
+
+```powershell
+# Clone
+git clone https://github.com/JinwangMok/democlaw.git
+cd democlaw
+
+# Option A: PowerShell
+.\scripts\start.ps1
+
+# Option B: Batch (double-click or from CMD)
+.\scripts\start.bat
+```
+
+The scripts mirror the Linux `start.sh` behavior: pull images from Docker Hub (fallback to local build), destroy/recreate containers, health-check both services, then print the dashboard URL.
+
+---
+
+## Pre-download Models
+
+To avoid waiting for model download during container startup, pre-download model weights with the provided scripts. The vLLM container mounts the local cache, so downloads only happen once.
+
+### Linux / macOS
+
+```bash
+# Default model (Qwen/Qwen3-4B-AWQ)
+./scripts/download-models.sh
+
+# Custom model
+./scripts/download-models.sh "Qwen/Qwen2.5-7B-Instruct-AWQ"
+
+# With HuggingFace token (for gated models)
+HF_TOKEN=hf_xxx ./scripts/download-models.sh
+```
+
+### Windows
+
+```powershell
+# PowerShell
+.\scripts\download-models.ps1
+
+# With custom model
+.\scripts\download-models.ps1 -ModelName "Qwen/Qwen2.5-7B-Instruct-AWQ"
+
+# Batch (double-click or from CMD)
+.\scripts\download-models.bat
+```
+
+The scripts download model weights to `~/.cache/huggingface` (Linux) or `%USERPROFILE%\.cache\huggingface` (Windows) and verify SHA256 checksums. On subsequent runs, existing files are verified and skipped if intact.
+
+---
+
+## Custom Skills
+
+OpenClaw supports **custom skills** — Python scripts that extend the AI agent's capabilities. Skills let the agent call your code to perform tasks like querying databases, calling APIs, or running computations.
+
+### Skill Structure
+
+A skill consists of two files in a directory:
+
+```
+my_skill/
+├── skill.yaml      # Skill manifest (name, description, I/O schema)
+└── my_script.py    # Python entry point
+```
+
+### Example: Hello World Skill
+
+**`examples/skills/hello_world/skill.yaml`**:
+
+```yaml
+name: hello_world
+description: "A simple greeting skill that demonstrates custom skill creation"
+version: "1.0.0"
+author: "DemoClaw"
+entry_point: hello.py
+input_schema:
+  type: object
+  properties:
+    name:
+      type: string
+      description: "Name to greet"
+      default: "World"
+output_schema:
+  type: object
+  properties:
+    message:
+      type: string
+      description: "Greeting message"
+```
+
+**`examples/skills/hello_world/hello.py`**:
+
+```python
+#!/usr/bin/env python3
+"""Hello World custom skill for OpenClaw."""
+import sys
+import json
+
+def main():
+    input_data = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+    name = input_data.get("name", "World")
+    result = {"message": f"Hello, {name}! This is a custom OpenClaw skill."}
+    print(json.dumps(result))
+
+if __name__ == "__main__":
+    main()
+```
+
+### Creating Your Own Skill
+
+1. **Copy the template**:
+   ```bash
+   cp -r examples/skills/template my_skills/my_new_skill
+   ```
+
+2. **Edit `skill.yaml`**: Set the name, description, input/output schemas.
+
+3. **Implement `skill_template.py`**: Write your logic in the `run()` function. The script reads JSON from stdin and writes JSON to stdout.
+
+4. **Register with OpenClaw**: Place the skill directory where OpenClaw can discover it (see OpenClaw documentation for skill paths).
+
+### Skill Development Tips
+
+- **Input**: Always read JSON from `sys.stdin`
+- **Output**: Always write JSON to `sys.stdout`
+- **Errors**: Write error JSON to `sys.stderr` and exit with code 1
+- **Dependencies**: Keep skills self-contained; include a `requirements.txt` if needed
+- **Testing**: Test standalone: `echo '{"name":"Alice"}' | python hello.py`
+
+---
+
+## ClawHub — Skill Marketplace
+
+[ClawHub](https://clawhub.com) is the community marketplace for OpenClaw skills. You can browse, download, and publish skills.
+
+### Installing ClawHub CLI
+
+```bash
+# Install via npm (requires Node.js)
+npm install -g clawhub
+
+# Verify installation
+clawhub --version
+```
+
+### Downloading Skills from ClawHub
+
+```bash
+# Search for skills
+clawhub search "weather"
+
+# Download a skill
+clawhub install weather-lookup
+
+# List installed skills
+clawhub list
+
+# Update all installed skills
+clawhub update
+```
+
+### Publishing Skills to ClawHub
+
+```bash
+# Initialize a skill for publishing
+cd my_skills/my_new_skill
+clawhub init
+
+# Publish
+clawhub publish
+```
+
+### Using Downloaded Skills
+
+Skills installed via ClawHub are automatically placed in OpenClaw's skill discovery path. After installing a skill, restart OpenClaw (or run `./scripts/start.sh` again) for the agent to pick it up.
+
+---
+
+## Docker Hub Images
+
+Pre-built images are published to Docker Hub for faster startup (no local build required):
+
+| Image | Tag | Description |
+|-------|-----|-------------|
+| `jinwangmok/democlaw-vllm` | `v1.0.0` | vLLM server with Qwen3-4B-AWQ support |
+| `jinwangmok/democlaw-openclaw` | `v1.0.0` | OpenClaw web dashboard |
+
+The `start.sh` (and `start.ps1`) scripts automatically pull these images. If Docker Hub is unreachable, they fall back to building locally from the `vllm/` and `openclaw/` Dockerfiles.
+
+To force a local build, set:
+```bash
+DEMOCLAW_VLLM_IMAGE=democlaw/vllm:local DEMOCLAW_OPENCLAW_IMAGE=democlaw/openclaw:local ./scripts/start.sh
+```
 
 ---
 

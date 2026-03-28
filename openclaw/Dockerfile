@@ -6,7 +6,7 @@
 #   NODE_MAJOR           — Node.js major version to install (default: 20)
 #   OPENCLAW_NPM_VERSION — npm package version/tag to install (default: latest)
 #   VLLM_BASE_URL        — default vLLM backend URL   (default: http://vllm:8000/v1)
-#   VLLM_MODEL_NAME      — default model name          (default: Qwen/Qwen3-4B-AWQ)
+#   VLLM_MODEL_NAME      — default model name          (default: Qwen/Qwen3.5-9B-AWQ)
 #   OPENCLAW_PORT        — port the dashboard listens on (default: 18789)
 #   VERSION              — image version label          (default: dev)
 #   BUILD_DATE           — ISO-8601 build timestamp     (default: unknown)
@@ -19,7 +19,7 @@
 ARG NODE_MAJOR=22
 ARG OPENCLAW_NPM_VERSION=latest
 ARG VLLM_BASE_URL=http://vllm:8000/v1
-ARG VLLM_MODEL_NAME=Qwen/Qwen3-4B-AWQ
+ARG VLLM_MODEL_NAME=Qwen/Qwen3.5-9B-AWQ
 ARG OPENCLAW_PORT=18789
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
@@ -113,7 +113,7 @@ RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh \
 ENV NODE_ENV="production" \
     VLLM_BASE_URL="http://vllm:8000/v1" \
     VLLM_API_KEY="EMPTY" \
-    VLLM_MODEL_NAME="Qwen/Qwen3-4B-AWQ" \
+    VLLM_MODEL_NAME="Qwen/Qwen3.5-9B-AWQ" \
     VLLM_MAX_TOKENS=4096 \
     VLLM_TEMPERATURE=0.7 \
     VLLM_HEALTH_RETRIES=60 \
@@ -125,11 +125,11 @@ ENV NODE_ENV="production" \
     OPENAI_API_BASE="http://vllm:8000/v1" \
     OPENAI_BASE_URL="http://vllm:8000/v1" \
     OPENAI_API_KEY="EMPTY" \
-    OPENAI_MODEL="Qwen/Qwen3-4B-AWQ" \
+    OPENAI_MODEL="Qwen/Qwen3.5-9B-AWQ" \
     OPENCLAW_LLM_PROVIDER="openai-compatible" \
     OPENCLAW_LLM_BASE_URL="http://vllm:8000/v1" \
     OPENCLAW_LLM_API_KEY="EMPTY" \
-    OPENCLAW_LLM_MODEL="Qwen/Qwen3-4B-AWQ" \
+    OPENCLAW_LLM_MODEL="Qwen/Qwen3.5-9B-AWQ" \
     OPENCLAW_LLM_MAX_TOKENS=4096 \
     OPENCLAW_LLM_TEMPERATURE=0.7
 

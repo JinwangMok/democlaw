@@ -118,26 +118,42 @@ if not errorlevel 1 (
 )
 
 :: ===========================================================================
-:: Phase 1: Build images (always rebuild to pick up changes)
+:: Phase 1: Acquire images (pull from Docker Hub first; local build fallback)
 :: ===========================================================================
 echo [start]
-echo [start] --- Phase 1: Build images ---
+echo [start] --- Phase 1: Acquire images ---
 
-echo [start] Building vLLM image ...
-%RUNTIME% build -t %VLLM_IMAGE% "%PROJECT_ROOT%\vllm"
+:: --- vLLM image: pull first, build on failure ---
+echo [start] Pulling vLLM image '%VLLM_IMAGE%' from registry ...
+%RUNTIME% pull %VLLM_IMAGE% >nul 2>&1
 if errorlevel 1 (
-    echo [start] ERROR: Failed to build vLLM image.
-    exit /b 1
+    echo [start] WARNING: Pull failed for '%VLLM_IMAGE%'. Falling back to local build ...
+    %RUNTIME% build -t %VLLM_IMAGE% "%PROJECT_ROOT%\vllm"
+    if errorlevel 1 (
+        echo [start] ERROR: Both pull and local build failed for vLLM image.
+        exit /b 1
+    )
+    echo [start] vLLM image built locally.
+) else (
+    echo [start] vLLM image pulled from registry.
 )
 
-echo [start] Building OpenClaw image ...
-%RUNTIME% build -t %OPENCLAW_IMAGE% "%PROJECT_ROOT%\openclaw"
+:: --- OpenClaw image: pull first, build on failure ---
+echo [start] Pulling OpenClaw image '%OPENCLAW_IMAGE%' from registry ...
+%RUNTIME% pull %OPENCLAW_IMAGE% >nul 2>&1
 if errorlevel 1 (
-    echo [start] ERROR: Failed to build OpenClaw image.
-    exit /b 1
+    echo [start] WARNING: Pull failed for '%OPENCLAW_IMAGE%'. Falling back to local build ...
+    %RUNTIME% build -t %OPENCLAW_IMAGE% "%PROJECT_ROOT%\openclaw"
+    if errorlevel 1 (
+        echo [start] ERROR: Both pull and local build failed for OpenClaw image.
+        exit /b 1
+    )
+    echo [start] OpenClaw image built locally.
+) else (
+    echo [start] OpenClaw image pulled from registry.
 )
 
-echo [start] Images built.
+echo [start] Images ready.
 
 :: ===========================================================================
 :: Phase 2: Create network + start vLLM

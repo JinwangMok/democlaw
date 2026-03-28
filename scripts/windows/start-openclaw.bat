@@ -256,28 +256,27 @@ set "_CNAME=%~1"
 %RUNTIME% container inspect "%_CNAME%" >nul 2>&1
 if errorlevel 1 exit /b 0
 
+REM Idempotent: ALWAYS destroy and recreate — never skip running containers
 for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "%_CNAME%" 2^>nul') do set "_CSTATE=%%s"
-if "!_CSTATE!"=="running" (
-    echo [start-openclaw] Container '%_CNAME%' is already running.
-    echo [start-openclaw] Dashboard: http://localhost:%OPENCLAW_HOST_PORT%
-    echo [start-openclaw] To restart, run: %RUNTIME% rm -f %_CNAME%
-    echo [start-openclaw]   then run: scripts\windows\start-openclaw.bat
-    exit /b 1
-)
-echo [start-openclaw] Removing stopped container '%_CNAME%' ...
+echo [start-openclaw] Removing existing container '%_CNAME%' (state: !_CSTATE!) for fresh recreation ...
 %RUNTIME% rm -f "%_CNAME%" >nul 2>&1
 exit /b 0
 
 :build_image
 set "_TAG=%~1"
 set "_CTX=%~2"
-%RUNTIME% image inspect "%_TAG%" >nul 2>&1
+echo [start-openclaw] Acquiring image '%_TAG%' ...
+echo [start-openclaw]   Strategy: pull from registry first, local build fallback
+echo [start-openclaw]   Pulling '%_TAG%' from registry ...
+%RUNTIME% pull "%_TAG%" >nul 2>&1
 if errorlevel 1 (
-    echo [start-openclaw] Building image '%_TAG%' from %_CTX% ...
+    echo [start-openclaw] WARNING: Pull failed for '%_TAG%'. Falling back to local build ...
+    echo [start-openclaw]   Building '%_TAG%' from %_CTX% ...
     %RUNTIME% build -t "%_TAG%" "%_CTX%"
     if errorlevel 1 exit /b 1
+    echo [start-openclaw]   Local build succeeded.
 ) else (
-    echo [start-openclaw] Image '%_TAG%' already exists. Use '%RUNTIME% rmi %_TAG%' to rebuild.
+    echo [start-openclaw]   Pull succeeded. Using registry image '%_TAG%'.
 )
 exit /b 0
 
