@@ -200,8 +200,15 @@ if not defined OPENCLAW_HOST_PORT set "OPENCLAW_HOST_PORT=18789"
 if %VLLM_EXIT% equ 0 if %OPENCLAW_EXIT% equ 0 if %HEALTHCHECK_EXIT% equ 0 (
     echo [start]   Both services started successfully!
     echo [start]   vLLM API     : http://localhost:%VLLM_HOST_PORT%/v1
-    echo [start]   OpenClaw UI  : http://localhost:%OPENCLAW_HOST_PORT%
     echo [start]   Runtime      : %RUNTIME%
+    echo [start]
+    for /f "tokens=2 delims= " %%u in ('%RUNTIME% exec democlaw-openclaw openclaw dashboard --no-open 2^>nul ^| findstr "Dashboard URL"') do set "DASHBOARD_URL=%%u"
+    if defined DASHBOARD_URL (
+        set "DASHBOARD_URL=!DASHBOARD_URL:127.0.0.1=localhost!"
+        echo [start]   OpenClaw UI  : !DASHBOARD_URL!
+    ) else (
+        echo [start]   OpenClaw UI  : http://localhost:%OPENCLAW_HOST_PORT%
+    )
     echo [start] ========================================================
     exit /b 0
 ) else (

@@ -150,8 +150,14 @@ log "========================================================"
 if [ "${VLLM_EXIT}" -eq 0 ] && [ "${OPENCLAW_EXIT}" -eq 0 ] && [ "${HEALTHCHECK_EXIT}" -eq 0 ]; then
     log "  Both services started successfully!"
     log "  vLLM API     : http://localhost:${VLLM_HOST_PORT:-8000}/v1"
-    log "  OpenClaw UI  : http://localhost:${OPENCLAW_HOST_PORT:-18789}"
     log "  Runtime      : ${RUNTIME}"
+    log ""
+    DASHBOARD_URL=$("${RUNTIME}" exec democlaw-openclaw openclaw dashboard --no-open 2>/dev/null | grep "Dashboard URL" | awk '{print $NF}' | sed 's/127\.0\.0\.1/localhost/')
+    if [ -n "${DASHBOARD_URL}" ]; then
+        log "  OpenClaw UI  : ${DASHBOARD_URL}"
+    else
+        log "  OpenClaw UI  : http://localhost:${OPENCLAW_HOST_PORT:-18789}"
+    fi
     log "========================================================"
     exit 0
 else
