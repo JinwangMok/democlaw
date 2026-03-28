@@ -175,30 +175,32 @@ openclaw config set models.providers.vllm.models.0.contextWindow 8192 2>/dev/nul
 echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPENCLAW_PORT}) ..."
 
 # ---------------------------------------------------------------------------
-# Auto-approve device pairing requests in background
-# This runs a loop that checks for pending pairing requests every 3 seconds
-# and auto-approves them, so users can just open the dashboard URL.
+# Launch gateway + auto-approve device pairing
+#
+# Strategy: run gateway in background, auto-approver in foreground.
+# When gateway dies, the script exits (container restarts via --restart).
 # ---------------------------------------------------------------------------
-(
-    sleep 10  # wait for gateway to be ready
-    echo "[openclaw-entrypoint] Auto-approver: watching for device pairing requests ..."
-    while true; do
-        pending=$(openclaw devices list 2>/dev/null | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
-        for req_id in $pending; do
-            openclaw devices approve "$req_id" 2>/dev/null && \
-                echo "[openclaw-entrypoint] Auto-approved device pairing: $req_id"
-        done
-        sleep 3
-    done
-) &
+echo "[openclaw-entrypoint] Starting OpenClaw gateway on port ${OPENCLAW_PORT} ..."
 
-# If a custom command was supplied (CMD override or direct docker run args),
-# execute it directly — allows debugging (e.g. `docker run ... bash`).
-# Otherwise start OpenClaw using the resolved env-var values so that
-# OPENCLAW_PORT / OPENCLAW_HOST are always respected, even when overridden at
-# runtime via --env or .env, without requiring a matching CMD override.
 if [ $# -gt 0 ]; then
-    exec "$@"
+    "$@" &
 else
-    exec openclaw gateway --port "${OPENCLAW_PORT}" --bind lan --allow-unconfigured
+    openclaw gateway --port "${OPENCLAW_PORT}" --bind lan --allow-unconfigured &
 fi
+GATEWAY_PID=$!
+
+# Wait for gateway to be ready
+sleep 8
+
+echo "[openclaw-entrypoint] Auto-approver: watching for device pairing requests ..."
+while kill -0 "$GATEWAY_PID" 2>/dev/null; do
+    pending=$(openclaw devices list 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true)
+    for req_id in $pending; do
+        openclaw devices approve "$req_id" 2>/dev/null && \
+            echo "[openclaw-entrypoint] Auto-approved device pairing: $req_id"
+    done
+    sleep 3
+done
+
+# Gateway exited — propagate its exit code
+wait "$GATEWAY_PID"
