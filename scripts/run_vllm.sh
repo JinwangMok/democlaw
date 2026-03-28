@@ -261,8 +261,6 @@ pull_model_weights() {
         log "huggingface-cli found on host — using CLI download ..."
 
         HF_HOME="${HF_CACHE_DIR}" \
-        HUGGING_FACE_HUB_TOKEN="${HF_TOKEN:-}" \
-        HF_TOKEN="${HF_TOKEN:-}" \
             huggingface-cli download \
                 "${MODEL_NAME}" \
                 --ignore-patterns "*.pt" "*.bin" \
@@ -286,7 +284,7 @@ pull_model_weights() {
     fi
 
     # SC2086: GPU_FLAGS and hf_token_flags must word-split into separate args.
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2046
     "${RUNTIME}" run --rm \
         --name "democlaw-vllm-pull" \
         $(runtime_gpu_flags) \
