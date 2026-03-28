@@ -52,6 +52,14 @@ cat > "${CONFIG_FILE}" <<JSONEOF
   "server": {
     "host": "0.0.0.0",
     "port": ${OPENCLAW_PORT}
+  },
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "controlUi": {
+      "allowedOrigins": ["*"],
+      "dangerouslyAllowHostHeaderOriginFallback": true
+    }
   }
 }
 JSONEOF
@@ -136,6 +144,13 @@ fi
 # ---------------------------------------------------------------------------
 # Launch OpenClaw with config
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Configure gateway settings via CLI (these write to OpenClaw's own config store)
+# ---------------------------------------------------------------------------
+openclaw config set gateway.mode local 2>/dev/null || true
+openclaw config set gateway.bind lan 2>/dev/null || true
+openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
+
 echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPENCLAW_PORT}) ..."
 
 # If a custom command was supplied (CMD override or direct docker run args),
@@ -146,5 +161,5 @@ echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPE
 if [ $# -gt 0 ]; then
     exec "$@"
 else
-    exec openclaw gateway --port "${OPENCLAW_PORT}" --allow-unconfigured
+    exec openclaw gateway --port "${OPENCLAW_PORT}" --bind lan --allow-unconfigured
 fi
