@@ -3410,9 +3410,3 @@ A: 로컬에서 `echo '입력' | python3 script.py`로 테스트하세요. `logg
 
 **Q: 스킬끼리 데이터를 공유할 수 있나요?**
 A: 파일 시스템이나 환경 변수를 통해 공유할 수 있습니다. 스킬 간 직접 호출은 지원되지 않습니다.
-
----
-
-## 라이선스 / License
-
-This project is licensed under the terms of the [MIT License](LICENSE).
