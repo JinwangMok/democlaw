@@ -94,4 +94,6 @@ exec python3 -m vllm.entrypoints.openai.api_server \
     --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}" \
     --trust-remote-code \
     --enforce-eager \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
     ${API_KEY_ARGS}
