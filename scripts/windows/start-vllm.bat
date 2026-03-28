@@ -330,7 +330,8 @@ if errorlevel 1 exit /b 0
 for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "%_CNAME%" 2^>nul') do set "_CSTATE=%%s"
 if "!_CSTATE!"=="running" (
     echo [start-vllm] Container '%_CNAME%' is already running.
-    echo [start-vllm] To restart: %RUNTIME% rm -f %_CNAME% ^&^& %~f0
+    echo [start-vllm] To restart, run: %RUNTIME% rm -f %_CNAME%
+    echo [start-vllm]   then run: scripts\windows\start-vllm.bat
     exit /b 1
 )
 echo [start-vllm] Removing stopped container '%_CNAME%' ...

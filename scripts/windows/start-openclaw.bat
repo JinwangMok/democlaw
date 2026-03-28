@@ -260,7 +260,8 @@ for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status
 if "!_CSTATE!"=="running" (
     echo [start-openclaw] Container '%_CNAME%' is already running.
     echo [start-openclaw] Dashboard: http://localhost:%OPENCLAW_HOST_PORT%
-    echo [start-openclaw] To restart: %RUNTIME% rm -f %_CNAME% ^&^& %~f0
+    echo [start-openclaw] To restart, run: %RUNTIME% rm -f %_CNAME%
+    echo [start-openclaw]   then run: scripts\windows\start-openclaw.bat
     exit /b 1
 )
 echo [start-openclaw] Removing stopped container '%_CNAME%' ...
