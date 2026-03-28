@@ -262,7 +262,7 @@ OPENCLAW_HOST_PORT=18790
 
 ```bash
 CONTAINER_RUNTIME=podman
-MAX_MODEL_LEN=4096
+MAX_MODEL_LEN=16384
 GPU_MEMORY_UTILIZATION=0.85
 ```
 
@@ -1501,7 +1501,7 @@ Every script (`start.sh`, `start-vllm.sh`, `start-openclaw.sh`, `stop.sh`, `heal
 You can also pass any variable inline for a one-off override:
 
 ```bash
-CONTAINER_RUNTIME=podman MAX_MODEL_LEN=4096 ./scripts/start.sh
+CONTAINER_RUNTIME=podman MAX_MODEL_LEN=16384 ./scripts/start.sh
 ```
 
 ---
@@ -1725,7 +1725,7 @@ CONTAINER_RUNTIME=docker bash -c 'source scripts/lib/runtime.sh; echo "Runtime: 
 
 ```bash
 CONTAINER_RUNTIME=podman
-MAX_MODEL_LEN=4096
+MAX_MODEL_LEN=16384
 GPU_MEMORY_UTILIZATION=0.85
 ```
 
@@ -1948,13 +1948,13 @@ The Qwen3-4B AWQ 4-bit model needs ~5–6 GB VRAM for weights plus overhead. A G
 
 Options:
 1. **Use a GPU with ≥ 8 GB VRAM** — RTX 3070, RTX 3080, RTX 4060 Ti, RTX 4080, A10, L40S, etc.
-2. **Reduce context length** — in `.env`, set `MAX_MODEL_LEN=4096` to cut VRAM overhead.
+2. **Reduce context length** — in `.env`, set `MAX_MODEL_LEN=16384` to cut VRAM overhead.
 3. **Lower GPU memory utilisation** — set `GPU_MEMORY_UTILIZATION=0.85` in `.env`.
 4. **Use a smaller model** — change `MODEL_NAME` to a 7B AWQ or 4B model.
 
 ```bash
 # .env example for tight VRAM budgets
-MAX_MODEL_LEN=4096
+MAX_MODEL_LEN=16384
 GPU_MEMORY_UTILIZATION=0.85
 ```
 
@@ -1964,7 +1964,7 @@ The model loaded but a long prompt exceeded available VRAM during generation.
 
 ```bash
 # Reduce context length and VRAM fraction
-MAX_MODEL_LEN=4096
+MAX_MODEL_LEN=16384
 GPU_MEMORY_UTILIZATION=0.80
 ```
 

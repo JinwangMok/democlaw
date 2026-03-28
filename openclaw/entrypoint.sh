@@ -170,7 +170,7 @@ openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback t
 # Fix model settings (onboard defaults may be wrong)
 openclaw config set models.providers.vllm.apiKey EMPTY 2>/dev/null || true
 openclaw config set models.providers.vllm.models.0.maxTokens 2048 2>/dev/null || true
-openclaw config set models.providers.vllm.models.0.contextWindow 8192 2>/dev/null || true
+openclaw config set models.providers.vllm.models.0.contextWindow 32000 2>/dev/null || true
 
 echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPENCLAW_PORT}) ..."
 

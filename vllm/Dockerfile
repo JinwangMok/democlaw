@@ -26,8 +26,8 @@
 # ---------------------------------------------------------------------------
 ARG VLLM_BASE_VERSION=v0.8.3
 ARG MODEL_NAME=Qwen/Qwen3-4B-AWQ
-ARG MAX_MODEL_LEN=4096
-ARG QUANTIZATION=awq
+ARG MAX_MODEL_LEN=16384
+ARG QUANTIZATION=awq_marlin
 ARG DTYPE=float16
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
