@@ -146,5 +146,5 @@ echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPE
 if [ $# -gt 0 ]; then
     exec "$@"
 else
-    exec openclaw serve --port "${OPENCLAW_PORT}" --host "${OPENCLAW_HOST:-0.0.0.0}"
+    exec openclaw gateway --port "${OPENCLAW_PORT}" --allow-unconfigured
 fi

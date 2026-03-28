@@ -16,7 +16,7 @@
 # ---------------------------------------------------------------------------
 # Build-time arguments — all have safe defaults for direct docker/podman build
 # ---------------------------------------------------------------------------
-ARG NODE_MAJOR=20
+ARG NODE_MAJOR=22
 ARG OPENCLAW_NPM_VERSION=latest
 ARG VLLM_BASE_URL=http://vllm:8000/v1
 ARG VLLM_MODEL_NAME=Qwen/Qwen3-4B-AWQ
