@@ -167,7 +167,30 @@ openclaw config set gateway.bind lan 2>/dev/null || true
 openclaw config set gateway.auth.mode token 2>/dev/null || true
 openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
 
+# Fix model settings (onboard defaults may be wrong)
+openclaw config set models.providers.vllm.apiKey EMPTY 2>/dev/null || true
+openclaw config set models.providers.vllm.models.0.maxTokens 2048 2>/dev/null || true
+openclaw config set models.providers.vllm.models.0.contextWindow 8192 2>/dev/null || true
+
 echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPENCLAW_PORT}) ..."
+
+# ---------------------------------------------------------------------------
+# Auto-approve device pairing requests in background
+# This runs a loop that checks for pending pairing requests every 3 seconds
+# and auto-approves them, so users can just open the dashboard URL.
+# ---------------------------------------------------------------------------
+(
+    sleep 10  # wait for gateway to be ready
+    echo "[openclaw-entrypoint] Auto-approver: watching for device pairing requests ..."
+    while true; do
+        pending=$(openclaw devices list 2>/dev/null | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+        for req_id in $pending; do
+            openclaw devices approve "$req_id" 2>/dev/null && \
+                echo "[openclaw-entrypoint] Auto-approved device pairing: $req_id"
+        done
+        sleep 3
+    done
+) &
 
 # If a custom command was supplied (CMD override or direct docker run args),
 # execute it directly — allows debugging (e.g. `docker run ... bash`).
