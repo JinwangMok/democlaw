@@ -192,15 +192,27 @@ GATEWAY_PID=$!
 # Wait for gateway to be ready
 sleep 8
 
-echo "[openclaw-entrypoint] Auto-approver: watching for device pairing requests ..."
-while kill -0 "$GATEWAY_PID" 2>/dev/null; do
-    pending=$(openclaw devices list 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || true)
-    for req_id in $pending; do
-        openclaw devices approve "$req_id" 2>/dev/null && \
-            echo "[openclaw-entrypoint] Auto-approved device pairing: $req_id"
-    done
-    sleep 3
+# ---------------------------------------------------------------------------
+# Auto-approve the FIRST device pairing request only (one-shot, not a loop)
+# After the first device is paired, stop watching — no blanket auto-approve.
+# ---------------------------------------------------------------------------
+echo "[openclaw-entrypoint] Waiting to auto-approve first device pairing ..."
+APPROVED=false
+for attempt in $(seq 1 60); do
+    if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then break; fi
+    pending=$(openclaw devices list 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
+    if [ -n "$pending" ]; then
+        openclaw devices approve "$pending" 2>/dev/null && \
+            echo "[openclaw-entrypoint] First device auto-approved: $pending" && \
+            APPROVED=true
+        break
+    fi
+    sleep 2
 done
 
-# Gateway exited — propagate its exit code
+if [ "$APPROVED" = false ]; then
+    echo "[openclaw-entrypoint] No pairing request received within 120s. Manual approve required."
+fi
+
+# Hand off to gateway — block until it exits
 wait "$GATEWAY_PID"
