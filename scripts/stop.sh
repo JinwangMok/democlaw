@@ -1,75 +1,56 @@
 #!/usr/bin/env bash
 # =============================================================================
-# stop.sh — Stop and remove DemoClaw containers and (optionally) the network
+# stop.sh -- Stop and clean up the entire DemoClaw stack
 #
-# Auto-detects docker or podman using the same shared detection library.
+# Removes: containers (democlaw-openclaw, democlaw-vllm) + network (democlaw-net)
 #
 # Usage:
-#   ./scripts/stop.sh                              # auto-detect runtime
-#   CONTAINER_RUNTIME=podman ./scripts/stop.sh     # force podman
-#   REMOVE_NETWORK=true ./scripts/stop.sh          # also remove the network
+#   ./scripts/stop.sh
 # =============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+log()  { echo "[stop] $*"; }
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Detect container runtime
 # ---------------------------------------------------------------------------
-log()   { echo "[stop] $*"; }
-warn()  { echo "[stop] WARNING: $*" >&2; }
-error() { printf "[stop] ERROR: %s\n" "$*" >&2; exit 1; }
-
-_rt_log()   { log "$@"; }
-_rt_warn()  { warn "$@"; }
-_rt_error() { error "$@"; }
-
-# ---------------------------------------------------------------------------
-# Load .env if present
-# ---------------------------------------------------------------------------
-ENV_FILE="${PROJECT_ROOT}/.env"
-if [ -f "${ENV_FILE}" ]; then
-    set -a
-    # shellcheck source=/dev/null
-    source "${ENV_FILE}"
-    set +a
+RUNTIME=""
+if [ -n "${CONTAINER_RUNTIME:-}" ] && command -v "${CONTAINER_RUNTIME}" >/dev/null 2>&1; then
+    RUNTIME="${CONTAINER_RUNTIME}"
+elif command -v docker >/dev/null 2>&1; then
+    RUNTIME="docker"
+elif command -v podman >/dev/null 2>&1; then
+    RUNTIME="podman"
+else
+    echo "[stop] ERROR: No container runtime found (docker / podman)." >&2
+    exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# Source runtime detection
-# ---------------------------------------------------------------------------
-# shellcheck source=lib/runtime.sh
-source "${SCRIPT_DIR}/lib/runtime.sh"
+log "========================================"
+log "  DemoClaw Stack -- Teardown"
+log "========================================"
+log "Runtime: ${RUNTIME}"
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Remove containers (order: openclaw first, then vllm)
 # ---------------------------------------------------------------------------
-VLLM_CONTAINER="${VLLM_CONTAINER_NAME:-democlaw-vllm}"
-OPENCLAW_CONTAINER="${OPENCLAW_CONTAINER_NAME:-democlaw-openclaw}"
-NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
-REMOVE_NETWORK="${REMOVE_NETWORK:-false}"
-
-# ---------------------------------------------------------------------------
-# Stop and remove containers
-# ---------------------------------------------------------------------------
-for cname in "${OPENCLAW_CONTAINER}" "${VLLM_CONTAINER}"; do
-    if "${RUNTIME}" container inspect "${cname}" > /dev/null 2>&1; then
-        log "Stopping and removing container '${cname}' ..."
-        "${RUNTIME}" rm -f "${cname}" 2>/dev/null || true
+for cname in democlaw-openclaw democlaw-vllm; do
+    if "${RUNTIME}" container inspect "${cname}" >/dev/null 2>&1; then
+        log "Removing container '${cname}' ..."
+        "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true
     else
-        log "Container '${cname}' does not exist — skipping."
+        log "Container '${cname}' not found -- skipping."
     fi
 done
 
 # ---------------------------------------------------------------------------
-# Optionally remove the shared network
+# Remove network
 # ---------------------------------------------------------------------------
-if [ "${REMOVE_NETWORK}" = "true" ]; then
-    if "${RUNTIME}" network inspect "${NETWORK_NAME}" > /dev/null 2>&1; then
-        log "Removing network '${NETWORK_NAME}' ..."
-        "${RUNTIME}" network rm "${NETWORK_NAME}" 2>/dev/null || warn "Could not remove network '${NETWORK_NAME}' — it may still have connected containers."
-    fi
+if "${RUNTIME}" network inspect democlaw-net >/dev/null 2>&1; then
+    log "Removing network 'democlaw-net' ..."
+    "${RUNTIME}" network rm democlaw-net >/dev/null 2>&1 || true
+else
+    log "Network 'democlaw-net' not found -- skipping."
 fi
 
 log "Done."

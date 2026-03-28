@@ -1,23 +1,23 @@
 @echo off
 :: =============================================================================
-:: start.bat -- Main orchestrator for the DemoClaw stack on Windows
+:: start.bat -- Full E2E startup for the DemoClaw stack (vLLM + OpenClaw)
 ::
-:: Launches both the vLLM server and OpenClaw containers using whichever
-:: container runtime (docker or podman) is available on the host.
-::
-:: Auto-detection priority:
-::   1. %CONTAINER_RUNTIME% env var  (explicit override)
-::   2. docker                       (if in PATH)
-::   3. podman                       (if in PATH)
+:: This single script handles the entire lifecycle:
+::   1. Clean up old containers/network
+::   2. Build images (always rebuild to pick up Dockerfile changes)
+::   3. Create network
+::   4. Start vLLM, wait for /health + /v1/models
+::   5. Start OpenClaw, wait for dashboard
+::   6. Print tokenized dashboard URL
 ::
 :: Usage:
 ::   scripts\windows\start.bat
-::   set CONTAINER_RUNTIME=podman && scripts\windows\start.bat
-::
-:: Requires: Windows 10+, NVIDIA GPU with CUDA drivers, Docker Desktop or
-::           Podman Desktop with GPU support enabled.
 :: =============================================================================
 setlocal EnableDelayedExpansion
+
+echo [start] ========================================================
+echo [start]   DemoClaw Stack -- Full E2E Startup
+echo [start] ========================================================
 
 :: ---------------------------------------------------------------------------
 :: Resolve paths
@@ -27,34 +27,41 @@ set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 for %%i in ("%SCRIPT_DIR%\..\..") do set "PROJECT_ROOT=%%~fi"
 
 :: ---------------------------------------------------------------------------
-:: Load .env file if present
+:: Configuration
 :: ---------------------------------------------------------------------------
-set "ENV_FILE=%PROJECT_ROOT%\.env"
-if exist "%ENV_FILE%" (
-    echo [start] Loading environment from %ENV_FILE%
-    for /f "usebackq tokens=1,* delims==" %%a in ("%ENV_FILE%") do (
-        set "line=%%a"
-        if not "!line:~0,1!"=="#" (
-            if not "%%a"=="" (
-                if not "%%b"=="" (
-                    set "%%a=%%b"
-                )
-            )
-        )
-    )
-)
+set "VLLM_IMAGE=democlaw/vllm:latest"
+set "OPENCLAW_IMAGE=democlaw/openclaw:latest"
+set "NETWORK=democlaw-net"
+set "VLLM_CONTAINER=democlaw-vllm"
+set "OPENCLAW_CONTAINER=democlaw-openclaw"
+set "MODEL_NAME=Qwen/Qwen3-4B-AWQ"
+
+:: vLLM tuning for 8GB VRAM
+set "MAX_MODEL_LEN=16384"
+set "QUANTIZATION=awq_marlin"
+set "DTYPE=float16"
+set "GPU_MEMORY_UTILIZATION=0.95"
+
+:: Ports
+set "VLLM_PORT=8000"
+set "OPENCLAW_PORT=18789"
+
+:: Timeouts (seconds)
+set "VLLM_HEALTH_TIMEOUT=300"
+set "OPENCLAW_HEALTH_TIMEOUT=120"
+
+:: HuggingFace cache
+if not defined HF_CACHE_DIR set "HF_CACHE_DIR=%USERPROFILE%\.cache\huggingface"
 
 :: ---------------------------------------------------------------------------
 :: Detect container runtime
 :: ---------------------------------------------------------------------------
+set "RUNTIME="
 if defined CONTAINER_RUNTIME (
     where "%CONTAINER_RUNTIME%" >nul 2>&1
-    if errorlevel 1 (
-        echo [start] ERROR: CONTAINER_RUNTIME='%CONTAINER_RUNTIME%' is set but not found in PATH.
-        exit /b 1
-    )
-    set "RUNTIME=%CONTAINER_RUNTIME%"
-) else (
+    if not errorlevel 1 set "RUNTIME=%CONTAINER_RUNTIME%"
+)
+if not defined RUNTIME (
     where docker >nul 2>&1
     if not errorlevel 1 (
         set "RUNTIME=docker"
@@ -69,154 +76,270 @@ if defined CONTAINER_RUNTIME (
     )
 )
 
-set "RUNTIME_IS_PODMAN=false"
-if "%RUNTIME%"=="podman" set "RUNTIME_IS_PODMAN=true"
+set "GPU_FLAGS=--gpus all"
+if "%RUNTIME%"=="podman" set "GPU_FLAGS=--device nvidia.com/gpu=all"
 
-echo [start] ========================================================
-echo [start]   DemoClaw Stack -- Container Runtime: %RUNTIME%
-echo [start]   Podman mode: %RUNTIME_IS_PODMAN%
-echo [start] ========================================================
+echo [start] Runtime: %RUNTIME%
 
 :: ---------------------------------------------------------------------------
 :: Validate NVIDIA GPU
 :: ---------------------------------------------------------------------------
-echo [start] Validating NVIDIA GPU ...
+echo [start] Checking NVIDIA GPU ...
 where nvidia-smi >nul 2>&1
 if errorlevel 1 (
-    echo [start] ERROR: nvidia-smi not found in PATH.
-    echo [start]   Install NVIDIA drivers and ensure nvidia-smi is in PATH.
-    echo [start]   Download: https://www.nvidia.com/Download/index.aspx
+    echo [start] ERROR: nvidia-smi not found. Install NVIDIA drivers.
     exit /b 1
 )
 nvidia-smi >nul 2>&1
 if errorlevel 1 (
-    echo [start] ERROR: nvidia-smi failed. Check that NVIDIA drivers are correctly installed.
+    echo [start] ERROR: nvidia-smi failed. Check NVIDIA driver installation.
     exit /b 1
 )
-echo [start] NVIDIA GPU validated.
+echo [start] NVIDIA GPU OK.
 
-:: ---------------------------------------------------------------------------
-:: Phase 0: Build images (synchronous -- must complete before containers start)
-:: ---------------------------------------------------------------------------
+:: ===========================================================================
+:: Phase 0: Clean up old containers and network
+:: ===========================================================================
 echo [start]
-set "VLLM_EXIT=0"
-set "OPENCLAW_EXIT=0"
-set "HEALTHCHECK_EXIT=0"
+echo [start] --- Phase 0: Cleanup ---
 
-echo [start] --- Phase 0: Building container images ----
-
-if not defined VLLM_IMAGE_TAG    set "VLLM_IMAGE_TAG=democlaw/vllm:latest"
-if not defined OPENCLAW_IMAGE_TAG set "OPENCLAW_IMAGE_TAG=democlaw/openclaw:latest"
-
-%RUNTIME% image inspect "%VLLM_IMAGE_TAG%" >nul 2>&1
-if errorlevel 1 (
-    echo [start] Building vLLM image ...
-    %RUNTIME% build -t "%VLLM_IMAGE_TAG%" "%PROJECT_ROOT%\vllm"
-    if errorlevel 1 (
-        echo [start] ERROR: Failed to build vLLM image.
-        exit /b 1
+for %%c in (%OPENCLAW_CONTAINER% %VLLM_CONTAINER%) do (
+    %RUNTIME% container inspect "%%c" >nul 2>&1
+    if not errorlevel 1 (
+        echo [start] Removing old container '%%c' ...
+        %RUNTIME% rm -f "%%c" >nul 2>&1
     )
-) else (
-    echo [start] vLLM image already exists.
 )
 
-%RUNTIME% image inspect "%OPENCLAW_IMAGE_TAG%" >nul 2>&1
-if errorlevel 1 (
-    echo [start] Building OpenClaw image ...
-    %RUNTIME% build -t "%OPENCLAW_IMAGE_TAG%" "%PROJECT_ROOT%\openclaw"
-    if errorlevel 1 (
-        echo [start] ERROR: Failed to build OpenClaw image.
-        exit /b 1
-    )
-) else (
-    echo [start] OpenClaw image already exists.
+%RUNTIME% network inspect %NETWORK% >nul 2>&1
+if not errorlevel 1 (
+    echo [start] Removing old network '%NETWORK%' ...
+    %RUNTIME% network rm %NETWORK% >nul 2>&1
 )
 
-echo [start] Images ready.
-
-:: ---------------------------------------------------------------------------
-:: Phase 1: Start vLLM
-:: ---------------------------------------------------------------------------
+:: ===========================================================================
+:: Phase 1: Build images (always rebuild to pick up changes)
+:: ===========================================================================
 echo [start]
-echo [start] --- Phase 1: Starting vLLM server ----
+echo [start] --- Phase 1: Build images ---
 
-call "%SCRIPT_DIR%\start-vllm.bat"
-set "VLLM_EXIT=!errorlevel!"
-
-if !VLLM_EXIT! neq 0 (
-    echo [start] ERROR: vLLM failed to start (exit code !VLLM_EXIT!).
-    goto :final_summary
+echo [start] Building vLLM image ...
+%RUNTIME% build -t %VLLM_IMAGE% "%PROJECT_ROOT%\vllm"
+if errorlevel 1 (
+    echo [start] ERROR: Failed to build vLLM image.
+    exit /b 1
 )
 
-echo [start] Waiting 5 seconds before starting OpenClaw ...
+echo [start] Building OpenClaw image ...
+%RUNTIME% build -t %OPENCLAW_IMAGE% "%PROJECT_ROOT%\openclaw"
+if errorlevel 1 (
+    echo [start] ERROR: Failed to build OpenClaw image.
+    exit /b 1
+)
+
+echo [start] Images built.
+
+:: ===========================================================================
+:: Phase 2: Create network + start vLLM
+:: ===========================================================================
+echo [start]
+echo [start] --- Phase 2: Start vLLM ---
+
+echo [start] Creating network '%NETWORK%' ...
+%RUNTIME% network create %NETWORK%
+if errorlevel 1 (
+    echo [start] ERROR: Failed to create network.
+    exit /b 1
+)
+
+:: Ensure HF cache dir exists
+if not exist "%HF_CACHE_DIR%" mkdir "%HF_CACHE_DIR%" 2>nul
+
+echo [start] Starting vLLM container ...
+echo [start]   Model        : %MODEL_NAME%
+echo [start]   Quantization : %QUANTIZATION%
+echo [start]   Context      : %MAX_MODEL_LEN%
+echo [start]   GPU mem util : %GPU_MEMORY_UTILIZATION%
+
+%RUNTIME% run -d ^
+    --name %VLLM_CONTAINER% ^
+    --network %NETWORK% ^
+    --hostname vllm ^
+    --network-alias vllm ^
+    %GPU_FLAGS% ^
+    --restart unless-stopped ^
+    --shm-size 1g ^
+    -p %VLLM_PORT%:%VLLM_PORT% ^
+    -v "%HF_CACHE_DIR%:/root/.cache/huggingface:rw" ^
+    -e "MODEL_NAME=%MODEL_NAME%" ^
+    -e "MAX_MODEL_LEN=%MAX_MODEL_LEN%" ^
+    -e "GPU_MEMORY_UTILIZATION=%GPU_MEMORY_UTILIZATION%" ^
+    -e "QUANTIZATION=%QUANTIZATION%" ^
+    -e "DTYPE=%DTYPE%" ^
+    -e "VLLM_ATTENTION_BACKEND=FLASHINFER" ^
+    %VLLM_IMAGE%
+
+if errorlevel 1 (
+    echo [start] ERROR: Failed to start vLLM container.
+    exit /b 1
+)
+
+echo [start] vLLM container started. Waiting for health ...
+
+:: ---------------------------------------------------------------------------
+:: Wait for vLLM /health
+:: ---------------------------------------------------------------------------
+set /a "elapsed=0"
+
+:vllm_health_loop
+if %elapsed% geq %VLLM_HEALTH_TIMEOUT% (
+    echo [start] ERROR: vLLM did not become healthy within %VLLM_HEALTH_TIMEOUT%s.
+    echo [start] Check logs: %RUNTIME% logs %VLLM_CONTAINER%
+    exit /b 1
+)
+
+:: Check container still alive
+for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" %VLLM_CONTAINER% 2^>nul') do set "CSTATE=%%s"
+if "!CSTATE!"=="exited" (
+    echo [start] ERROR: vLLM container exited unexpectedly.
+    %RUNTIME% logs --tail 20 %VLLM_CONTAINER% 2>&1
+    exit /b 1
+)
+
+curl -sf http://localhost:%VLLM_PORT%/health >nul 2>&1
+if not errorlevel 1 (
+    echo [start] vLLM /health OK.
+    goto :vllm_models_check
+)
+
 timeout /t 5 >nul 2>&1
+set /a "elapsed=elapsed+5"
+if !elapsed! geq 10 (
+    set /a "mod=elapsed %% 30"
+    if !mod! equ 0 echo [start]   ... vLLM loading (%elapsed%/%VLLM_HEALTH_TIMEOUT%s)
+)
+goto :vllm_health_loop
 
 :: ---------------------------------------------------------------------------
-:: Phase 2: Start OpenClaw
+:: Verify /v1/models
 :: ---------------------------------------------------------------------------
+:vllm_models_check
+echo [start] Checking /v1/models ...
+set /a "models_elapsed=0"
+
+:vllm_models_loop
+if %models_elapsed% geq 60 (
+    echo [start] WARNING: /v1/models not responding. Proceeding anyway.
+    goto :start_openclaw
+)
+
+curl -sf http://localhost:%VLLM_PORT%/v1/models >nul 2>&1
+if not errorlevel 1 (
+    echo [start] vLLM /v1/models OK. Model ready.
+    goto :start_openclaw
+)
+
+timeout /t 5 >nul 2>&1
+set /a "models_elapsed=models_elapsed+5"
+goto :vllm_models_loop
+
+:: ===========================================================================
+:: Phase 3: Start OpenClaw
+:: ===========================================================================
+:start_openclaw
 echo [start]
-echo [start] --- Phase 2: Starting OpenClaw ----
+echo [start] --- Phase 3: Start OpenClaw ---
 
-call "%SCRIPT_DIR%\start-openclaw.bat"
-set "OPENCLAW_EXIT=!errorlevel!"
+echo [start] Starting OpenClaw container ...
+
+%RUNTIME% run -d ^
+    --name %OPENCLAW_CONTAINER% ^
+    --network %NETWORK% ^
+    --hostname openclaw ^
+    --network-alias openclaw ^
+    --restart unless-stopped ^
+    -p %OPENCLAW_PORT%:%OPENCLAW_PORT% ^
+    -p 18791:18791 ^
+    -e "VLLM_BASE_URL=http://vllm:8000/v1" ^
+    -e "VLLM_API_KEY=EMPTY" ^
+    -e "VLLM_MODEL_NAME=%MODEL_NAME%" ^
+    -e "OPENCLAW_PORT=%OPENCLAW_PORT%" ^
+    %OPENCLAW_IMAGE%
+
+if errorlevel 1 (
+    echo [start] ERROR: Failed to start OpenClaw container.
+    exit /b 1
+)
+
+echo [start] OpenClaw container started. Waiting for dashboard ...
 
 :: ---------------------------------------------------------------------------
-:: Phase 3: Comprehensive healthcheck
+:: Wait for OpenClaw dashboard
 :: ---------------------------------------------------------------------------
-echo [start]
-echo [start] --- Phase 3: Comprehensive healthcheck ----
+set /a "oc_elapsed=0"
 
-set "HEALTHCHECK_EXIT=0"
-
-if %VLLM_EXIT% neq 0 (
-    set "HEALTHCHECK_EXIT=1"
-    echo [start] HEALTHCHECK SKIP: vLLM failed to start (exit code %VLLM_EXIT%).
-    goto :final_summary
-)
-if %OPENCLAW_EXIT% neq 0 (
-    set "HEALTHCHECK_EXIT=1"
-    echo [start] HEALTHCHECK SKIP: OpenClaw failed to start (exit code %OPENCLAW_EXIT%).
-    goto :final_summary
+:openclaw_health_loop
+if %oc_elapsed% geq %OPENCLAW_HEALTH_TIMEOUT% (
+    echo [start] ERROR: OpenClaw dashboard did not respond within %OPENCLAW_HEALTH_TIMEOUT%s.
+    echo [start] Check logs: %RUNTIME% logs %OPENCLAW_CONTAINER%
+    exit /b 1
 )
 
-echo [start] Both containers running; running comprehensive healthcheck ...
-call "%SCRIPT_DIR%\healthcheck.bat"
-set "HEALTHCHECK_EXIT=!errorlevel!"
-
-if %HEALTHCHECK_EXIT% equ 0 (
-    echo [start] HEALTHCHECK PASS: All services are healthy.
-) else (
-    echo [start] HEALTHCHECK FAIL: One or more checks did not pass.
-    echo [start]   Re-run at any time with: scripts\windows\healthcheck.bat
+for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" %OPENCLAW_CONTAINER% 2^>nul') do set "OC_STATE=%%s"
+if "!OC_STATE!"=="exited" (
+    echo [start] ERROR: OpenClaw container exited unexpectedly.
+    %RUNTIME% logs --tail 20 %OPENCLAW_CONTAINER% 2>&1
+    exit /b 1
 )
 
-:final_summary
+curl -sf http://localhost:%OPENCLAW_PORT%/ >nul 2>&1
+if not errorlevel 1 (
+    echo [start] OpenClaw dashboard responding.
+    goto :show_result
+)
+
+timeout /t 3 >nul 2>&1
+set /a "oc_elapsed=oc_elapsed+3"
+if !oc_elapsed! geq 9 (
+    set /a "mod=oc_elapsed %% 15"
+    if !mod! equ 0 echo [start]   ... waiting for OpenClaw (%oc_elapsed%/%OPENCLAW_HEALTH_TIMEOUT%s)
+)
+goto :openclaw_health_loop
+
+:: ===========================================================================
+:: Phase 4: Show result
+:: ===========================================================================
+:show_result
 echo [start]
 echo [start] ========================================================
+echo [start]   DemoClaw is running!
+echo [start] ========================================================
+echo [start]
+echo [start]   vLLM API : http://localhost:%VLLM_PORT%/v1
+echo [start]   Model    : %MODEL_NAME%
+echo [start]   Runtime  : %RUNTIME%
+echo [start]
 
-if not defined VLLM_HOST_PORT    set "VLLM_HOST_PORT=8000"
-if not defined OPENCLAW_HOST_PORT set "OPENCLAW_HOST_PORT=18789"
-
-if %VLLM_EXIT% equ 0 if %OPENCLAW_EXIT% equ 0 if %HEALTHCHECK_EXIT% equ 0 (
-    echo [start]   Both services started successfully!
-    echo [start]   vLLM API     : http://localhost:%VLLM_HOST_PORT%/v1
-    echo [start]   Runtime      : %RUNTIME%
-    echo [start]
-    for /f "tokens=2 delims= " %%u in ('%RUNTIME% exec democlaw-openclaw openclaw dashboard --no-open 2^>nul ^| findstr "Dashboard URL"') do set "DASHBOARD_URL=%%u"
-    if defined DASHBOARD_URL (
-        set "DASHBOARD_URL=!DASHBOARD_URL:127.0.0.1=localhost!"
-        echo [start]   OpenClaw UI  : !DASHBOARD_URL!
-    ) else (
-        echo [start]   OpenClaw UI  : http://localhost:%OPENCLAW_HOST_PORT%
-    )
-    echo [start] ========================================================
-    exit /b 0
-) else (
-    if %VLLM_EXIT% neq 0    echo [start] WARNING: vLLM start script exited with code %VLLM_EXIT%
-    if %OPENCLAW_EXIT% neq 0 echo [start] WARNING: OpenClaw start script exited with code %OPENCLAW_EXIT%
-    if %HEALTHCHECK_EXIT% neq 0 echo [start] WARNING: Healthcheck exited with code %HEALTHCHECK_EXIT%
-    echo [start] ========================================================
-    exit /b 1
+:: Try to get tokenized dashboard URL
+:: Output format: "Dashboard URL: http://127.0.0.1:18789/#token=abc..."
+set "DASHBOARD_URL="
+for /f "tokens=3 delims= " %%u in ('%RUNTIME% exec %OPENCLAW_CONTAINER% openclaw dashboard --no-open 2^>nul ^| findstr /i "http"') do (
+    set "DASHBOARD_URL=%%u"
 )
+
+if defined DASHBOARD_URL (
+    set "DASHBOARD_URL=!DASHBOARD_URL:127.0.0.1=localhost!"
+    echo [start]   Dashboard: !DASHBOARD_URL!
+) else (
+    echo [start]   Dashboard: http://localhost:%OPENCLAW_PORT%
+)
+
+echo [start]
+echo [start]   NOTE: On first connect, click "Connect" in the browser.
+echo [start]         The device pairing is auto-approved within ~2 seconds.
+echo [start]         If needed, click "Connect" again after approval.
+echo [start]
+echo [start]   Stop with: scripts\windows\stop.bat
+echo [start] ========================================================
 
 endlocal
