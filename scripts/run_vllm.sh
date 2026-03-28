@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # run_vllm.sh — Launch the vLLM container with NVIDIA GPU passthrough serving
-#               Qwen3.5-9B AWQ 4-bit via an OpenAI-compatible API.
+#               Qwen2.5-7B AWQ 4-bit via an OpenAI-compatible API.
 #
 # Supports both docker and podman on Linux hosts.
 # Requires: NVIDIA GPU with >= 8 GB VRAM, nvidia-container-toolkit installed.
@@ -12,7 +12,7 @@
 #   3. Validate NVIDIA GPU / CUDA prerequisites — exits with clear error if absent
 #   4. Create shared container network if it does not already exist
 #   5. Build the vLLM image if not already present
-#   6. Pre-pull Qwen3.5-9B AWQ 4-bit model weights from HuggingFace
+#   6. Pre-pull Qwen2.5-7B AWQ 4-bit model weights from HuggingFace
 #        • Uses huggingface-cli on the host if available (preferred)
 #        • Falls back to a temporary vLLM container if CLI not found
 #        • Idempotent: skips download if weights already cached locally
@@ -83,7 +83,7 @@ fi
 # ---------------------------------------------------------------------------
 
 # --- Model ---
-# Qwen3.5-9B AWQ 4-bit — the only model variant that fits in 8 GB VRAM.
+# Qwen2.5-7B AWQ 4-bit — the only model variant that fits in 8 GB VRAM.
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
 QUANTIZATION="${QUANTIZATION:-awq}"
 DTYPE="${DTYPE:-float16}"
@@ -214,7 +214,7 @@ fi
 # Step 5: Build the vLLM image if not already present
 #
 # The Dockerfile is located at <project_root>/vllm/Dockerfile and extends
-# vllm/vllm-openai with the Qwen3.5-9B AWQ entrypoint and healthcheck.
+# vllm/vllm-openai with the Qwen2.5-7B AWQ entrypoint and healthcheck.
 # ---------------------------------------------------------------------------
 if ! "${RUNTIME}" image inspect "${IMAGE_TAG}" > /dev/null 2>&1; then
     log "Image '${IMAGE_TAG}' not found — building from ${PROJECT_ROOT}/vllm ..."
@@ -228,7 +228,7 @@ fi
 mkdir -p "${HF_CACHE_DIR}"
 
 # ---------------------------------------------------------------------------
-# Step 6: Pre-pull Qwen3.5-9B AWQ 4-bit model weights from HuggingFace
+# Step 6: Pre-pull Qwen2.5-7B AWQ 4-bit model weights from HuggingFace
 #
 # Two-strategy approach (first succeeds wins):
 #   1. huggingface-cli on the host    — preferred; no extra container needed
@@ -247,7 +247,7 @@ pull_model_weights() {
     fi
 
     log "======================================================="
-    log "  Step: Pull Qwen3.5-9B AWQ 4-bit model weights"
+    log "  Step: Pull Qwen2.5-7B AWQ 4-bit model weights"
     log "  Model     : ${MODEL_NAME}"
     log "  Cache dir : ${HF_CACHE_DIR}"
     log "======================================================="

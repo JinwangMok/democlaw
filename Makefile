@@ -280,7 +280,7 @@ build-vllm: _require-runtime
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		--label "org.opencontainers.image.title=democlaw-vllm" \
-		--label "org.opencontainers.image.description=vLLM OpenAI-compatible server for Qwen3.5-9B AWQ 4-bit" \
+		--label "org.opencontainers.image.description=vLLM OpenAI-compatible server for Qwen2.5-7B AWQ 4-bit" \
 		--label "org.opencontainers.image.version=$(VERSION)" \
 		--label "org.opencontainers.image.created=$(BUILD_DATE)" \
 		--label "org.opencontainers.image.revision=$(GIT_COMMIT)" \

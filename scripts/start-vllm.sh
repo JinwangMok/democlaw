@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# start-vllm.sh — Pull the Qwen3.5-9B AWQ 4-bit model and launch the vLLM
+# start-vllm.sh — Pull the Qwen2.5-7B AWQ 4-bit model and launch the vLLM
 #                  container serving it via an OpenAI-compatible API.
 #
 # Supports both docker and podman on Linux hosts.
@@ -9,7 +9,7 @@
 # Steps performed:
 #   1. Validate host OS, container runtime, and NVIDIA GPU/CUDA
 #   2. Build the vLLM image if not already present
-#   3. Pre-pull Qwen3.5-9B AWQ 4-bit weights from HuggingFace (skip if cached)
+#   3. Pre-pull Qwen2.5-7B AWQ 4-bit weights from HuggingFace (skip if cached)
 #   4. Launch the vLLM server container with GPU passthrough and model config
 #   5. Wait for /health and /v1/models endpoints to confirm readiness
 #
@@ -162,7 +162,7 @@ build_image
 mkdir -p "${HF_CACHE_DIR}"
 
 # ---------------------------------------------------------------------------
-# pull_model_weights — Pre-download the Qwen3.5-9B AWQ 4-bit weights
+# pull_model_weights — Pre-download the Qwen2.5-7B AWQ 4-bit weights
 #
 # Runs a short-lived container using the built vLLM image (which already has
 # Python and huggingface_hub installed) to invoke `huggingface-cli download`.

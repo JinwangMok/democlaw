@@ -1,6 +1,6 @@
 # DemoClaw
 
-Shell-script orchestration for running [OpenClaw](https://github.com/openclaw) AI assistant with a self-hosted [vLLM](https://github.com/vllm-project/vllm) backend serving **Qwen3.5-9B AWQ 4-bit** on NVIDIA GPUs — no docker-compose required.
+Shell-script orchestration for running [OpenClaw](https://github.com/openclaw) AI assistant with a self-hosted [vLLM](https://github.com/vllm-project/vllm) backend serving **Qwen2.5-7B AWQ 4-bit** on NVIDIA GPUs — no docker-compose required.
 
 ## Overview
 
@@ -8,7 +8,7 @@ DemoClaw launches two containers on a shared network:
 
 | Container | Purpose | Host Port |
 |-----------|---------|-----------|
-| **vLLM** | Serves Qwen3.5-9B AWQ 4-bit via an OpenAI-compatible API | `localhost:8000` |
+| **vLLM** | Serves Qwen2.5-7B AWQ 4-bit via an OpenAI-compatible API | `localhost:8000` |
 | **OpenClaw** | AI assistant web dashboard connected to vLLM | `localhost:18789` |
 
 Both **Docker** and **Podman** are supported — the scripts auto-detect whichever runtime is available.
@@ -308,7 +308,7 @@ This script checks (in order):
 | 3 | NVIDIA GPU | At least one physical GPU detected |
 | 4 | NVIDIA driver | Version ≥ 520 (exposes CUDA 11.8 driver API) |
 | 5 | CUDA version | ≥ 11.8, required by vLLM |
-| 6 | GPU VRAM | ≥ 7500 MiB (~7.3 GB) for Qwen3.5-9B AWQ 4-bit |
+| 6 | GPU VRAM | ≥ 7500 MiB (~7.3 GB) for Qwen2.5-7B AWQ 4-bit |
 | 7 | Container toolkit | `nvidia-container-toolkit` configured for detected runtime |
 
 **Expected output when all checks pass:**
@@ -395,7 +395,7 @@ CONTAINER_RUNTIME=docker ./scripts/start.sh
 What happens:
 1. The script detects Docker and validates your NVIDIA GPU/CUDA drivers.
 2. Both container images (`democlaw/vllm:latest` and `democlaw/openclaw:latest`) are built from the local Dockerfiles (first run only; subsequent runs reuse cached images).
-3. The vLLM server starts and downloads the Qwen3.5-9B AWQ 4-bit model weights from HuggingFace (~5 GB on first run; cached afterwards).
+3. The vLLM server starts and downloads the Qwen2.5-7B AWQ 4-bit model weights from HuggingFace (~5 GB on first run; cached afterwards).
 4. Once the vLLM `/health` endpoint responds, the OpenClaw container starts and connects to it.
 5. A final healthcheck confirms the OpenClaw dashboard is reachable.
 
@@ -462,7 +462,7 @@ CONTAINER_RUNTIME=podman ./scripts/start-vllm.sh
 |-------|--------|
 | 1 | Validates Linux host OS, container runtime, and NVIDIA GPU/CUDA drivers |
 | 2 | Builds `democlaw/vllm:latest` from `vllm/Dockerfile` (skipped if image exists) |
-| 3 | Downloads Qwen3.5-9B AWQ 4-bit weights from HuggingFace (~5 GB, first run only) |
+| 3 | Downloads Qwen2.5-7B AWQ 4-bit weights from HuggingFace (~5 GB, first run only) |
 | 4 | Starts the `democlaw-vllm` container on `democlaw-net` with GPU passthrough |
 | 5 | Polls `GET /health` every 5 s until the server responds (timeout: 300 s) |
 | 6 | Confirms `Qwen/Qwen2.5-7B-Instruct-AWQ` appears in `GET /v1/models`, then exits |
@@ -1763,7 +1763,7 @@ See [`.env.example`](.env.example) for the complete annotated template with ever
 │  ┌────────────────┐       ┌────────────────────────┐ │
 │  │  vLLM Server   │       │  OpenClaw              │ │
 │  │                │       │                        │ │
-│  │  Qwen3.5-9B    │◄──────│  Web Dashboard         │ │
+│  │  Qwen2.5-7B    │◄──────│  Web Dashboard         │ │
 │  │  AWQ 4-bit     │ HTTP  │  (Node.js)             │ │
 │  │                │       │                        │ │
 │  │  :8000/v1      │       │  :18789                │ │
@@ -1780,7 +1780,7 @@ See [`.env.example`](.env.example) for the complete annotated template with ever
 
 **vLLM container** (`democlaw-vllm`):
 - Base image: `vllm/vllm-openai:v0.8.3`
-- Serves the Qwen3.5-9B AWQ 4-bit model
+- Serves the Qwen2.5-7B AWQ 4-bit model
 - OpenAI-compatible API at `/v1/chat/completions`, `/v1/models`, etc.
 - GPU passthrough via `--gpus all` (Docker) or CDI (Podman)
 - Built-in healthcheck on `/health` and `/v1/models`
@@ -1944,7 +1944,7 @@ Driver ≥ 520 reports CUDA ≥ 11.8. Driver ≥ 535 reports CUDA ≥ 12.2.
 
 #### `ERROR: Insufficient GPU VRAM: 6144 MiB detected, but 7500 MiB required`
 
-The Qwen3.5-9B AWQ 4-bit model needs ~5–6 GB VRAM for weights plus overhead. A GPU with < 8 GB VRAM will likely fail.
+The Qwen2.5-7B AWQ 4-bit model needs ~5–6 GB VRAM for weights plus overhead. A GPU with < 8 GB VRAM will likely fail.
 
 Options:
 1. **Use a GPU with ≥ 8 GB VRAM** — RTX 3070, RTX 3080, RTX 4060 Ti, RTX 4080, A10, L40S, etc.
@@ -2271,7 +2271,7 @@ democlaw/
 | Project | Description | Links |
 |---------|-------------|-------|
 | **vLLM** | High-throughput LLM inference engine with OpenAI-compatible API | [GitHub](https://github.com/vllm-project/vllm) · [Docs](https://docs.vllm.ai) · [Docker Hub](https://hub.docker.com/r/vllm/vllm-openai) |
-| **Qwen3.5-9B-AWQ** | Alibaba's Qwen 3.5 series 9B model, AWQ 4-bit quantised for 8 GB VRAM | [HuggingFace](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ) · [Qwen GitHub](https://github.com/QwenLM/Qwen3) · [Model card](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ) |
+| **Qwen2.5-7B-AWQ** | Alibaba's Qwen 2.5 series 7B model, AWQ 4-bit quantised for 8 GB VRAM | [HuggingFace](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ) · [Qwen GitHub](https://github.com/QwenLM/Qwen2.5) · [Model card](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ) |
 | **OpenClaw** | Open-source AI assistant web dashboard | [GitHub](https://github.com/openclaw/openclaw) |
 | **NVIDIA Container Toolkit** | GPU passthrough for Docker and Podman | [GitHub](https://github.com/NVIDIA/nvidia-container-toolkit) · [Install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) |
 | **NVIDIA CDI** | Container Device Interface spec for Podman GPU passthrough | [CDI spec](https://github.com/cncf-tags/container-device-interface) · [nvidia-ctk cdi docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html) |
@@ -2285,12 +2285,12 @@ democlaw/
 - Docker Hub: <https://hub.docker.com/r/vllm/vllm-openai>
 - Supported models list: <https://docs.vllm.ai/en/latest/models/supported_models.html>
 
-### Qwen / Qwen3.5-9B-AWQ
+### Qwen / Qwen2.5-7B-AWQ
 
-[Qwen](https://github.com/QwenLM/Qwen3) is Alibaba Cloud's open-source large language model family. The **Qwen3.5-9B-AWQ** variant is a 9-billion-parameter model quantised to 4-bit using the [AWQ (Activation-aware Weight Quantization)](https://arxiv.org/abs/2306.00978) method, reducing the on-GPU memory footprint from ~18 GB (fp16) to ~5–6 GB while preserving most of the model quality.
+[Qwen](https://github.com/QwenLM/Qwen2.5) is Alibaba Cloud's open-source large language model family. The **Qwen2.5-7B-AWQ** variant is a 7-billion-parameter model quantised to 4-bit using the [AWQ (Activation-aware Weight Quantization)](https://arxiv.org/abs/2306.00978) method, reducing the on-GPU memory footprint from ~14 GB (fp16) to ~5 GB while preserving most of the model quality.
 
 - Model card: <https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ>
-- Qwen GitHub: <https://github.com/QwenLM/Qwen3>
+- Qwen GitHub: <https://github.com/QwenLM/Qwen2.5>
 - Qwen Blog: <https://qwenlm.github.io>
 - AWQ paper: <https://arxiv.org/abs/2306.00978>
 
@@ -2311,7 +2311,7 @@ The [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-container-toolki
 ### Further reading
 
 - [OpenAI API Reference](https://platform.openai.com/docs/api-reference) — the API contract that vLLM's `/v1/` endpoints implement
-- [AWQ: Activation-aware Weight Quantization](https://arxiv.org/abs/2306.00978) — the quantisation technique used by `Qwen3.5-9B-AWQ`
+- [AWQ: Activation-aware Weight Quantization](https://arxiv.org/abs/2306.00978) — the quantisation technique used by `Qwen2.5-7B-AWQ`
 - [PagedAttention paper](https://arxiv.org/abs/2309.06180) — the memory-management technique behind vLLM's efficiency
 - [HuggingFace model hub](https://huggingface.co/models?pipeline_tag=text-generation&sort=downloads) — browse other AWQ-quantised models compatible with vLLM
 

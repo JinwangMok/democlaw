@@ -3,7 +3,7 @@
 # check-gpu.sh — Standalone NVIDIA GPU and CUDA driver preflight validation
 #
 # Validates that the host meets all hardware and driver prerequisites for
-# running the DemoClaw stack (vLLM + Qwen3.5-9B AWQ 4-bit on NVIDIA GPU).
+# running the DemoClaw stack (vLLM + Qwen2.5-7B AWQ 4-bit on NVIDIA GPU).
 #
 # Run this script BEFORE launching containers to confirm your GPU setup is
 # ready. The main start scripts (start.sh, start-vllm.sh) also call this
@@ -15,7 +15,7 @@
 #   3. At least one physical NVIDIA GPU device is detected
 #   4. NVIDIA driver version meets minimum (>= 520.0 for CUDA 11.8)
 #   5. CUDA version meets minimum (>= 11.8, required by vLLM)
-#   6. GPU VRAM meets minimum (>= 7500 MiB for Qwen3.5-9B AWQ 4-bit)
+#   6. GPU VRAM meets minimum (>= 7500 MiB for Qwen2.5-7B AWQ 4-bit)
 #   7. nvidia-container-toolkit is configured for the detected runtime
 #
 # Exit codes:

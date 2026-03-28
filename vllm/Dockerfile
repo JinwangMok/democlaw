@@ -45,7 +45,7 @@ ARG BUILD_DATE
 ARG GIT_COMMIT
 
 LABEL maintainer="democlaw"
-LABEL description="vLLM OpenAI-compatible server for Qwen3.5-9B AWQ 4-bit"
+LABEL description="vLLM OpenAI-compatible server for Qwen2.5-7B AWQ 4-bit"
 LABEL org.opencontainers.image.title="democlaw-vllm"
 LABEL org.opencontainers.image.description="Serves Qwen/Qwen2.5-7B-Instruct-AWQ via the vLLM OpenAI-compatible API"
 LABEL org.opencontainers.image.version="${VERSION}"
