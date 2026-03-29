@@ -65,11 +65,13 @@ fi
 GPU_FLAGS="--gpus all"
 HOSTNAME_VLLM="--hostname vllm"
 HOSTNAME_OPENCLAW="--hostname openclaw"
+SHM_FLAGS="--shm-size 1g"
 if [ "${RUNTIME}" = "podman" ]; then
     GPU_FLAGS="--device nvidia.com/gpu=all"
-    # Podman rootful inherits host UTS namespace; --hostname is invalid
+    # Podman rootful inherits host UTS/IPC namespaces; --hostname and --shm-size are invalid
     HOSTNAME_VLLM=""
     HOSTNAME_OPENCLAW=""
+    SHM_FLAGS=""
 fi
 
 log "========================================================"
@@ -158,7 +160,7 @@ log "  GPU mem util : ${GPU_MEMORY_UTILIZATION}"
     --network-alias vllm \
     ${GPU_FLAGS} \
     --restart unless-stopped \
-    --shm-size 1g \
+    ${SHM_FLAGS} \
     -p "${VLLM_PORT}:${VLLM_PORT}" \
     -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
     -e "MODEL_NAME=${MODEL_NAME}" \
