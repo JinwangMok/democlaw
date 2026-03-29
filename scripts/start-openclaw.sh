@@ -21,7 +21,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 CONTAINER_NAME="${OPENCLAW_CONTAINER_NAME:-democlaw-openclaw}"
 NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
-IMAGE_TAG="${OPENCLAW_IMAGE_TAG:-jinwangmok/democlaw-openclaw:v1.0.0}"
+IMAGE_TAG="${OPENCLAW_IMAGE_TAG:-docker.io/jinwangmok/democlaw-openclaw:v1.0.0}"
 
 # Port mapping — container listens on OPENCLAW_PORT, host exposes OPENCLAW_HOST_PORT
 OPENCLAW_PORT="${OPENCLAW_PORT:-18789}"

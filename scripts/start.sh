@@ -24,8 +24,8 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-VLLM_IMAGE="${DEMOCLAW_VLLM_IMAGE:-jinwangmok/democlaw-vllm:v1.0.0}"
-OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-jinwangmok/democlaw-openclaw:v1.0.0}"
+VLLM_IMAGE="${DEMOCLAW_VLLM_IMAGE:-docker.io/jinwangmok/democlaw-vllm:v1.0.0}"
+OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-openclaw:v1.0.0}"
 NETWORK="democlaw-net"
 VLLM_CONTAINER="democlaw-vllm"
 OPENCLAW_CONTAINER="democlaw-openclaw"

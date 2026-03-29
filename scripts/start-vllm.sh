@@ -51,7 +51,7 @@ fi
 # ---------------------------------------------------------------------------
 CONTAINER_NAME="${VLLM_CONTAINER_NAME:-democlaw-vllm}"
 NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
-IMAGE_TAG="${VLLM_IMAGE_TAG:-jinwangmok/democlaw-vllm:v1.0.0}"
+IMAGE_TAG="${VLLM_IMAGE_TAG:-docker.io/jinwangmok/democlaw-vllm:v1.0.0}"
 
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
 VLLM_HOST="${VLLM_HOST:-0.0.0.0}"

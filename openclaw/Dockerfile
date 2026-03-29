@@ -25,7 +25,7 @@ ARG VERSION=dev
 ARG BUILD_DATE=unknown
 ARG GIT_COMMIT=unknown
 
-FROM ubuntu:24.04
+FROM docker.io/ubuntu:24.04
 
 # Re-declare ARGs after FROM so they are visible in this build stage
 ARG NODE_MAJOR

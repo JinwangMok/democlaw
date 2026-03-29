@@ -33,7 +33,7 @@ ARG VERSION=dev
 ARG BUILD_DATE=unknown
 ARG GIT_COMMIT=unknown
 
-FROM vllm/vllm-openai:${VLLM_BASE_VERSION}
+FROM docker.io/vllm/vllm-openai:${VLLM_BASE_VERSION}
 
 # Re-declare ARGs after FROM so they are visible in this build stage
 ARG MODEL_NAME

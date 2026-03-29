@@ -131,7 +131,7 @@ OPENCLAW_HOST_PORT="${OPENCLAW_HOST_PORT:-18789}"
 
 # --- Container / image ---
 CONTAINER_NAME="${OPENCLAW_CONTAINER_NAME:-democlaw-openclaw}"
-IMAGE_TAG="${OPENCLAW_IMAGE_TAG:-jinwangmok/democlaw-openclaw:v1.0.0}"
+IMAGE_TAG="${OPENCLAW_IMAGE_TAG:-docker.io/jinwangmok/democlaw-openclaw:v1.0.0}"
 NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
 
 # --- vLLM container name for pre-flight checks ---
