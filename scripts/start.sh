@@ -63,8 +63,13 @@ else
 fi
 
 GPU_FLAGS="--gpus all"
+HOSTNAME_VLLM="--hostname vllm"
+HOSTNAME_OPENCLAW="--hostname openclaw"
 if [ "${RUNTIME}" = "podman" ]; then
     GPU_FLAGS="--device nvidia.com/gpu=all"
+    # Podman rootful inherits host UTS namespace; --hostname is invalid
+    HOSTNAME_VLLM=""
+    HOSTNAME_OPENCLAW=""
 fi
 
 log "========================================================"
@@ -149,7 +154,7 @@ log "  GPU mem util : ${GPU_MEMORY_UTILIZATION}"
 "${RUNTIME}" run -d \
     --name "${VLLM_CONTAINER}" \
     --network "${NETWORK}" \
-    --hostname vllm \
+    ${HOSTNAME_VLLM} \
     --network-alias vllm \
     ${GPU_FLAGS} \
     --restart unless-stopped \
@@ -272,7 +277,7 @@ log "Starting OpenClaw container ..."
 "${RUNTIME}" run -d \
     --name "${OPENCLAW_CONTAINER}" \
     --network "${NETWORK}" \
-    --hostname openclaw \
+    ${HOSTNAME_OPENCLAW} \
     --network-alias openclaw \
     --restart unless-stopped \
     -p "${OPENCLAW_PORT}:${OPENCLAW_PORT}" \
