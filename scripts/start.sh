@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# start.sh -- Full E2E startup for the DemoClaw stack (vLLM + OpenClaw)
+# start.sh -- Full E2E startup for the DemoClaw stack (llama.cpp + OpenClaw)
 #
 # This single script handles the entire lifecycle:
 #   1. Clean up old containers/network
-#   2. Build images (always rebuild to pick up Dockerfile changes)
+#   2. Acquire images (pull from Docker Hub first; local build fallback)
 #   3. Create network
-#   4. Start vLLM, wait for /health + /v1/models
+#   4. Start llama.cpp server, wait for /health + /v1/models
 #   5. Start OpenClaw, wait for dashboard
 #   6. Print tokenized dashboard URL
 #
@@ -24,29 +24,32 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-VLLM_IMAGE="${DEMOCLAW_VLLM_IMAGE:-docker.io/jinwangmok/democlaw-vllm:v1.0.0}"
+LLAMACPP_IMAGE="${DEMOCLAW_LLAMACPP_IMAGE:-docker.io/jinwangmok/democlaw-llamacpp:v1.0.0}"
 OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-openclaw:v1.0.0}"
 NETWORK="democlaw-net"
-VLLM_CONTAINER="democlaw-vllm"
+LLAMACPP_CONTAINER="democlaw-llamacpp"
 OPENCLAW_CONTAINER="democlaw-openclaw"
-MODEL_NAME="Qwen/Qwen3-4B-AWQ"
+MODEL_NAME="Qwen3.5-9B-Q4_K_M"
+MODEL_REPO="unsloth/Qwen3.5-9B-GGUF"
+MODEL_FILE="Qwen3.5-9B-Q4_K_M.gguf"
 
-# vLLM tuning for 8GB VRAM
-MAX_MODEL_LEN="16384"
-QUANTIZATION="awq_marlin"
-DTYPE="float16"
-GPU_MEMORY_UTILIZATION="0.95"
+# llama.cpp tuning for 8GB VRAM
+CTX_SIZE="${CTX_SIZE:-32768}"
+N_GPU_LAYERS="${N_GPU_LAYERS:-99}"
+FLASH_ATTN="${FLASH_ATTN:-1}"
+CACHE_TYPE_K="${CACHE_TYPE_K:-q8_0}"
+CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
 
 # Ports
-VLLM_PORT="8000"
+LLAMACPP_PORT="8000"
 OPENCLAW_PORT="18789"
 
 # Timeouts (seconds)
-VLLM_HEALTH_TIMEOUT=300
+LLAMACPP_HEALTH_TIMEOUT=600   # longer: model may need to download on first run
 OPENCLAW_HEALTH_TIMEOUT=120
 
-# HuggingFace cache
-HF_CACHE_DIR="${HF_CACHE_DIR:-${HOME}/.cache/huggingface}"
+# Model directory (host path mounted into the container)
+MODEL_DIR="${MODEL_DIR:-${HOME}/.cache/democlaw/models}"
 
 # ---------------------------------------------------------------------------
 # Detect container runtime
@@ -63,13 +66,13 @@ else
 fi
 
 GPU_FLAGS="--gpus all"
-HOSTNAME_VLLM="--hostname vllm"
+HOSTNAME_LLM="--hostname llamacpp"
 HOSTNAME_OPENCLAW="--hostname openclaw"
 SHM_FLAGS="--shm-size 1g"
 if [ "${RUNTIME}" = "podman" ]; then
     GPU_FLAGS="--device nvidia.com/gpu=all"
     # Podman rootful inherits host UTS/IPC namespaces; --hostname and --shm-size are invalid
-    HOSTNAME_VLLM=""
+    HOSTNAME_LLM=""
     HOSTNAME_OPENCLAW=""
     SHM_FLAGS=""
 fi
@@ -78,6 +81,8 @@ log "========================================================"
 log "  DemoClaw Stack -- Full E2E Startup"
 log "========================================================"
 log "Runtime: ${RUNTIME}"
+log "Engine : llama.cpp (CUDA backend)"
+log "Model  : ${MODEL_NAME} (GGUF Q4_K_M)"
 
 # ---------------------------------------------------------------------------
 # Validate NVIDIA GPU
@@ -93,7 +98,7 @@ log "NVIDIA GPU OK."
 log ""
 log "--- Phase 0: Cleanup ---"
 
-for cname in "${OPENCLAW_CONTAINER}" "${VLLM_CONTAINER}"; do
+for cname in "${OPENCLAW_CONTAINER}" "${LLAMACPP_CONTAINER}" "democlaw-vllm"; do
     if "${RUNTIME}" container inspect "${cname}" >/dev/null 2>&1; then
         log "Removing old container '${cname}' ..."
         "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true
@@ -117,101 +122,94 @@ _img_warn()  { log "WARNING: $*"; }
 _img_error() { error "$@"; }
 source "${SCRIPT_DIR}/lib/image.sh"
 
-ensure_image "${VLLM_IMAGE}" "${PROJECT_ROOT}/vllm"
+ensure_image "${LLAMACPP_IMAGE}" "${PROJECT_ROOT}/llamacpp"
 ensure_image "${OPENCLAW_IMAGE}" "${PROJECT_ROOT}/openclaw"
 
 log "Images ready."
 
 # ===========================================================================
-# Phase 2: Create network + start vLLM
+# Phase 2: Create network + start llama.cpp
 # ===========================================================================
 log ""
-log "--- Phase 2: Start vLLM ---"
+log "--- Phase 2: Start llama.cpp ---"
 
 log "Creating network '${NETWORK}' ..."
 "${RUNTIME}" network create "${NETWORK}" || error "Failed to create network."
 
-mkdir -p "${HF_CACHE_DIR}"
+mkdir -p "${MODEL_DIR}"
 
-# Source checksum library for model integrity verification
-_cksum_log()   { log "$@"; }
-_cksum_warn()  { log "WARNING: $*"; }
-_cksum_error() { log "ERROR: $*"; }
-source "${SCRIPT_DIR}/lib/checksum.sh"
-
-# Verify model checksums (if model is already cached)
-if ! checksum_model_needs_download "${HF_CACHE_DIR}" "${MODEL_NAME}"; then
-    log "Model checksums verified — cached model is intact."
-else
-    log "Model not yet cached or checksums missing — vLLM will download on first start."
-fi
-
-log "Starting vLLM container ..."
-log "  Model        : ${MODEL_NAME}"
-log "  Quantization : ${QUANTIZATION}"
-log "  Context      : ${MAX_MODEL_LEN}"
-log "  GPU mem util : ${GPU_MEMORY_UTILIZATION}"
+log "Starting llama.cpp container ..."
+log "  Model      : ${MODEL_REPO}/${MODEL_FILE}"
+log "  Context    : ${CTX_SIZE} tokens"
+log "  GPU layers : ${N_GPU_LAYERS}"
+log "  Flash attn : ${FLASH_ATTN}"
+log "  KV cache   : K=${CACHE_TYPE_K}, V=${CACHE_TYPE_V}"
+log "  Model dir  : ${MODEL_DIR}"
 
 # shellcheck disable=SC2086
 "${RUNTIME}" run -d \
-    --name "${VLLM_CONTAINER}" \
+    --name "${LLAMACPP_CONTAINER}" \
     --network "${NETWORK}" \
-    ${HOSTNAME_VLLM} \
+    ${HOSTNAME_LLM} \
     --network-alias vllm \
     ${GPU_FLAGS} \
     --restart unless-stopped \
     ${SHM_FLAGS} \
-    -p "${VLLM_PORT}:${VLLM_PORT}" \
-    -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
-    -e "MODEL_NAME=${MODEL_NAME}" \
-    -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}" \
-    -e "GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}" \
-    -e "QUANTIZATION=${QUANTIZATION}" \
-    -e "DTYPE=${DTYPE}" \
-    -e "VLLM_ATTENTION_BACKEND=FLASHINFER" \
-    "${VLLM_IMAGE}" || error "Failed to start vLLM container."
+    -p "${LLAMACPP_PORT}:${LLAMACPP_PORT}" \
+    -v "${MODEL_DIR}:/models:rw" \
+    -e "MODEL_PATH=/models/${MODEL_FILE}" \
+    -e "MODEL_REPO=${MODEL_REPO}" \
+    -e "MODEL_FILE=${MODEL_FILE}" \
+    -e "MODEL_ALIAS=${MODEL_NAME}" \
+    -e "LLAMA_HOST=0.0.0.0" \
+    -e "LLAMA_PORT=${LLAMACPP_PORT}" \
+    -e "CTX_SIZE=${CTX_SIZE}" \
+    -e "N_GPU_LAYERS=${N_GPU_LAYERS}" \
+    -e "FLASH_ATTN=${FLASH_ATTN}" \
+    -e "CACHE_TYPE_K=${CACHE_TYPE_K}" \
+    -e "CACHE_TYPE_V=${CACHE_TYPE_V}" \
+    "${LLAMACPP_IMAGE}" || error "Failed to start llama.cpp container."
 
-log "vLLM container started. Waiting for health ..."
+log "llama.cpp container started. Waiting for health ..."
 
 # ---------------------------------------------------------------------------
-# Wait for vLLM /health
+# Wait for llama.cpp /health
 # ---------------------------------------------------------------------------
 elapsed=0
-while [ "${elapsed}" -lt "${VLLM_HEALTH_TIMEOUT}" ]; do
-    state=$("${RUNTIME}" container inspect --format '{{.State.Status}}' "${VLLM_CONTAINER}" 2>/dev/null || echo "unknown")
+while [ "${elapsed}" -lt "${LLAMACPP_HEALTH_TIMEOUT}" ]; do
+    state=$("${RUNTIME}" container inspect --format '{{.State.Status}}' "${LLAMACPP_CONTAINER}" 2>/dev/null || echo "unknown")
     if [ "${state}" = "exited" ] || [ "${state}" = "dead" ]; then
-        log "ERROR: vLLM container exited unexpectedly."
-        "${RUNTIME}" logs --tail 20 "${VLLM_CONTAINER}" 2>&1 || true
+        log "ERROR: llama.cpp container exited unexpectedly."
+        "${RUNTIME}" logs --tail 30 "${LLAMACPP_CONTAINER}" 2>&1 || true
         exit 1
     fi
 
-    if curl -sf "http://localhost:${VLLM_PORT}/health" >/dev/null 2>&1; then
-        log "vLLM /health OK."
+    if curl -sf "http://localhost:${LLAMACPP_PORT}/health" >/dev/null 2>&1; then
+        log "llama.cpp /health OK."
         break
     fi
 
     sleep 5
     elapsed=$((elapsed + 5))
     if [ $((elapsed % 30)) -eq 0 ]; then
-        log "  ... vLLM loading (${elapsed}/${VLLM_HEALTH_TIMEOUT}s)"
+        log "  ... llama.cpp loading (${elapsed}/${LLAMACPP_HEALTH_TIMEOUT}s)"
     fi
 done
 
-if [ "${elapsed}" -ge "${VLLM_HEALTH_TIMEOUT}" ]; then
-    error "vLLM did not become healthy within ${VLLM_HEALTH_TIMEOUT}s. Check logs: ${RUNTIME} logs ${VLLM_CONTAINER}"
+if [ "${elapsed}" -ge "${LLAMACPP_HEALTH_TIMEOUT}" ]; then
+    error "llama.cpp did not become healthy within ${LLAMACPP_HEALTH_TIMEOUT}s. Check logs: ${RUNTIME} logs ${LLAMACPP_CONTAINER}"
 fi
 
 # ---------------------------------------------------------------------------
 # Verify /v1/models returns HTTP 200 with the expected model loaded
 # ---------------------------------------------------------------------------
 log "Checking /v1/models for model '${MODEL_NAME}' ..."
-MODELS_URL="http://localhost:${VLLM_PORT}/v1/models"
-MODELS_TIMEOUT=120
+MODELS_URL="http://localhost:${LLAMACPP_PORT}/v1/models"
+MODELS_TIMEOUT=60
 models_elapsed=0
 models_verified=false
 
 while [ "${models_elapsed}" -lt "${MODELS_TIMEOUT}" ]; do
-    # Capture both HTTP status code and response body
     tmpfile=$(mktemp)
     http_code=$(curl -sf -o "${tmpfile}" -w "%{http_code}" \
         --max-time 10 "${MODELS_URL}" 2>/dev/null || echo "000")
@@ -219,7 +217,6 @@ while [ "${models_elapsed}" -lt "${MODELS_TIMEOUT}" ]; do
     rm -f "${tmpfile}"
 
     if [ "${http_code}" = "200" ] && [ -n "${response}" ]; then
-        # Parse model list and verify expected model is present
         model_check=$(echo "${response}" | python3 -c "
 import sys, json
 try:
@@ -236,20 +233,12 @@ except Exception:
         case "${model_check}" in
             found:*)
                 models_listed="${model_check#found:}"
-                log "vLLM /v1/models returned HTTP 200."
+                log "llama.cpp /v1/models returned HTTP 200."
                 log "  Available models: ${models_listed}"
-                if echo "${models_listed}" | grep -qF "${MODEL_NAME}"; then
-                    log "  Confirmed: '${MODEL_NAME}' is loaded and serving."
-                    models_verified=true
-                else
-                    log "  WARNING: Expected model '${MODEL_NAME}' not in list."
-                    log "  Proceeding with available models: ${models_listed}"
-                    models_verified=true
-                fi
+                models_verified=true
                 break
                 ;;
             empty)
-                # HTTP 200 but no models yet — keep polling
                 ;;
         esac
     fi
@@ -265,7 +254,7 @@ if [ "${models_verified}" != "true" ]; then
     log "WARNING: /v1/models did not confirm model readiness within ${MODELS_TIMEOUT}s."
     log "  Last HTTP status: ${http_code:-000}"
     log "  The model may still be loading. Check: curl ${MODELS_URL}"
-    log "  Container logs: ${RUNTIME} logs -f ${VLLM_CONTAINER}"
+    log "  Container logs: ${RUNTIME} logs -f ${LLAMACPP_CONTAINER}"
 fi
 
 # ===========================================================================
@@ -336,28 +325,29 @@ if [ -z "${DASHBOARD_URL}" ]; then
     DASHBOARD_URL="http://localhost:${OPENCLAW_PORT}"
 fi
 
-VLLM_API_URL="http://localhost:${VLLM_PORT}/v1"
+LLM_API_URL="http://localhost:${LLAMACPP_PORT}/v1"
 
 log ""
 log "========================================================"
-log "  ✅ DemoClaw is running!"
+log "  DemoClaw is running!"
 log "========================================================"
 log ""
 log "  Both health-checks passed:"
-log "    • vLLM /v1/models .... HTTP 200 ✓"
-log "    • OpenClaw dashboard . HTTP 200 ✓"
+log "    - llama.cpp /v1/models .. HTTP 200"
+log "    - OpenClaw dashboard ... HTTP 200"
 log ""
 log "  Services:"
-log "    vLLM API  : ${VLLM_API_URL}"
-log "    Model     : ${MODEL_NAME}"
-log "    Runtime   : ${RUNTIME}"
+log "    LLM API  : ${LLM_API_URL}"
+log "    Engine   : llama.cpp (CUDA)"
+log "    Model    : ${MODEL_NAME} (${MODEL_REPO})"
+log "    Context  : ${CTX_SIZE} tokens"
+log "    Runtime  : ${RUNTIME}"
 log ""
 log "  Web UI Dashboard:"
 log "    ${DASHBOARD_URL}"
 log ""
 
 # Print bare dashboard URL to stdout for easy parsing by scripts/tools
-# This line has no prefix so it can be captured with: ./scripts/start.sh | grep '^http'
 echo "${DASHBOARD_URL}"
 
 log ""

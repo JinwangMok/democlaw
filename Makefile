@@ -33,18 +33,18 @@ CONTAINER_RUNTIME ?= $(shell \
 	fi)
 
 # Container and image names (match defaults in scripts and .env.example)
-VLLM_CONTAINER_NAME    ?= democlaw-vllm
+LLAMACPP_CONTAINER_NAME ?= democlaw-llamacpp
 OPENCLAW_CONTAINER_NAME ?= democlaw-openclaw
-VLLM_IMAGE_TAG         ?= democlaw/vllm:latest
-OPENCLAW_IMAGE_TAG     ?= democlaw/openclaw:latest
-DEMOCLAW_NETWORK       ?= democlaw-net
+LLAMACPP_IMAGE_TAG      ?= democlaw/llamacpp:latest
+OPENCLAW_IMAGE_TAG      ?= democlaw/openclaw:latest
+DEMOCLAW_NETWORK        ?= democlaw-net
 
 # ---------------------------------------------------------------------------
 # Build options
 # Set NO_CACHE=1 to force a clean rebuild (passes --no-cache to the runtime).
 # BUILDKIT is enabled by default for Docker; podman uses BuildKit natively.
 # Override image tags at the command line:
-#   make build VLLM_IMAGE_TAG=my-org/vllm:dev OPENCLAW_IMAGE_TAG=my-org/openclaw:dev
+#   make build LLAMACPP_IMAGE_TAG=my-org/llamacpp:dev OPENCLAW_IMAGE_TAG=my-org/openclaw:dev
 # ---------------------------------------------------------------------------
 NO_CACHE              ?=
 DOCKER_BUILDKIT       ?= 1
@@ -68,31 +68,34 @@ REPO_URL   ?= https://github.com/democlaw/democlaw
 # Override these to pin specific upstream releases:
 #   make build VLLM_BASE_VERSION=v0.8.4 NODE_MAJOR=22
 # ---------------------------------------------------------------------------
-VLLM_BASE_VERSION    ?= v0.8.3
+LLAMA_CPP_TAG        ?= master
+CUDA_VERSION         ?= 12.6.3
+CUDA_ARCHITECTURES   ?= 86
 NODE_MAJOR           ?= 20
 OPENCLAW_NPM_VERSION ?= latest
 
 # Base image references used by the 'pull-*' targets.
-# Kept in sync with the FROM directives in vllm/Dockerfile and openclaw/Dockerfile.
-VLLM_BASE_IMAGE     ?= vllm/vllm-openai:$(VLLM_BASE_VERSION)
 OPENCLAW_BASE_IMAGE ?= ubuntu:24.04
 
 # ---------------------------------------------------------------------------
 # Model and port configuration (mirrors .env.example defaults)
 # ---------------------------------------------------------------------------
-MODEL_NAME             ?= Qwen/Qwen3-4B-AWQ
-VLLM_PORT              ?= 8000
-VLLM_HOST_PORT         ?= 8000
+MODEL_NAME             ?= Qwen3.5-9B-Q4_K_M
+MODEL_REPO             ?= unsloth/Qwen3.5-9B-GGUF
+MODEL_FILE             ?= Qwen3.5-9B-Q4_K_M.gguf
+LLAMACPP_PORT          ?= 8000
+LLAMACPP_HOST_PORT     ?= 8000
 OPENCLAW_PORT          ?= 18789
 OPENCLAW_HOST_PORT     ?= 18789
-MAX_MODEL_LEN          ?= 8192
-GPU_MEMORY_UTILIZATION ?= 0.90
-QUANTIZATION           ?= awq
-DTYPE                  ?= float16
+CTX_SIZE               ?= 32768
+N_GPU_LAYERS           ?= 99
+FLASH_ATTN             ?= 1
+CACHE_TYPE_K           ?= q8_0
+CACHE_TYPE_V           ?= q8_0
 VLLM_BASE_URL          ?= http://vllm:8000/v1
 VLLM_API_KEY           ?= EMPTY
-VLLM_MODEL_NAME        ?= Qwen/Qwen3-4B-AWQ
-HF_CACHE_DIR           ?= $(HOME)/.cache/huggingface
+VLLM_MODEL_NAME        ?= Qwen3.5-9B-Q4_K_M
+MODEL_DIR              ?= $(HOME)/.cache/democlaw/models
 HF_TOKEN               ?=
 
 # ---------------------------------------------------------------------------
@@ -129,9 +132,9 @@ export _runtime_missing_msg
 
 # Export so shell scripts inherit these values
 export CONTAINER_RUNTIME
-export VLLM_CONTAINER_NAME
+export LLAMACPP_CONTAINER_NAME
 export OPENCLAW_CONTAINER_NAME
-export VLLM_IMAGE_TAG
+export LLAMACPP_IMAGE_TAG
 export OPENCLAW_IMAGE_TAG
 export DEMOCLAW_NETWORK
 export MODEL_NAME
@@ -163,7 +166,7 @@ export OPENCLAW_BASE_IMAGE
 # =============================================================================
 
 .PHONY: build build-all start stop restart restart-all clean prune status logs help \
-       health health-check validate-api validate-connection validate-connection-host ps follow follow-vllm follow-openclaw \
+       health health-check validate-api validate-korean validate-connection validate-connection-host ps follow follow-vllm follow-openclaw \
        shell shell-vllm shell-openclaw inspect-vllm inspect-openclaw \
        top-vllm top-openclaw env-check check-gpu build-info \
        run-vllm run-openclaw start-all stop-vllm stop-openclaw stop-all \
@@ -233,7 +236,7 @@ restart-all: stop start
 clean: _require-runtime
 	@REMOVE_NETWORK=true bash "$(SCRIPTS_DIR)/stop.sh"
 	@echo "[clean] Removing container images ..."
-	@$(CONTAINER_RUNTIME) rmi -f $(VLLM_IMAGE_TAG) 2>/dev/null || true
+	@$(CONTAINER_RUNTIME) rmi -f $(LLAMACPP_IMAGE_TAG) 2>/dev/null || true
 	@$(CONTAINER_RUNTIME) rmi -f $(OPENCLAW_IMAGE_TAG) 2>/dev/null || true
 	@echo "[clean] Pruning dangling volumes ..."
 	@$(CONTAINER_RUNTIME) volume prune -f 2>/dev/null || true
@@ -246,7 +249,7 @@ clean: _require-runtime
 prune: _require-runtime
 	@REMOVE_NETWORK=true bash "$(SCRIPTS_DIR)/stop.sh"
 	@echo "[prune] Removing DemoClaw container images ..."
-	@$(CONTAINER_RUNTIME) rmi -f $(VLLM_IMAGE_TAG) 2>/dev/null || true
+	@$(CONTAINER_RUNTIME) rmi -f $(LLAMACPP_IMAGE_TAG) 2>/dev/null || true
 	@$(CONTAINER_RUNTIME) rmi -f $(OPENCLAW_IMAGE_TAG) 2>/dev/null || true
 	@echo "[prune] Pruning ALL dangling images ..."
 	@$(CONTAINER_RUNTIME) image prune -f 2>/dev/null || true
@@ -263,35 +266,34 @@ prune: _require-runtime
 ##@ Per-service
 # =============================================================================
 
-## build-vllm: Build the vLLM container image (set NO_CACHE=1 to skip layer cache)
-build-vllm: _require-runtime
-	@echo "[build] Building vLLM image '$(VLLM_IMAGE_TAG)' with runtime '$(CONTAINER_RUNTIME)' ..."
-	@echo "[build]   Base version : $(VLLM_BASE_VERSION)"
+## build-llamacpp: Build the llama.cpp container image (set NO_CACHE=1 to skip layer cache)
+build-llamacpp: _require-runtime
+	@echo "[build] Building llama.cpp image '$(LLAMACPP_IMAGE_TAG)' with runtime '$(CONTAINER_RUNTIME)' ..."
+	@echo "[build]   CUDA         : $(CUDA_VERSION)"
+	@echo "[build]   llama.cpp    : $(LLAMA_CPP_TAG)"
 	@echo "[build]   Model        : $(MODEL_NAME)"
 	@echo "[build]   Version      : $(VERSION)  commit=$(GIT_COMMIT)"
 	@$(if $(NO_CACHE),echo "[build] Cache disabled (NO_CACHE=1)",)
 	@$(CONTAINER_RUNTIME) build $(_BUILD_NOCACHE_FLAG) \
-		--build-arg VLLM_BASE_VERSION=$(VLLM_BASE_VERSION) \
-		--build-arg MODEL_NAME=$(MODEL_NAME) \
-		--build-arg MAX_MODEL_LEN=$(MAX_MODEL_LEN) \
-		--build-arg QUANTIZATION=$(QUANTIZATION) \
-		--build-arg DTYPE=$(DTYPE) \
+		--build-arg CUDA_VERSION=$(CUDA_VERSION) \
+		--build-arg LLAMA_CPP_TAG=$(LLAMA_CPP_TAG) \
+		--build-arg CUDA_ARCHITECTURES=$(CUDA_ARCHITECTURES) \
 		--build-arg VERSION=$(VERSION) \
 		--build-arg BUILD_DATE=$(BUILD_DATE) \
 		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
-		--label "org.opencontainers.image.title=democlaw-vllm" \
-		--label "org.opencontainers.image.description=vLLM OpenAI-compatible server for Qwen3-4B AWQ 4-bit" \
+		--label "org.opencontainers.image.title=democlaw-llamacpp" \
+		--label "org.opencontainers.image.description=llama.cpp OpenAI-compatible server for Qwen3.5-9B Q4_K_M GGUF" \
 		--label "org.opencontainers.image.version=$(VERSION)" \
 		--label "org.opencontainers.image.created=$(BUILD_DATE)" \
 		--label "org.opencontainers.image.revision=$(GIT_COMMIT)" \
 		--label "org.opencontainers.image.source=$(REPO_URL)" \
 		--label "org.opencontainers.image.licenses=MIT" \
 		--label "org.opencontainers.image.vendor=democlaw" \
+		--label "democlaw.engine=llama.cpp" \
 		--label "democlaw.model=$(MODEL_NAME)" \
-		--label "democlaw.quantization=$(QUANTIZATION)" \
-		-t $(VLLM_IMAGE_TAG) \
-		"$(PROJECT_ROOT)vllm"
-	@echo "[build] vLLM image '$(VLLM_IMAGE_TAG)' ready."
+		-t $(LLAMACPP_IMAGE_TAG) \
+		"$(PROJECT_ROOT)llamacpp"
+	@echo "[build] llama.cpp image '$(LLAMACPP_IMAGE_TAG)' ready."
 
 ## build-openclaw: Build the OpenClaw container image (set NO_CACHE=1 to skip layer cache)
 build-openclaw: _require-runtime
@@ -422,14 +424,14 @@ run-vllm: _require-runtime
 	@$(CONTAINER_RUNTIME) network inspect $(DEMOCLAW_NETWORK) >/dev/null 2>&1 \
 		|| $(CONTAINER_RUNTIME) network create $(DEMOCLAW_NETWORK)
 	@mkdir -p "$(HF_CACHE_DIR)"
-	@echo "[run-vllm] Starting vLLM container '$(VLLM_CONTAINER_NAME)' ..."
-	@echo "[run-vllm]   Image       : $(VLLM_IMAGE_TAG)"
+	@echo "[run-vllm] Starting vLLM container '$(LLAMACPP_CONTAINER_NAME)' ..."
+	@echo "[run-vllm]   Image       : $(LLAMACPP_IMAGE_TAG)"
 	@echo "[run-vllm]   Model       : $(MODEL_NAME)"
 	@echo "[run-vllm]   Quantize    : $(QUANTIZATION)  dtype=$(DTYPE)"
 	@echo "[run-vllm]   GPU flags   : $(GPU_FLAGS)"
 	@echo "[run-vllm]   Host port   : $(VLLM_HOST_PORT) -> container $(VLLM_PORT)"
 	$(CONTAINER_RUNTIME) run -d \
-		--name $(VLLM_CONTAINER_NAME) \
+		--name $(LLAMACPP_CONTAINER_NAME) \
 		--network $(DEMOCLAW_NETWORK) \
 		--hostname vllm \
 		--network-alias vllm \
@@ -448,10 +450,10 @@ run-vllm: _require-runtime
 		-e HUGGING_FACE_HUB_TOKEN=$(HF_TOKEN) \
 		--cap-drop ALL \
 		--security-opt no-new-privileges \
-		$(VLLM_IMAGE_TAG)
-	@echo "[run-vllm] Container '$(VLLM_CONTAINER_NAME)' started."
+		$(LLAMACPP_IMAGE_TAG)
+	@echo "[run-vllm] Container '$(LLAMACPP_CONTAINER_NAME)' started."
 	@echo "[run-vllm] API endpoint : http://localhost:$(VLLM_HOST_PORT)/v1"
-	@echo "[run-vllm] Stream logs  : $(CONTAINER_RUNTIME) logs -f $(VLLM_CONTAINER_NAME)"
+	@echo "[run-vllm] Stream logs  : $(CONTAINER_RUNTIME) logs -f $(LLAMACPP_CONTAINER_NAME)"
 
 ## run-openclaw: Run the OpenClaw container directly (network + ports + env vars, no health wait)
 run-openclaw: _require-runtime
@@ -495,10 +497,10 @@ run-openclaw: _require-runtime
 
 ## stop-vllm: Stop and remove the vLLM container
 stop-vllm: _require-runtime
-	@echo "[stop-vllm] Stopping and removing container '$(VLLM_CONTAINER_NAME)' ..."
-	@$(CONTAINER_RUNTIME) rm -f $(VLLM_CONTAINER_NAME) 2>/dev/null \
+	@echo "[stop-vllm] Stopping and removing container '$(LLAMACPP_CONTAINER_NAME)' ..."
+	@$(CONTAINER_RUNTIME) rm -f $(LLAMACPP_CONTAINER_NAME) 2>/dev/null \
 		&& echo "[stop-vllm] Done." \
-		|| echo "[stop-vllm] Container '$(VLLM_CONTAINER_NAME)' not found — already removed."
+		|| echo "[stop-vllm] Container '$(LLAMACPP_CONTAINER_NAME)' not found — already removed."
 
 ## stop-openclaw: Stop and remove the OpenClaw container
 stop-openclaw: _require-runtime
@@ -551,11 +553,11 @@ status:
 	@echo "DemoClaw — Container Status"
 	@echo "==========================="
 	@$(CONTAINER_RUNTIME) ps -a \
-		--filter "name=$(VLLM_CONTAINER_NAME)" \
+		--filter "name=$(LLAMACPP_CONTAINER_NAME)" \
 		--filter "name=$(OPENCLAW_CONTAINER_NAME)" \
 		--format "table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}" 2>/dev/null \
 	|| $(CONTAINER_RUNTIME) ps -a \
-		--filter "name=$(VLLM_CONTAINER_NAME)" \
+		--filter "name=$(LLAMACPP_CONTAINER_NAME)" \
 		--filter "name=$(OPENCLAW_CONTAINER_NAME)" 2>/dev/null \
 	|| echo "(no containers found)"
 	@echo ""
@@ -571,6 +573,14 @@ health-check: status
 validate-api:
 	@bash "$(SCRIPTS_DIR)/validate-api.sh"
 
+## validate-tool-calling: Verify llama.cpp tool/function calling API (/v1/chat/completions with tools, tool_choice)
+validate-tool-calling:
+	@bash "$(SCRIPTS_DIR)/validate-tool-calling.sh"
+
+## validate-korean: Validate Korean language response quality (comprehension, generation, reasoning)
+validate-korean:
+	@bash "$(SCRIPTS_DIR)/validate-korean-quality.sh"
+
 ## validate-connection: Confirm vLLM provider connection is live from within/alongside the OpenClaw container
 validate-connection:
 	@bash "$(SCRIPTS_DIR)/validate_connection.sh" --exec
@@ -584,7 +594,7 @@ logs:
 	@case "$(SERVICE)" in \
 		vllm) \
 			echo "=== vLLM logs (last 50 lines) ==="; \
-			$(CONTAINER_RUNTIME) logs --tail 50 $(VLLM_CONTAINER_NAME) 2>/dev/null \
+			$(CONTAINER_RUNTIME) logs --tail 50 $(LLAMACPP_CONTAINER_NAME) 2>/dev/null \
 				|| echo "(no vLLM container)";; \
 		openclaw) \
 			echo "=== OpenClaw logs (last 50 lines) ==="; \
@@ -592,7 +602,7 @@ logs:
 				|| echo "(no OpenClaw container)";; \
 		"") \
 			echo "=== vLLM logs (last 50 lines) ==="; \
-			$(CONTAINER_RUNTIME) logs --tail 50 $(VLLM_CONTAINER_NAME) 2>/dev/null \
+			$(CONTAINER_RUNTIME) logs --tail 50 $(LLAMACPP_CONTAINER_NAME) 2>/dev/null \
 				|| echo "(no vLLM container)"; \
 			echo ""; \
 			echo "=== OpenClaw logs (last 50 lines) ==="; \
@@ -608,7 +618,7 @@ logs:
 
 ## logs-vllm: Show last 50 lines of vLLM container logs
 logs-vllm:
-	@$(CONTAINER_RUNTIME) logs --tail 50 $(VLLM_CONTAINER_NAME)
+	@$(CONTAINER_RUNTIME) logs --tail 50 $(LLAMACPP_CONTAINER_NAME)
 
 ## logs-openclaw: Show last 50 lines of OpenClaw container logs
 logs-openclaw:
@@ -619,25 +629,25 @@ ps:
 	@echo "DemoClaw containers:"
 	@echo "--------------------"
 	@$(CONTAINER_RUNTIME) ps -a \
-		--filter "name=$(VLLM_CONTAINER_NAME)" \
+		--filter "name=$(LLAMACPP_CONTAINER_NAME)" \
 		--filter "name=$(OPENCLAW_CONTAINER_NAME)" \
 		--format "table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}" 2>/dev/null \
 	|| $(CONTAINER_RUNTIME) ps -a \
-		--filter "name=$(VLLM_CONTAINER_NAME)" \
+		--filter "name=$(LLAMACPP_CONTAINER_NAME)" \
 		--filter "name=$(OPENCLAW_CONTAINER_NAME)" 2>/dev/null \
 	|| echo "(no containers found)"
 
 ## follow: Follow live logs from both containers (Ctrl+C to stop)
 follow:
-	@echo "=== Following logs for $(VLLM_CONTAINER_NAME) and $(OPENCLAW_CONTAINER_NAME) ===" && \
+	@echo "=== Following logs for $(LLAMACPP_CONTAINER_NAME) and $(OPENCLAW_CONTAINER_NAME) ===" && \
 	echo "    (Ctrl+C to stop)" && echo "" && \
-	$(CONTAINER_RUNTIME) logs -f --tail 10 $(VLLM_CONTAINER_NAME) 2>/dev/null &\
+	$(CONTAINER_RUNTIME) logs -f --tail 10 $(LLAMACPP_CONTAINER_NAME) 2>/dev/null &\
 	$(CONTAINER_RUNTIME) logs -f --tail 10 $(OPENCLAW_CONTAINER_NAME) 2>/dev/null &\
 	wait
 
 ## follow-vllm: Follow vLLM container logs in real time (Ctrl+C to stop)
 follow-vllm:
-	@$(CONTAINER_RUNTIME) logs -f $(VLLM_CONTAINER_NAME)
+	@$(CONTAINER_RUNTIME) logs -f $(LLAMACPP_CONTAINER_NAME)
 
 ## follow-openclaw: Follow OpenClaw container logs in real time (Ctrl+C to stop)
 follow-openclaw:
@@ -652,15 +662,15 @@ shell: _require-runtime
 	@_svc="$(or $(SERVICE),$(CONTAINER))"; \
 	if [ -z "$$_svc" ]; then \
 		echo "[shell] Usage: make shell SERVICE=vllm|openclaw" >&2; \
-		echo "[shell]        make shell CONTAINER=$(VLLM_CONTAINER_NAME)" >&2; \
+		echo "[shell]        make shell CONTAINER=$(LLAMACPP_CONTAINER_NAME)" >&2; \
 		echo "" >&2; \
 		echo "[shell] Shortcuts:" >&2; \
-		echo "[shell]   make shell-vllm     — exec into $(VLLM_CONTAINER_NAME)" >&2; \
+		echo "[shell]   make shell-vllm     — exec into $(LLAMACPP_CONTAINER_NAME)" >&2; \
 		echo "[shell]   make shell-openclaw — exec into $(OPENCLAW_CONTAINER_NAME)" >&2; \
 		exit 1; \
 	fi; \
 	case "$$_svc" in \
-		vllm)     _cname="$(VLLM_CONTAINER_NAME)";; \
+		vllm)     _cname="$(LLAMACPP_CONTAINER_NAME)";; \
 		openclaw) _cname="$(OPENCLAW_CONTAINER_NAME)";; \
 		*)        _cname="$$_svc";; \
 	esac; \
@@ -670,9 +680,9 @@ shell: _require-runtime
 
 ## shell-vllm: Open an interactive shell inside the vLLM container
 shell-vllm:
-	@echo "Attaching shell to '$(VLLM_CONTAINER_NAME)' ..."
-	@$(CONTAINER_RUNTIME) exec -it $(VLLM_CONTAINER_NAME) /bin/bash \
-		|| $(CONTAINER_RUNTIME) exec -it $(VLLM_CONTAINER_NAME) /bin/sh
+	@echo "Attaching shell to '$(LLAMACPP_CONTAINER_NAME)' ..."
+	@$(CONTAINER_RUNTIME) exec -it $(LLAMACPP_CONTAINER_NAME) /bin/bash \
+		|| $(CONTAINER_RUNTIME) exec -it $(LLAMACPP_CONTAINER_NAME) /bin/sh
 
 ## shell-openclaw: Open an interactive shell inside the OpenClaw container
 shell-openclaw:
@@ -682,8 +692,8 @@ shell-openclaw:
 
 ## inspect-vllm: Show detailed vLLM container information (JSON)
 inspect-vllm:
-	@$(CONTAINER_RUNTIME) inspect $(VLLM_CONTAINER_NAME) 2>/dev/null \
-		|| echo "Container '$(VLLM_CONTAINER_NAME)' not found."
+	@$(CONTAINER_RUNTIME) inspect $(LLAMACPP_CONTAINER_NAME) 2>/dev/null \
+		|| echo "Container '$(LLAMACPP_CONTAINER_NAME)' not found."
 
 ## inspect-openclaw: Show detailed OpenClaw container information (JSON)
 inspect-openclaw:
@@ -692,8 +702,8 @@ inspect-openclaw:
 
 ## top-vllm: Show vLLM container resource usage (CPU, memory)
 top-vllm:
-	@$(CONTAINER_RUNTIME) stats --no-stream $(VLLM_CONTAINER_NAME) 2>/dev/null \
-		|| echo "Container '$(VLLM_CONTAINER_NAME)' is not running."
+	@$(CONTAINER_RUNTIME) stats --no-stream $(LLAMACPP_CONTAINER_NAME) 2>/dev/null \
+		|| echo "Container '$(LLAMACPP_CONTAINER_NAME)' is not running."
 
 ## top-openclaw: Show OpenClaw container resource usage (CPU, memory)
 top-openclaw:
@@ -712,7 +722,7 @@ build-info:
 	@echo "  Git commit      : $(GIT_COMMIT)"
 	@echo "  Repo URL        : $(REPO_URL)"
 	@echo ""
-	@echo "  vLLM image      : $(VLLM_IMAGE_TAG)"
+	@echo "  vLLM image      : $(LLAMACPP_IMAGE_TAG)"
 	@echo "    base version  : $(VLLM_BASE_VERSION)"
 	@echo "    model         : $(MODEL_NAME)"
 	@echo "    quantization  : $(QUANTIZATION)"
@@ -809,6 +819,7 @@ help:
 	@printf "  make follow-openclaw                  # Stream OpenClaw logs in real time\n"
 	@printf "  make status                           # Show running containers + healthchecks\n"
 	@printf "  make validate-api                     # Validate vLLM API endpoints\n"
+	@printf "  make validate-korean                  # Validate Korean language response quality\n"
 	@printf "  make validate-connection              # Confirm vLLM provider connection via OpenClaw container\n"
 	@printf "  make validate-connection-host         # Confirm vLLM provider connection via host port\n"
 	@printf "  make ps                               # Show DemoClaw container states\n"
@@ -830,7 +841,7 @@ help:
 	@printf "\n\033[1m  Build options\033[0m\n"
 	@printf "  make build                            # Build both images (auto-detect runtime)\n"
 	@printf "  make build NO_CACHE=1                 # Force clean image rebuild\n"
-	@printf "  make build-vllm VLLM_IMAGE_TAG=my/v   # Custom vLLM image tag\n"
+	@printf "  make build-vllm LLAMACPP_IMAGE_TAG=my/v   # Custom vLLM image tag\n"
 	@printf "  make build-docker                     # Build both images with docker\n"
 	@printf "  make build-podman                     # Build both images with podman\n"
 	@printf "  make build-vllm-docker                # Build vLLM image with docker\n"

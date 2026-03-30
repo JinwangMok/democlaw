@@ -1,8 +1,8 @@
 # DemoClaw
 
-NVIDIA GPU에서 **Qwen3-4B AWQ 4비트** 모델을 자체 호스팅하는 [vLLM](https://github.com/vllm-project/vllm) 백엔드와 [OpenClaw](https://github.com/openclaw) AI 비서를 실행하기 위한 셸 스크립트 오케스트레이션입니다. docker-compose가 필요 없습니다.
+NVIDIA GPU에서 **Qwen3.5-9B Q4_K_M GGUF** 모델을 자체 호스팅하는 [llama.cpp](https://github.com/ggerganov/llama.cpp) 백엔드와 [OpenClaw](https://github.com/openclaw) AI 비서를 실행하기 위한 셸 스크립트 오케스트레이션입니다. docker-compose가 필요 없습니다.
 
-Shell-script orchestration for running [OpenClaw](https://github.com/openclaw) AI assistant with a self-hosted [vLLM](https://github.com/vllm-project/vllm) backend serving **Qwen3-4B AWQ 4-bit** on NVIDIA GPUs — no docker-compose required.
+Shell-script orchestration for running [OpenClaw](https://github.com/openclaw) AI assistant with a self-hosted [llama.cpp](https://github.com/ggerganov/llama.cpp) backend serving **Qwen3.5-9B Q4_K_M GGUF** on NVIDIA GPUs — no docker-compose required.
 
 ## 개요 / Overview
 
@@ -12,8 +12,8 @@ DemoClaw launches two containers on a shared network:
 
 | Container | Purpose | Host Port |
 |-----------|---------|-----------|
-| **vLLM** | Serves Qwen3-4B AWQ 4-bit via an OpenAI-compatible API | `localhost:8000` |
-| **OpenClaw** | AI assistant web dashboard connected to vLLM | `localhost:18789` |
+| **llama.cpp** | Serves Qwen3.5-9B Q4_K_M GGUF via an OpenAI-compatible API (CUDA) | `localhost:8000` |
+| **OpenClaw** | AI assistant web dashboard connected to llama.cpp | `localhost:18789` |
 
 **Docker**와 **Podman** 모두 지원되며, 스크립트가 사용 가능한 런타임을 자동으로 감지합니다.
 
@@ -53,12 +53,13 @@ DemoClaw requires a **Linux x86_64** host. The following distributions are teste
 
 | Requirement | Minimum | Recommended | Notes |
 |-------------|---------|-------------|-------|
-| **NVIDIA GPU** | 8 GB VRAM | 12 GB+ VRAM | The AWQ 4-bit model uses ~5–6 GB VRAM; ≥ 8 GB provides safe headroom. Examples: RTX 3070, RTX 3080, RTX 4060 Ti, RTX 4080, A10, L40S |
+| **NVIDIA GPU** | 8 GB VRAM | 12 GB+ VRAM | The Q4_K_M GGUF model uses ~5.7 GB VRAM + KV cache (~1 GB for 32k context); ≥ 8 GB provides safe headroom. Examples: RTX 3070, RTX 3080, RTX 4060 Ti, RTX 4080, A10, L40S |
 | **NVIDIA Driver** | 520 | 560+ | Driver ≥ 520 exposes CUDA 11.8 driver API; driver ≥ 535 exposes CUDA 12.2. Verify with `nvidia-smi`. |
 | **CUDA driver API version** | 11.8 | 12.x | The CUDA version _reported by `nvidia-smi`_ — determined by your driver, **not** by a separately installed CUDA Toolkit (see note below). |
 | **System RAM** | 16 GB | 32 GB+ | Required for model tokenization overhead and container runtime |
-| **Disk space** | 15 GB free | 30 GB+ free | ~5 GB for model weights (cached in `HF_CACHE_DIR`), ~3 GB for container images, remainder for logs and temp files |
-| **Internet access** | Required (first run) | — | Model weights (~5 GB) are downloaded from HuggingFace on first launch and cached locally for subsequent runs |
+| **System RAM** (optional) | 8 GB | 16 GB+ | For 64k context, ~1–2 GB can be offloaded to host RAM via llama.cpp. Not needed for 32k context. |
+| **Disk space** | 15 GB free | 30 GB+ free | ~5.7 GB for GGUF model file (cached in `MODEL_DIR`), ~3 GB for container images, remainder for logs and temp files |
+| **Internet access** | Required (first run) | — | GGUF model (~5.7 GB) is downloaded from HuggingFace on first launch and cached locally for subsequent runs |
 
 #### CUDA Toolkit과 CUDA 드라이버 API — 알아야 할 것 / CUDA Toolkit vs CUDA driver API — what you need to know
 
@@ -222,9 +223,9 @@ CONTAINER_RUNTIME=podman ./scripts/start.sh   # force Podman
 The script will:
 1. Auto-detect Docker or Podman (or use `CONTAINER_RUNTIME` if set)
 2. Validate your NVIDIA GPU and CUDA drivers — exits immediately with a clear error if absent
-3. Build the container images (first run only; cached on subsequent runs)
-4. Start the vLLM server and wait for model loading (~5 GB download on first run)
-5. Start OpenClaw and connect it to vLLM via the `democlaw-net` network
+3. Pull container images from Docker Hub (or build locally as fallback)
+4. Start the llama.cpp server and wait for model loading (~5.7 GB GGUF download on first run)
+5. Start OpenClaw and connect it to llama.cpp via the `democlaw-net` network
 6. Run healthchecks on both services
 
 준비가 완료되면 브라우저에서 **http://localhost:18789** 을 열어 OpenClaw 대시보드에 접속하세요.
@@ -2544,16 +2545,16 @@ The scripts mirror the Linux `start.sh` behavior: pull images from Docker Hub (f
 
 ## 모델 사전 다운로드 / Pre-download Models
 
-To avoid waiting for model download during container startup, pre-download model weights with the provided scripts. The vLLM container mounts the local cache, so downloads only happen once.
+To avoid waiting for the GGUF model download (~5.7 GB) during container startup, pre-download model weights with the provided scripts. The llama.cpp container mounts the model directory, so downloads only happen once.
 
 ### Linux / macOS
 
 ```bash
-# Default model (Qwen/Qwen3-4B-AWQ)
+# Default model (Qwen3.5-9B Q4_K_M GGUF)
 ./scripts/download-models.sh
 
-# Custom model
-./scripts/download-models.sh "Qwen/Qwen2.5-7B-Instruct-AWQ"
+# Custom model directory
+./scripts/download-models.sh --model-dir /mnt/models
 
 # With HuggingFace token (for gated models)
 HF_TOKEN=hf_xxx ./scripts/download-models.sh
@@ -2565,14 +2566,14 @@ HF_TOKEN=hf_xxx ./scripts/download-models.sh
 # PowerShell
 .\scripts\download-models.ps1
 
-# With custom model
-.\scripts\download-models.ps1 -ModelName "Qwen/Qwen2.5-7B-Instruct-AWQ"
+# With custom model directory
+.\scripts\download-models.ps1 -ModelDir "D:\models"
 
 # Batch (double-click or from CMD)
 .\scripts\download-models.bat
 ```
 
-The scripts download model weights to `~/.cache/huggingface` (Linux) or `%USERPROFILE%\.cache\huggingface` (Windows) and verify SHA256 checksums. On subsequent runs, existing files are verified and skipped if intact.
+The scripts download `Qwen3.5-9B-Q4_K_M.gguf` to `~/.cache/democlaw/models` (Linux) or `%USERPROFILE%\.cache\democlaw\models` (Windows) and verify SHA256 checksums. On subsequent runs, existing files are verified and skipped if intact.
 
 ---
 
@@ -2978,14 +2979,14 @@ Pre-built images are published to Docker Hub for faster startup (no local build 
 
 | Image | Tag | Description |
 |-------|-----|-------------|
-| `jinwangmok/democlaw-vllm` | `v1.0.0` | vLLM server with Qwen3-4B-AWQ support |
+| `jinwangmok/democlaw-llamacpp` | `v1.0.0` | llama.cpp server (CUDA) for Qwen3.5-9B Q4_K_M GGUF |
 | `jinwangmok/democlaw-openclaw` | `v1.0.0` | OpenClaw web dashboard |
 
-The `start.sh` (and `start.ps1`) scripts automatically pull these images. If Docker Hub is unreachable, they fall back to building locally from the `vllm/` and `openclaw/` Dockerfiles.
+The `start.sh` script automatically pulls these images. If Docker Hub is unreachable, it falls back to building locally from the `llamacpp/` and `openclaw/` Dockerfiles.
 
 To force a local build, set:
 ```bash
-DEMOCLAW_VLLM_IMAGE=democlaw/vllm:local DEMOCLAW_OPENCLAW_IMAGE=democlaw/openclaw:local ./scripts/start.sh
+DEMOCLAW_LLAMACPP_IMAGE=democlaw/llamacpp:local DEMOCLAW_OPENCLAW_IMAGE=democlaw/openclaw:local ./scripts/start.sh
 ```
 
 ---
