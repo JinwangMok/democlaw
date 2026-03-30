@@ -44,14 +44,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# CUDA driver stubs are needed at link time (not present in devel containers)
+# CUDA driver stubs are needed at link time (not present in devel containers).
+# The stubs dir ships libcuda.so but not the versioned libcuda.so.1 soname that
+# the linker resolves transitively through libggml-cuda.so — create the symlink.
 ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
+RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so \
+           /usr/local/cuda/lib64/stubs/libcuda.so.1
 
 RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" \
         https://github.com/ggerganov/llama.cpp.git . \
     && cmake -B build \
         -DGGML_CUDA=ON \
-        -DLLAMA_CURL=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
     && cmake --build build --config Release -j"$(nproc)" --target llama-server
@@ -83,13 +86,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates libcurl4 libgomp1 python3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy llama-server binary and shared libraries from builder
+# Copy llama-server binary and shared libraries from builder.
+# llama.cpp places all outputs under build/bin/ (including versioned sonames).
 COPY --from=builder /build/build/bin/llama-server /usr/local/bin/llama-server
-COPY --from=builder /build/build/src/libllama.so /usr/local/lib/
-COPY --from=builder /build/build/ggml/src/libggml.so /usr/local/lib/
-COPY --from=builder /build/build/ggml/src/libggml-base.so /usr/local/lib/
-COPY --from=builder /build/build/ggml/src/libggml-cuda.so /usr/local/lib/
-COPY --from=builder /build/build/ggml/src/libggml-cpu.so /usr/local/lib/
+COPY --from=builder /build/build/bin/libllama.so   /usr/local/lib/
+COPY --from=builder /build/build/bin/libggml.so    /usr/local/lib/
+COPY --from=builder /build/build/bin/libggml-base.so  /usr/local/lib/
+COPY --from=builder /build/build/bin/libggml-cuda.so  /usr/local/lib/
+COPY --from=builder /build/build/bin/libggml-cpu.so   /usr/local/lib/
 RUN ldconfig
 
 # ---------------------------------------------------------------------------
