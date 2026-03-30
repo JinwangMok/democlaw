@@ -7,7 +7,7 @@
 # without any modification to OpenClaw code.
 #
 # Verification matrix (Sub-AC 3 of AC 2):
-#   1. OpenAI-compatible endpoint reachable at http://vllm:8000/v1
+#   1. OpenAI-compatible endpoint reachable at http://llamacpp:8000/v1
 #   2. /v1/chat/completions accepts tools[] + tool_choice parameters
 #   3. Response contains tool_calls[] in OpenAI-standard format
 #   4. Multi-turn tool flow (call → result → response) completes
@@ -15,7 +15,7 @@
 #   6. Auth compatibility (EMPTY/no-auth mode works)
 #
 # This script validates ZERO changes are needed on the OpenClaw side by:
-#   - Using the same baseUrl format OpenClaw uses (http://vllm:8000/v1)
+#   - Using the same baseUrl format OpenClaw uses (http://llamacpp:8000/v1)
 #   - Using the same auth header (Bearer EMPTY or no header)
 #   - Sending the same JSON structure OpenClaw sends for tool calls
 #   - Verifying the response matches what OpenClaw expects to parse
@@ -26,7 +26,7 @@
 #
 # Usage:
 #   ./scripts/verify-openclaw-tool-calling.sh
-#   VLLM_BASE_URL=http://localhost:8000 ./scripts/verify-openclaw-tool-calling.sh
+#   LLAMACPP_BASE_URL=http://localhost:8000 ./scripts/verify-openclaw-tool-calling.sh
 #   SKIP_LIVE_TEST=true ./scripts/verify-openclaw-tool-calling.sh  # code analysis only
 # =============================================================================
 set -euo pipefail
@@ -46,8 +46,8 @@ if [ -f "${ENV_FILE}" ]; then
     set +a
 fi
 
-VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
-VLLM_BASE_URL="${VLLM_BASE_URL:-http://localhost:${VLLM_HOST_PORT}}"
+LLAMACPP_HOST_PORT="${LLAMACPP_HOST_PORT:-8000}"
+LLAMACPP_BASE_URL="${LLAMACPP_BASE_URL:-http://localhost:${LLAMACPP_HOST_PORT}}"
 # llama.cpp MODEL_ALIAS — what /v1/models returns
 LLAMACPP_MODEL_ALIAS="${LLAMACPP_MODEL_ALIAS:-Qwen3.5-9B-Q4_K_M}"
 # OpenClaw's configured model name — may differ from alias
@@ -86,7 +86,7 @@ echo ""
 echo "======================================================="
 echo "  OpenClaw ↔ llama.cpp Function Calling Verification"
 echo "======================================================="
-echo "  Base URL       : ${VLLM_BASE_URL}"
+echo "  Base URL       : ${LLAMACPP_BASE_URL}"
 echo "  llama.cpp model: ${LLAMACPP_MODEL_ALIAS}"
 echo "  OpenClaw model : ${OPENCLAW_MODEL_NAME}"
 echo "  Auth mode      : no-auth (EMPTY)"
@@ -98,15 +98,15 @@ echo ""
 #
 # Verify by inspecting the OpenClaw container configuration that all
 # connection parameters are env-var driven with no hardcoded assumptions
-# about the backend being vLLM specifically.
+# about the backend being llama.cpp specifically.
 # ===========================================================================
 header "1. Code Analysis — OpenClaw configuration is backend-agnostic"
 
 # Check OpenClaw Dockerfile uses env vars for all LLM config
 if [ -f "${PROJECT_ROOT}/openclaw/Dockerfile" ]; then
-    if grep -q 'VLLM_BASE_URL' "${PROJECT_ROOT}/openclaw/Dockerfile" \
-       && grep -q 'VLLM_MODEL_NAME' "${PROJECT_ROOT}/openclaw/Dockerfile"; then
-        pass "OpenClaw Dockerfile uses VLLM_BASE_URL and VLLM_MODEL_NAME env vars"
+    if grep -q 'LLAMACPP_BASE_URL' "${PROJECT_ROOT}/openclaw/Dockerfile" \
+       && grep -q 'LLAMACPP_MODEL_NAME' "${PROJECT_ROOT}/openclaw/Dockerfile"; then
+        pass "OpenClaw Dockerfile uses LLAMACPP_BASE_URL and LLAMACPP_MODEL_NAME env vars"
     else
         fail "OpenClaw Dockerfile missing expected env var configuration"
     fi
@@ -116,18 +116,18 @@ fi
 
 # Check OpenClaw entrypoint generates config.json from env vars at runtime
 if [ -f "${PROJECT_ROOT}/openclaw/entrypoint.sh" ]; then
-    if grep -q 'VLLM_BASE_URL' "${PROJECT_ROOT}/openclaw/entrypoint.sh" \
+    if grep -q 'LLAMACPP_BASE_URL' "${PROJECT_ROOT}/openclaw/entrypoint.sh" \
        && grep -q 'openai-compatible' "${PROJECT_ROOT}/openclaw/entrypoint.sh"; then
         pass "OpenClaw entrypoint generates config from env vars (provider: openai-compatible)"
     else
         fail "OpenClaw entrypoint missing dynamic config generation"
     fi
 
-    # Verify health check uses generic /health endpoint (not vLLM-specific)
+    # Verify health check uses generic /health endpoint (not llama.cpp-specific)
     if grep -q '/health' "${PROJECT_ROOT}/openclaw/entrypoint.sh"; then
         pass "OpenClaw health check uses generic /health endpoint (llama.cpp compatible)"
     else
-        fail "OpenClaw health check uses vLLM-specific endpoint"
+        fail "OpenClaw health check uses llama.cpp-specific endpoint"
     fi
 
     # Verify model verification is graceful (warns but continues on mismatch)
@@ -143,7 +143,7 @@ fi
 # Check OpenClaw config.json uses openai-compatible provider
 if [ -f "${PROJECT_ROOT}/openclaw/config.json" ]; then
     if grep -q '"openai-compatible"' "${PROJECT_ROOT}/openclaw/config.json"; then
-        pass "OpenClaw config.json provider is 'openai-compatible' (not 'vllm')"
+        pass "OpenClaw config.json provider is 'openai-compatible' (not 'llamacpp')"
     else
         fail "OpenClaw config.json uses a specific provider (not openai-compatible)"
     fi
@@ -155,7 +155,7 @@ fi
 if [ -f "${PROJECT_ROOT}/llamacpp/Dockerfile" ]; then
     if grep -q 'LLAMA_PORT="8000"' "${PROJECT_ROOT}/llamacpp/Dockerfile" \
        || grep -q 'EXPOSE 8000' "${PROJECT_ROOT}/llamacpp/Dockerfile"; then
-        pass "llama.cpp Dockerfile exposes port 8000 (matches OpenClaw's VLLM_BASE_URL)"
+        pass "llama.cpp Dockerfile exposes port 8000 (matches OpenClaw's LLAMACPP_BASE_URL)"
     else
         fail "llama.cpp Dockerfile does not expose port 8000"
     fi
@@ -190,7 +190,7 @@ else
     # 2a: GET /health
     info "Testing GET /health (OpenClaw entrypoint dependency)"
     HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
-        --max-time 10 "${VLLM_BASE_URL%/v1}/health" 2>/dev/null || echo "000")
+        --max-time 10 "${LLAMACPP_BASE_URL%/v1}/health" 2>/dev/null || echo "000")
 
     if [ "${HTTP_CODE}" = "200" ]; then
         pass "GET /health → HTTP 200 (OpenClaw health gate will pass)"
@@ -202,7 +202,7 @@ else
     info "Testing GET /v1/models (OpenClaw model verification)"
     TMPFILE=$(mktemp)
     HTTP_CODE=$(curl -sf -o "${TMPFILE}" -w "%{http_code}" \
-        --max-time 10 "${VLLM_BASE_URL}/models" 2>/dev/null || echo "000")
+        --max-time 10 "${LLAMACPP_BASE_URL}/models" 2>/dev/null || echo "000")
     MODELS_RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
 
@@ -245,7 +245,7 @@ except Exception as e:
         --max-time "${INFERENCE_TIMEOUT}" \
         -H "Content-Type: application/json" \
         -d "${BASIC_PAYLOAD}" \
-        "${VLLM_BASE_URL}/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/chat/completions" 2>/dev/null || echo "000")
     rm -f "${TMPFILE}"
 
     if [ "${HTTP_CODE}" = "200" ]; then
@@ -313,7 +313,7 @@ TOOL_EOF
         -H "Content-Type: application/json" \
         ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
         -d "${TOOL_PAYLOAD}" \
-        "${VLLM_BASE_URL}/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/chat/completions" 2>/dev/null || echo "000")
 
     RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
@@ -457,7 +457,7 @@ print(json.dumps(payload))
                 -H "Content-Type: application/json" \
                 ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
                 -d "${STEP2_PAYLOAD}" \
-                "${VLLM_BASE_URL}/chat/completions" 2>/dev/null || echo "000")
+                "${LLAMACPP_BASE_URL}/chat/completions" 2>/dev/null || echo "000")
 
             STEP2_RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
             rm -f "${TMPFILE}"
@@ -522,7 +522,7 @@ else
     HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
         --max-time 10 \
         -H "Authorization: Bearer EMPTY" \
-        "${VLLM_BASE_URL}/models" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/models" 2>/dev/null || echo "000")
 
     if [ "${HTTP_CODE}" = "200" ]; then
         pass "Request with 'Authorization: Bearer EMPTY' accepted (HTTP 200)"
@@ -533,7 +533,7 @@ else
     # Test with no auth header
     HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
         --max-time 10 \
-        "${VLLM_BASE_URL}/models" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/models" 2>/dev/null || echo "000")
 
     if [ "${HTTP_CODE}" = "200" ]; then
         pass "Request with no auth header accepted (HTTP 200)"
@@ -545,32 +545,32 @@ fi
 # ===========================================================================
 # Verification 5: Network Alias Compatibility
 #
-# OpenClaw connects to http://vllm:8000/v1 via Docker network alias.
-# The llama.cpp container registers --network-alias vllm on democlaw-net,
-# so the DNS name "vllm" resolves to the llama.cpp container's IP.
+# OpenClaw connects to http://llamacpp:8000/v1 via Docker network alias.
+# The llama.cpp container registers --network-alias llamacpp on democlaw-net,
+# so the DNS name "llamacpp" resolves to the llama.cpp container's IP.
 # This is a code-level verification (network test requires running containers).
 # ===========================================================================
-header "5. Network Alias Compatibility — 'vllm' alias resolves to llama.cpp"
+header "5. Network Alias Compatibility — 'llamacpp' alias resolves to llama.cpp"
 
-# Check start scripts register --network-alias vllm for llama.cpp
+# Check start scripts register --network-alias llamacpp for llama.cpp
 _ALIAS_FOUND=false
 for script in "${PROJECT_ROOT}/scripts/start.sh" "${PROJECT_ROOT}/Makefile" \
-              "${PROJECT_ROOT}/scripts/start-vllm.sh" "${PROJECT_ROOT}/start.ps1"; do
-    if [ -f "${script}" ] && grep -q 'network-alias.*vllm' "${script}" 2>/dev/null; then
+              "${PROJECT_ROOT}/scripts/start-llamacpp.sh" "${PROJECT_ROOT}/start.ps1"; do
+    if [ -f "${script}" ] && grep -q 'network-alias.*llamacpp' "${script}" 2>/dev/null; then
         _ALIAS_FOUND=true
         break
     fi
 done
 
 if [ "${_ALIAS_FOUND}" = "true" ]; then
-    pass "Start scripts register --network-alias vllm for the inference container"
+    pass "Start scripts register --network-alias llamacpp for the inference container"
 else
-    fail "No start script registers --network-alias vllm"
+    fail "No start script registers --network-alias llamacpp"
 fi
 
-# Check OpenClaw uses http://vllm:8000/v1 as base URL
-if grep -rq 'http://vllm:8000/v1' "${PROJECT_ROOT}/openclaw/" 2>/dev/null; then
-    pass "OpenClaw defaults to http://vllm:8000/v1 (resolves to llama.cpp container)"
+# Check OpenClaw uses http://llamacpp:8000/v1 as base URL
+if grep -rq 'http://llamacpp:8000/v1' "${PROJECT_ROOT}/openclaw/" 2>/dev/null; then
+    pass "OpenClaw defaults to http://llamacpp:8000/v1 (resolves to llama.cpp container)"
 fi
 
 # ===========================================================================
@@ -590,12 +590,12 @@ if [ "${FAILED}" -eq 0 ]; then
     echo "    ✓ Tool/function calling works (tools[], tool_choice, tool_calls[] response)"
     echo "    ✓ Multi-turn tool flow completes (call → result → response)"
     echo "    ✓ Auth compatibility (EMPTY/no-auth mode)"
-    echo "    ✓ Network alias 'vllm' routes to llama.cpp container"
+    echo "    ✓ Network alias 'llamacpp' routes to llama.cpp container"
     echo ""
     echo "  Why zero OpenClaw changes are needed:"
-    echo "    1. OpenClaw uses 'openai-compatible' provider — not vLLM-specific"
+    echo "    1. OpenClaw uses 'openai-compatible' provider — not llama.cpp-specific"
     echo "    2. llama.cpp serves OpenAI-compatible API on the same port (8000)"
-    echo "    3. llama.cpp registers as 'vllm' network alias (same DNS name)"
+    echo "    3. llama.cpp registers as 'llamacpp' network alias (same DNS name)"
     echo "    4. llama.cpp --jinja flag enables tool calling in OpenAI format"
     echo "    5. Auth mode (EMPTY/no-auth) is identical"
     echo "    6. Model name mismatch is handled gracefully by both sides"

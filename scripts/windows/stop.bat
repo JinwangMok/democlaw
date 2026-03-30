@@ -23,11 +23,11 @@ echo [stop] Runtime: %RT%
     %RT% rm -f democlaw-openclaw >nul 2>&1
 ) || echo [stop] Container 'democlaw-openclaw' not found -- skipping.
 
-:: Remove vllm container
-%RT% container inspect democlaw-vllm >nul 2>&1 && (
-    echo [stop] Removing container 'democlaw-vllm' ...
-    %RT% rm -f democlaw-vllm >nul 2>&1
-) || echo [stop] Container 'democlaw-vllm' not found -- skipping.
+:: Remove llamacpp container
+%RT% container inspect democlaw-llamacpp >nul 2>&1 && (
+    echo [stop] Removing container 'democlaw-llamacpp' ...
+    %RT% rm -f democlaw-llamacpp >nul 2>&1
+) || echo [stop] Container 'democlaw-llamacpp' not found -- skipping.
 
 :: Remove network
 %RT% network inspect democlaw-net >nul 2>&1 && (

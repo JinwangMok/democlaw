@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# validate-api.sh — Validate the vLLM OpenAI-compatible API endpoints
+# validate-api.sh — Validate the llama.cpp OpenAI-compatible API endpoints
 #
-# Tests that the vLLM server (default port 8000) correctly exposes the
+# Tests that the llama.cpp server (default port 8000) correctly exposes the
 # OpenAI-compatible REST API required by OpenClaw:
 #
 #   GET  /health               — liveness probe
 #   GET  /v1/models            — list loaded models (OpenAI-compatible)
 #   POST /v1/chat/completions  — chat inference (OpenAI-compatible)
 #
-# This script can be run against any already-running vLLM instance and
+# This script can be run against any already-running llama.cpp instance and
 # does NOT require the container to be present on this host (it only uses
 # the HTTP API).  It is intentionally free of Docker/Podman dependencies
 # so it is safe to run in CI without a GPU.
@@ -20,8 +20,8 @@
 #
 # Usage:
 #   ./scripts/validate-api.sh
-#   VLLM_HOST_PORT=8001 ./scripts/validate-api.sh          # custom port
-#   VLLM_BASE_URL=http://192.168.1.10:8000 ./scripts/validate-api.sh
+#   LLAMACPP_HOST_PORT=8001 ./scripts/validate-api.sh          # custom port
+#   LLAMACPP_BASE_URL=http://192.168.1.10:8000 ./scripts/validate-api.sh
 #   SKIP_INFERENCE_TEST=true ./scripts/validate-api.sh     # skip POST test
 # =============================================================================
 set -euo pipefail
@@ -41,17 +41,17 @@ if [ -f "${ENV_FILE}" ]; then
     set +a
 fi
 
-VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
-VLLM_BASE_URL="${VLLM_BASE_URL:-http://localhost:${VLLM_HOST_PORT}}"
+LLAMACPP_HOST_PORT="${LLAMACPP_HOST_PORT:-8000}"
+LLAMACPP_BASE_URL="${LLAMACPP_BASE_URL:-http://localhost:${LLAMACPP_HOST_PORT}}"
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-10}"
 INFERENCE_TIMEOUT="${INFERENCE_TIMEOUT:-30}"
 
-# Optional API key — must match VLLM_API_KEY passed to the vLLM container.
+# Optional API key — must match LLAMACPP_API_KEY passed to the llama.cpp container.
 # Leave empty (or "EMPTY") when the server is running in no-auth mode (default).
 # When set to a real key, every curl request will include:
-#   Authorization: Bearer <VLLM_API_KEY>
-VLLM_API_KEY="${VLLM_API_KEY:-}"
+#   Authorization: Bearer <LLAMACPP_API_KEY>
+LLAMACPP_API_KEY="${LLAMACPP_API_KEY:-}"
 
 # Set to "true" to skip the POST /v1/chat/completions inference test
 # (useful when you only want to confirm the API shape without spending GPU time)
@@ -82,18 +82,18 @@ FAILED=0
 
 # ---------------------------------------------------------------------------
 # Build optional Authorization header for API key auth.
-# When VLLM_API_KEY is empty, "EMPTY", or "none" we run in no-auth mode and
-# include no Authorization header.  This matches the vLLM entrypoint logic.
+# When LLAMACPP_API_KEY is empty, "EMPTY", or "none" we run in no-auth mode and
+# include no Authorization header.  This matches the llama.cpp entrypoint logic.
 # ---------------------------------------------------------------------------
 AUTH_HEADER=""
 _AUTH_MODE_LABEL="no-auth"
-case "${VLLM_API_KEY:-}" in
+case "${LLAMACPP_API_KEY:-}" in
     "" | EMPTY | none | no-auth )
         AUTH_HEADER=""
         _AUTH_MODE_LABEL="no-auth"
         ;;
     *)
-        AUTH_HEADER="Authorization: Bearer ${VLLM_API_KEY}"
+        AUTH_HEADER="Authorization: Bearer ${LLAMACPP_API_KEY}"
         _AUTH_MODE_LABEL="api-key"
         ;;
 esac
@@ -119,40 +119,40 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "======================================================="
-echo "  vLLM OpenAI-Compatible API Validation"
+echo "  llama.cpp OpenAI-Compatible API Validation"
 echo "======================================================="
-echo "  Base URL  : ${VLLM_BASE_URL}"
+echo "  Base URL  : ${LLAMACPP_BASE_URL}"
 echo "  Model     : ${MODEL_NAME}"
 echo "  Auth mode : ${_AUTH_MODE_LABEL}"
 echo "======================================================="
 echo ""
 echo "  Network note: when run from another container on the same network,"
-echo "  set VLLM_BASE_URL=http://vllm:${VLLM_HOST_PORT} to test container-to-container"
-echo "  reachability via the 'vllm' network alias."
+echo "  set LLAMACPP_BASE_URL=http://llamacpp:${LLAMACPP_HOST_PORT} to test container-to-container"
+echo "  reachability via the 'llamacpp' network alias."
 echo "======================================================="
 
 # ===========================================================================
 # Check 1: GET /health — liveness probe
 # ===========================================================================
 header "1. GET /health — liveness probe"
-info "Endpoint: ${VLLM_BASE_URL}/health"
+info "Endpoint: ${LLAMACPP_BASE_URL}/health"
 
 HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
     --max-time "${CURL_TIMEOUT}" \
     "${_CURL_AUTH_ARGS[@]}" \
-    "${VLLM_BASE_URL}/health" 2>/dev/null || echo "000")
+    "${LLAMACPP_BASE_URL}/health" 2>/dev/null || echo "000")
 
 if [ "${HTTP_CODE}" = "200" ]; then
     pass "HTTP ${HTTP_CODE} — server is live"
 else
-    fail "HTTP ${HTTP_CODE} — expected 200. Is the vLLM server running at ${VLLM_BASE_URL}?"
+    fail "HTTP ${HTTP_CODE} — expected 200. Is the llama.cpp server running at ${LLAMACPP_BASE_URL}?"
 fi
 
 # ===========================================================================
 # Check 2: GET /v1/models — OpenAI-compatible model listing
 # ===========================================================================
 header "2. GET /v1/models — OpenAI-compatible model listing"
-info "Endpoint: ${VLLM_BASE_URL}/v1/models"
+info "Endpoint: ${LLAMACPP_BASE_URL}/v1/models"
 
 TMPFILE=$(mktemp)
 
@@ -160,7 +160,7 @@ HTTP_CODE=$(curl -sf -o "${TMPFILE}" -w "%{http_code}" \
     --max-time "${CURL_TIMEOUT}" \
     -H "Accept: application/json" \
     "${_CURL_AUTH_ARGS[@]}" \
-    "${VLLM_BASE_URL}/v1/models" 2>/dev/null || echo "000")
+    "${LLAMACPP_BASE_URL}/v1/models" 2>/dev/null || echo "000")
 
 RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
 rm -f "${TMPFILE}"
@@ -227,7 +227,7 @@ fi
 # Check 3: POST /v1/chat/completions — OpenAI-compatible chat inference
 # ===========================================================================
 header "3. POST /v1/chat/completions — chat inference endpoint"
-info "Endpoint: ${VLLM_BASE_URL}/v1/chat/completions"
+info "Endpoint: ${LLAMACPP_BASE_URL}/v1/chat/completions"
 
 if [ "${SKIP_INFERENCE_TEST}" = "true" ]; then
     skip "Inference test skipped (SKIP_INFERENCE_TEST=true)"
@@ -253,7 +253,7 @@ PAYLOAD_EOF
         -H "Accept: application/json" \
         "${_CURL_AUTH_ARGS[@]}" \
         -d "${PAYLOAD}" \
-        "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
     RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
@@ -332,10 +332,10 @@ fi
 # ===========================================================================
 # Check 4: Network reachability configuration (informational)
 #
-# This check reports the network configuration that makes the vLLM API
+# This check reports the network configuration that makes the llama.cpp API
 # reachable from other containers on the shared network.  It does not
 # attempt a live connection (that requires running inside the network) but
-# validates that the configured VLLM_BASE_URL uses the correct alias when
+# validates that the configured LLAMACPP_BASE_URL uses the correct alias when
 # invoked container-to-container, vs localhost when invoked from the host.
 # ===========================================================================
 header "4. Network reachability configuration"
@@ -343,35 +343,35 @@ header "4. Network reachability configuration"
 # Inspect the base URL to determine if we're testing from the host or from
 # within the container network.
 _IS_NETWORK_TEST="false"
-_EXPECTED_NETWORK_URL="http://vllm:${VLLM_HOST_PORT}/v1"
+_EXPECTED_NETWORK_URL="http://llamacpp:${LLAMACPP_HOST_PORT}/v1"
 
-if echo "${VLLM_BASE_URL}" | grep -q "vllm"; then
+if echo "${LLAMACPP_BASE_URL}" | grep -q "llamacpp"; then
     _IS_NETWORK_TEST="true"
 fi
 
-info "Configured base URL    : ${VLLM_BASE_URL}"
-info "Container network alias: vllm  (reachable at http://vllm:${VLLM_HOST_PORT}/v1)"
-info "Host access URL        : http://localhost:${VLLM_HOST_PORT}/v1"
-info "Shared network name    : democlaw-net (created by start-vllm.sh)"
+info "Configured base URL    : ${LLAMACPP_BASE_URL}"
+info "Container network alias: llamacpp  (reachable at http://llamacpp:${LLAMACPP_HOST_PORT}/v1)"
+info "Host access URL        : http://localhost:${LLAMACPP_HOST_PORT}/v1"
+info "Shared network name    : democlaw-net (created by start-llamacpp.sh)"
 
 if [ "${_IS_NETWORK_TEST}" = "true" ]; then
-    pass "VLLM_BASE_URL uses the container network alias 'vllm' — correct for container-to-container access"
+    pass "LLAMACPP_BASE_URL uses the container network alias 'llamacpp' — correct for container-to-container access"
 else
-    pass "VLLM_BASE_URL uses localhost — correct for host-side access"
+    pass "LLAMACPP_BASE_URL uses localhost — correct for host-side access"
     echo ""
     echo -e "  ${CYAN}ℹ${NC}  To test container-to-container reachability from within the shared network,"
-    echo -e "  ${CYAN}ℹ${NC}  run this script with:  VLLM_BASE_URL=${_EXPECTED_NETWORK_URL} $0"
+    echo -e "  ${CYAN}ℹ${NC}  run this script with:  LLAMACPP_BASE_URL=${_EXPECTED_NETWORK_URL} $0"
 fi
 
 # Report auth mode
 case "${_AUTH_MODE_LABEL}" in
     no-auth)
-        pass "Auth mode: no-auth — vLLM accepts all requests; no Authorization header required"
+        pass "Auth mode: no-auth — llama.cpp accepts all requests; no Authorization header required"
         echo -e "  ${YELLOW}ℹ${NC}  OpenClaw config.json apiKey ('EMPTY') is compatible with no-auth mode"
         ;;
     api-key)
-        pass "Auth mode: api-key — requests must include 'Authorization: Bearer ${VLLM_API_KEY}'"
-        echo -e "  ${CYAN}ℹ${NC}  Ensure openclaw/config.json apiKey matches VLLM_API_KEY"
+        pass "Auth mode: api-key — requests must include 'Authorization: Bearer ${LLAMACPP_API_KEY}'"
+        echo -e "  ${CYAN}ℹ${NC}  Ensure openclaw/config.json apiKey matches LLAMACPP_API_KEY"
         ;;
 esac
 
@@ -383,18 +383,18 @@ echo "======================================================="
 if [ "${FAILED}" -eq 0 ]; then
     echo -e "  ${GREEN}${BOLD}PASS${NC} — All API endpoint checks passed"
     echo ""
-    echo "  The vLLM server at ${VLLM_BASE_URL} correctly exposes"
-    echo "  an OpenAI-compatible API on port ${VLLM_HOST_PORT}."
+    echo "  The llama.cpp server at ${LLAMACPP_BASE_URL} correctly exposes"
+    echo "  an OpenAI-compatible API on port ${LLAMACPP_HOST_PORT}."
     echo ""
     echo "  Container-to-container access (from OpenClaw):"
-    echo "    URL : http://vllm:${VLLM_HOST_PORT}/v1"
+    echo "    URL : http://llamacpp:${LLAMACPP_HOST_PORT}/v1"
     echo "    Auth: ${_AUTH_MODE_LABEL}"
 else
     echo -e "  ${RED}${BOLD}FAIL${NC} — ${FAILED} check(s) failed"
     echo ""
-    echo "  Ensure the vLLM container is running and healthy:"
-    echo "    ./scripts/start-vllm.sh"
-    echo "    ./scripts/healthcheck.sh --vllm-only"
+    echo "  Ensure the llama.cpp container is running and healthy:"
+    echo "    ./scripts/start-llamacpp.sh"
+    echo "    ./scripts/healthcheck.sh --llamacpp-only"
 fi
 echo "======================================================="
 echo ""

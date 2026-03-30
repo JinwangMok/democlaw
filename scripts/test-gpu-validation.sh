@@ -17,7 +17,7 @@
 #   11. validate_nvidia_gpu() exits on first failure (fail-fast)
 #   12. version_gte() correctly compares dot-separated version strings
 #   13. validate_nvidia_gpu() is called by all main orchestration scripts
-#   14. lib/gpu.sh is sourced by all vLLM launch scripts
+#   14. lib/gpu.sh is sourced by all llama.cpp launch scripts
 #
 # No real NVIDIA GPU is required — fake nvidia-smi and nvidia-ctk binaries
 # are placed in a temporary directory and injected via PATH manipulation.
@@ -374,7 +374,7 @@ else
     _fail "Expected non-zero exit when CUDA too old, got exit 0"
 fi
 
-if echo "${err5}" | grep -qi "cuda\|version\|too old\|minimum\|upgrade\|11.8\|vllm"; then
+if echo "${err5}" | grep -qi "cuda\|version\|too old\|minimum\|upgrade\|11.8\|llama.cpp"; then
     _pass "Error message mentions old CUDA version with remediation steps"
 else
     _fail "Error message does not mention CUDA version issue. Output: ${err5}"
@@ -672,8 +672,8 @@ _section "Test 13: validate_nvidia_gpu() called before container launch in main 
 
 for script in \
     "${SCRIPT_DIR}/start.sh" \
-    "${SCRIPT_DIR}/start-vllm.sh" \
-    "${SCRIPT_DIR}/run_vllm.sh"; do
+    "${SCRIPT_DIR}/start-llamacpp.sh" \
+    "${SCRIPT_DIR}/run_llamacpp.sh"; do
 
     if [ ! -f "${script}" ]; then
         _fail "$(basename "${script}") not found (expected at ${script})"
@@ -688,14 +688,14 @@ for script in \
 done
 
 # =============================================================================
-# TEST 14 — All vLLM launch scripts source lib/gpu.sh
+# TEST 14 — All llama.cpp launch scripts source lib/gpu.sh
 # =============================================================================
-_section "Test 14: vLLM launch scripts source lib/gpu.sh"
+_section "Test 14: llama.cpp launch scripts source lib/gpu.sh"
 
 for script in \
     "${SCRIPT_DIR}/start.sh" \
-    "${SCRIPT_DIR}/start-vllm.sh" \
-    "${SCRIPT_DIR}/run_vllm.sh" \
+    "${SCRIPT_DIR}/start-llamacpp.sh" \
+    "${SCRIPT_DIR}/run_llamacpp.sh" \
     "${SCRIPT_DIR}/check-gpu.sh"; do
 
     if [ ! -f "${script}" ]; then

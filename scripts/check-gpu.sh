@@ -3,10 +3,10 @@
 # check-gpu.sh — Standalone NVIDIA GPU and CUDA driver preflight validation
 #
 # Validates that the host meets all hardware and driver prerequisites for
-# running the DemoClaw stack (vLLM + Qwen3-4B AWQ 4-bit on NVIDIA GPU).
+# running the DemoClaw stack (llama.cpp + Qwen3-4B AWQ 4-bit on NVIDIA GPU).
 #
 # Run this script BEFORE launching containers to confirm your GPU setup is
-# ready. The main start scripts (start.sh, start-vllm.sh) also call this
+# ready. The main start scripts (start.sh, start-llamacpp.sh) also call this
 # validation automatically before launching any containers.
 #
 # Checks performed:
@@ -14,7 +14,7 @@
 #   2. nvidia-smi is available and can communicate with the driver
 #   3. At least one physical NVIDIA GPU device is detected
 #   4. NVIDIA driver version meets minimum (>= 520.0 for CUDA 11.8)
-#   5. CUDA version meets minimum (>= 11.8, required by vLLM)
+#   5. CUDA version meets minimum (>= 11.8, required by llama.cpp)
 #   6. GPU VRAM meets minimum (>= 7500 MiB for Qwen3-4B AWQ 4-bit)
 #   7. nvidia-container-toolkit is configured for the detected runtime
 #
@@ -124,7 +124,7 @@ log "  Next step: start the DemoClaw stack with:"
 log "    ./scripts/start.sh"
 log ""
 log "  Or start services individually:"
-log "    ./scripts/start-vllm.sh     # vLLM model server"
+log "    ./scripts/start-llamacpp.sh  # llama.cpp model server"
 log "    ./scripts/start-openclaw.sh # OpenClaw assistant UI"
 log ""
 exit 0

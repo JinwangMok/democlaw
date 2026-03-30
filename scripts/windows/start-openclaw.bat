@@ -44,13 +44,13 @@ if not defined DEMOCLAW_NETWORK        set "DEMOCLAW_NETWORK=democlaw-net"
 if not defined OPENCLAW_IMAGE_TAG      set "OPENCLAW_IMAGE_TAG=jinwangmok/democlaw-openclaw:v1.0.0"
 if not defined OPENCLAW_PORT           set "OPENCLAW_PORT=18789"
 if not defined OPENCLAW_HOST_PORT      set "OPENCLAW_HOST_PORT=18789"
-if not defined VLLM_BASE_URL           set "VLLM_BASE_URL=http://vllm:8000/v1"
-if not defined VLLM_API_KEY            set "VLLM_API_KEY=EMPTY"
-if not defined VLLM_MODEL_NAME         set "VLLM_MODEL_NAME=Qwen/Qwen3-4B-AWQ"
-if not defined VLLM_CONTAINER_NAME     set "VLLM_CONTAINER_NAME=democlaw-vllm"
+if not defined LLAMACPP_BASE_URL           set "LLAMACPP_BASE_URL=http://llamacpp:8000/v1"
+if not defined LLAMACPP_API_KEY            set "LLAMACPP_API_KEY=EMPTY"
+if not defined LLAMACPP_MODEL_NAME         set "LLAMACPP_MODEL_NAME=Qwen/Qwen3-4B-AWQ"
+if not defined LLAMACPP_CONTAINER_NAME     set "LLAMACPP_CONTAINER_NAME=democlaw-llamacpp"
 if not defined OPENCLAW_HEALTH_TIMEOUT set "OPENCLAW_HEALTH_TIMEOUT=120"
-if not defined VLLM_HEALTH_RETRIES     set "VLLM_HEALTH_RETRIES=60"
-if not defined VLLM_HEALTH_INTERVAL    set "VLLM_HEALTH_INTERVAL=5"
+if not defined LLAMACPP_HEALTH_RETRIES     set "LLAMACPP_HEALTH_RETRIES=60"
+if not defined LLAMACPP_HEALTH_INTERVAL    set "LLAMACPP_HEALTH_INTERVAL=5"
 
 set "CONTAINER_NAME=%OPENCLAW_CONTAINER_NAME%"
 set "NETWORK_NAME=%DEMOCLAW_NETWORK%"
@@ -71,9 +71,9 @@ if errorlevel 1 (
 call :ensure_network "%NETWORK_NAME%"
 
 :: ---------------------------------------------------------------------------
-:: Verify vLLM container membership (warning only, not fatal)
+:: Verify llama.cpp container membership (warning only, not fatal)
 :: ---------------------------------------------------------------------------
-call :verify_vllm_network_membership
+call :verify_llamacpp_network_membership
 
 :: ---------------------------------------------------------------------------
 :: Handle existing container
@@ -95,8 +95,8 @@ if errorlevel 1 (
 :: ---------------------------------------------------------------------------
 echo [start-openclaw] Starting OpenClaw container '%CONTAINER_NAME%' ...
 echo [start-openclaw]   Dashboard port  : localhost:%OPENCLAW_HOST_PORT% -^> container:%OPENCLAW_PORT%
-echo [start-openclaw]   vLLM endpoint   : %VLLM_BASE_URL%
-echo [start-openclaw]   Model           : %VLLM_MODEL_NAME%
+echo [start-openclaw]   llama.cpp endpoint   : %LLAMACPP_BASE_URL%
+echo [start-openclaw]   Model           : %LLAMACPP_MODEL_NAME%
 echo [start-openclaw]   Network         : %NETWORK_NAME%
 
 %RUNTIME% run -d ^
@@ -106,20 +106,20 @@ echo [start-openclaw]   Network         : %NETWORK_NAME%
     --network-alias openclaw ^
     --restart unless-stopped ^
     -p "%OPENCLAW_HOST_PORT%:%OPENCLAW_PORT%" ^
-    -e "VLLM_BASE_URL=%VLLM_BASE_URL%" ^
-    -e "VLLM_API_KEY=%VLLM_API_KEY%" ^
-    -e "VLLM_MODEL_NAME=%VLLM_MODEL_NAME%" ^
+    -e "LLAMACPP_BASE_URL=%LLAMACPP_BASE_URL%" ^
+    -e "LLAMACPP_API_KEY=%LLAMACPP_API_KEY%" ^
+    -e "LLAMACPP_MODEL_NAME=%LLAMACPP_MODEL_NAME%" ^
     -e "OPENCLAW_PORT=%OPENCLAW_PORT%" ^
-    -e "OPENAI_API_BASE=%VLLM_BASE_URL%" ^
-    -e "OPENAI_BASE_URL=%VLLM_BASE_URL%" ^
-    -e "OPENAI_API_KEY=%VLLM_API_KEY%" ^
-    -e "OPENAI_MODEL=%VLLM_MODEL_NAME%" ^
+    -e "OPENAI_API_BASE=%LLAMACPP_BASE_URL%" ^
+    -e "OPENAI_BASE_URL=%LLAMACPP_BASE_URL%" ^
+    -e "OPENAI_API_KEY=%LLAMACPP_API_KEY%" ^
+    -e "OPENAI_MODEL=%LLAMACPP_MODEL_NAME%" ^
     -e "OPENCLAW_LLM_PROVIDER=openai-compatible" ^
-    -e "OPENCLAW_LLM_BASE_URL=%VLLM_BASE_URL%" ^
-    -e "OPENCLAW_LLM_API_KEY=%VLLM_API_KEY%" ^
-    -e "OPENCLAW_LLM_MODEL=%VLLM_MODEL_NAME%" ^
-    -e "VLLM_HEALTH_RETRIES=%VLLM_HEALTH_RETRIES%" ^
-    -e "VLLM_HEALTH_INTERVAL=%VLLM_HEALTH_INTERVAL%" ^
+    -e "OPENCLAW_LLM_BASE_URL=%LLAMACPP_BASE_URL%" ^
+    -e "OPENCLAW_LLM_API_KEY=%LLAMACPP_API_KEY%" ^
+    -e "OPENCLAW_LLM_MODEL=%LLAMACPP_MODEL_NAME%" ^
+    -e "LLAMACPP_HEALTH_RETRIES=%LLAMACPP_HEALTH_RETRIES%" ^
+    -e "LLAMACPP_HEALTH_INTERVAL=%LLAMACPP_HEALTH_INTERVAL%" ^
     --cap-drop ALL ^
     --security-opt no-new-privileges ^
     --read-only ^
@@ -176,7 +176,7 @@ goto :wait_dashboard_loop
 
 :dashboard_timeout
 echo [start-openclaw] WARNING: OpenClaw dashboard did not respond within %OPENCLAW_HEALTH_TIMEOUT%s.
-echo [start-openclaw] The container is still running -- it may be waiting for vLLM.
+echo [start-openclaw] The container is still running -- it may be waiting for llama.cpp.
 echo [start-openclaw]   Dashboard URL : %DASHBOARD_URL%
 echo [start-openclaw]   Check logs    : %RUNTIME% logs -f %CONTAINER_NAME%
 exit /b 1
@@ -227,28 +227,28 @@ if errorlevel 1 (
 )
 exit /b 0
 
-:verify_vllm_network_membership
-echo [start-openclaw] Verifying vLLM endpoint reachability on network '%NETWORK_NAME%' ...
-echo [start-openclaw]   vLLM container : %VLLM_CONTAINER_NAME%
-echo [start-openclaw]   vLLM endpoint  : %VLLM_BASE_URL%
+:verify_llamacpp_network_membership
+echo [start-openclaw] Verifying llama.cpp endpoint reachability on network '%NETWORK_NAME%' ...
+echo [start-openclaw]   llama.cpp container : %LLAMACPP_CONTAINER_NAME%
+echo [start-openclaw]   llama.cpp endpoint  : %LLAMACPP_BASE_URL%
 
-%RUNTIME% container inspect "%VLLM_CONTAINER_NAME%" >nul 2>&1
+%RUNTIME% container inspect "%LLAMACPP_CONTAINER_NAME%" >nul 2>&1
 if errorlevel 1 (
-    echo [start-openclaw] WARNING: vLLM container '%VLLM_CONTAINER_NAME%' does not exist.
-    echo [start-openclaw] OpenClaw will start but wait for vLLM to become available.
-    echo [start-openclaw] Start vLLM with: scripts\windows\start-vllm.bat
+    echo [start-openclaw] WARNING: llama.cpp container '%LLAMACPP_CONTAINER_NAME%' does not exist.
+    echo [start-openclaw] OpenClaw will start but wait for llama.cpp to become available.
+    echo [start-openclaw] Start llama.cpp with: scripts\windows\start-llamacpp.bat
     exit /b 0
 )
 
-for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "%VLLM_CONTAINER_NAME%" 2^>nul') do set "_VSTATE=%%s"
+for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" "%LLAMACPP_CONTAINER_NAME%" 2^>nul') do set "_VSTATE=%%s"
 if not "!_VSTATE!"=="running" (
-    echo [start-openclaw] WARNING: vLLM container exists but is not running (state: !_VSTATE!).
-    echo [start-openclaw] OpenClaw will start and wait for vLLM at: %VLLM_BASE_URL%
+    echo [start-openclaw] WARNING: llama.cpp container exists but is not running (state: !_VSTATE!).
+    echo [start-openclaw] OpenClaw will start and wait for llama.cpp at: %LLAMACPP_BASE_URL%
     exit /b 0
 )
 
-echo [start-openclaw] vLLM container '%VLLM_CONTAINER_NAME%' is running.
-echo [start-openclaw] OpenClaw will reach vLLM via: %VLLM_BASE_URL%
+echo [start-openclaw] llama.cpp container '%LLAMACPP_CONTAINER_NAME%' is running.
+echo [start-openclaw] OpenClaw will reach llama.cpp via: %LLAMACPP_BASE_URL%
 exit /b 0
 
 :handle_existing_container

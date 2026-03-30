@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# validate_connection.sh — Confirm the vLLM provider connection is live from
+# validate_connection.sh — Confirm the llama.cpp provider connection is live from
 #                          within or alongside the OpenClaw container.
 #
 # PURPOSE
 # -------
 # This script is the "provider connection gate" that must pass before
-# OpenClaw starts accepting user requests.  It queries the vLLM
+# OpenClaw starts accepting user requests.  It queries the llama.cpp
 # OpenAI-compatible /v1/models endpoint to confirm:
 #
-#   • The vLLM server is reachable at the configured URL
+#   • The llama.cpp server is reachable at the configured URL
 #   • The /v1/models endpoint returns a valid JSON response
 #   • At least one model is loaded and ready to serve requests
 #   • (Optional) The expected model (Qwen/Qwen3-4B-AWQ) is present
@@ -19,7 +19,7 @@
 # The script supports three execution contexts, selectable via flags:
 #
 #   1. Inside the OpenClaw container (default, no flag needed)
-#      Uses VLLM_BASE_URL which defaults to http://vllm:8000/v1 — the
+#      Uses LLAMACPP_BASE_URL which defaults to http://llamacpp:8000/v1 — the
 #      internal container-network URL that only resolves within democlaw-net.
 #      Run via docker/podman exec:
 #        docker exec democlaw-openclaw /scripts/validate_connection.sh
@@ -32,10 +32,10 @@
 #        CONTAINER_RUNTIME=podman ./scripts/validate_connection.sh --exec
 #
 #   3. --host flag: Validates via the host-published port (localhost)
-#      Uses http://localhost:${VLLM_HOST_PORT}/v1 instead of the internal
+#      Uses http://localhost:${LLAMACPP_HOST_PORT}/v1 instead of the internal
 #      container-network URL. Useful for quick host-side spot checks.
 #        ./scripts/validate_connection.sh --host
-#        VLLM_HOST_PORT=8001 ./scripts/validate_connection.sh --host
+#        LLAMACPP_HOST_PORT=8001 ./scripts/validate_connection.sh --host
 #
 # EXIT CODES
 # ----------
@@ -44,9 +44,9 @@
 #
 # ENVIRONMENT VARIABLES (all have sensible defaults)
 # ---------------------------------------------------
-#   VLLM_BASE_URL          Full base URL for the vLLM API
-#                          default: http://vllm:8000/v1    (container-network URL)
-#   VLLM_HOST_PORT         Host port for vLLM (used with --host flag)
+#   LLAMACPP_BASE_URL          Full base URL for the llama.cpp API
+#                          default: http://llamacpp:8000/v1    (container-network URL)
+#   LLAMACPP_HOST_PORT         Host port for llama.cpp (used with --host flag)
 #                          default: 8000
 #   MODEL_NAME             Expected model to verify is loaded
 #                          default: Qwen/Qwen3-4B-AWQ
@@ -75,7 +75,7 @@
 #   ./scripts/validate_connection.sh --quiet
 #
 #   # Override URL directly:
-#   VLLM_BASE_URL=http://192.168.1.20:8000/v1 ./scripts/validate_connection.sh
+#   LLAMACPP_BASE_URL=http://192.168.1.20:8000/v1 ./scripts/validate_connection.sh
 #
 #   # Force podman as the container runtime (--exec mode):
 #   CONTAINER_RUNTIME=podman ./scripts/validate_connection.sh --exec
@@ -127,11 +127,11 @@ fi
 # Configurable defaults
 # ---------------------------------------------------------------------------
 # Internal container-network URL — used when running inside or via exec into
-# the OpenClaw container. The hostname "vllm" resolves within democlaw-net.
-VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm:8000/v1}"
+# the OpenClaw container. The hostname "llamacpp" resolves within democlaw-net.
+LLAMACPP_BASE_URL="${LLAMACPP_BASE_URL:-http://llamacpp:8000/v1}"
 
 # Host-published port — used with --host flag for localhost access
-VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
+LLAMACPP_HOST_PORT="${LLAMACPP_HOST_PORT:-8000}"
 
 # Expected model name
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
@@ -149,12 +149,12 @@ OPENCLAW_CONTAINER_NAME="${OPENCLAW_CONTAINER_NAME:-democlaw-openclaw}"
 # ---------------------------------------------------------------------------
 if [ "${MODE}" = "host" ]; then
     # --host: Override to use the localhost-published port
-    VLLM_BASE_URL="http://localhost:${VLLM_HOST_PORT}/v1"
+    LLAMACPP_BASE_URL="http://localhost:${LLAMACPP_HOST_PORT}/v1"
 fi
 
-MODELS_URL="${VLLM_BASE_URL}/models"
+MODELS_URL="${LLAMACPP_BASE_URL}/models"
 # Strip /v1 suffix (if present) to build the health URL for diagnostics
-VLLM_SERVER_ROOT="${VLLM_BASE_URL%/v1}"
+LLAMACPP_SERVER_ROOT="${LLAMACPP_BASE_URL%/v1}"
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -200,7 +200,7 @@ fi
 if [ "${QUIET}" = false ]; then
     echo ""
     echo "======================================================="
-    echo -e "  ${BOLD}vLLM Provider Connection Validation${NC}"
+    echo -e "  ${BOLD}llama.cpp Provider Connection Validation${NC}"
     echo "======================================================="
     echo "  Mode          : ${MODE}"
     echo "  Models URL    : ${MODELS_URL}"
@@ -214,7 +214,7 @@ fi
 # --exec mode: Delegate curl to inside the running OpenClaw container
 #
 # This exercises the exact same network path that OpenClaw itself would use.
-# The internal container-network URL (http://vllm:8000/v1) only resolves
+# The internal container-network URL (http://llamacpp:8000/v1) only resolves
 # within the shared container network, so running curl from inside the
 # OpenClaw container is the most accurate reachability test.
 # ===========================================================================
@@ -261,12 +261,12 @@ if [ "${MODE}" = "exec" ]; then
     echo ""
 
     # Run curl from inside the OpenClaw container.
-    # The internal URL (http://vllm:8000/v1) resolves within democlaw-net.
+    # The internal URL (http://llamacpp:8000/v1) resolves within democlaw-net.
     # We pass the configuration via environment so the exec'd command is
     # self-contained and does not depend on the host .env file.
     exec_exit=0
     "${RUNTIME}" exec \
-        -e "VLLM_BASE_URL=${VLLM_BASE_URL}" \
+        -e "LLAMACPP_BASE_URL=${LLAMACPP_BASE_URL}" \
         -e "MODEL_NAME=${MODEL_NAME}" \
         -e "VALIDATE_RETRIES=${VALIDATE_RETRIES}" \
         -e "VALIDATE_INTERVAL=${VALIDATE_INTERVAL}" \
@@ -274,7 +274,7 @@ if [ "${MODE}" = "exec" ]; then
         "${OPENCLAW_CONTAINER_NAME}" \
         bash -c "
 set -euo pipefail
-MODELS_URL=\"\${VLLM_BASE_URL}/models\"
+MODELS_URL=\"\${LLAMACPP_BASE_URL}/models\"
 retries=0
 while [ \"\${retries}\" -lt \"\${VALIDATE_RETRIES}\" ]; do
     response=\$(curl -sf --max-time \"\${VALIDATE_TIMEOUT}\" \
@@ -334,27 +334,27 @@ except Exception as e:
     fi
 done
 
-echo \"[exec-check] FAIL: vLLM provider unreachable at \${MODELS_URL} after \${VALIDATE_RETRIES} attempts\" >&2
-echo \"[exec-check] The OpenClaw container cannot reach the vLLM server.\" >&2
-echo \"[exec-check] Ensure the vLLM container is running on network '\${VLLM_BASE_URL%/v1}'.\" >&2
+echo \"[exec-check] FAIL: llama.cpp provider unreachable at \${MODELS_URL} after \${VALIDATE_RETRIES} attempts\" >&2
+echo \"[exec-check] The OpenClaw container cannot reach the llama.cpp server.\" >&2
+echo \"[exec-check] Ensure the llama.cpp container is running on network '\${LLAMACPP_BASE_URL%/v1}'.\" >&2
 exit 1
 " || exec_exit=$?
 
     if [ "${exec_exit}" -eq 0 ]; then
         echo ""
         success "Provider connection confirmed from inside '${OPENCLAW_CONTAINER_NAME}'."
-        success "OpenClaw can reach vLLM at: ${VLLM_BASE_URL}"
+        success "OpenClaw can reach llama.cpp at: ${LLAMACPP_BASE_URL}"
         echo ""
     else
         echo ""
         fail "Provider connection FAILED from inside '${OPENCLAW_CONTAINER_NAME}'."
-        fail "OpenClaw cannot reach the vLLM server at: ${VLLM_BASE_URL}"
+        fail "OpenClaw cannot reach the llama.cpp server at: ${LLAMACPP_BASE_URL}"
         echo "" >&2
         fail "Troubleshooting steps:" >&2
-        fail "  1. Verify vLLM is running   : ${RUNTIME} ps --filter name=${OPENCLAW_CONTAINER_NAME/openclaw/vllm}" >&2
-        fail "  2. Check vLLM logs          : ${RUNTIME} logs democlaw-vllm" >&2
-        fail "  3. Check network membership : ${RUNTIME} inspect democlaw-vllm | grep -A5 Networks" >&2
-        fail "  4. Restart vLLM             : ./scripts/start-vllm.sh" >&2
+        fail "  1. Verify llama.cpp is running   : ${RUNTIME} ps --filter name=${OPENCLAW_CONTAINER_NAME/openclaw/llamacpp}" >&2
+        fail "  2. Check llama.cpp logs          : ${RUNTIME} logs democlaw-llamacpp" >&2
+        fail "  3. Check network membership : ${RUNTIME} inspect democlaw-llamacpp | grep -A5 Networks" >&2
+        fail "  4. Restart llama.cpp             : ./scripts/start-llamacpp.sh" >&2
         echo "" >&2
     fi
 
@@ -364,15 +364,15 @@ fi
 # ===========================================================================
 # default / host modes: Query the /v1/models endpoint directly via curl
 #
-# "default" uses VLLM_BASE_URL (http://vllm:8000/v1) — works when this
-# script itself runs inside the container network, or when VLLM_BASE_URL
+# "default" uses LLAMACPP_BASE_URL (http://llamacpp:8000/v1) — works when this
+# script itself runs inside the container network, or when LLAMACPP_BASE_URL
 # is overridden to a reachable URL.
 #
-# "host" uses http://localhost:<VLLM_HOST_PORT>/v1 — host-side check via
+# "host" uses http://localhost:<LLAMACPP_HOST_PORT>/v1 — host-side check via
 # the published port.
 # ===========================================================================
 
-log "Querying vLLM /v1/models endpoint ..."
+log "Querying llama.cpp /v1/models endpoint ..."
 log "  URL: ${MODELS_URL}"
 echo ""
 
@@ -404,17 +404,17 @@ while [ "${attempt}" -lt "${VALIDATE_RETRIES}" ]; do
         fi
         # Final attempt failed
         echo ""
-        fail "FAIL: vLLM server unreachable at ${MODELS_URL}"
+        fail "FAIL: llama.cpp server unreachable at ${MODELS_URL}"
         fail "      (${VALIDATE_RETRIES} attempts x ${VALIDATE_INTERVAL}s = $((VALIDATE_RETRIES * VALIDATE_INTERVAL))s elapsed)"
         echo "" >&2
         fail "Possible causes:" >&2
-        fail "  • vLLM container is not running" >&2
-        fail "  • vLLM container is not on the same container network" >&2
-        fail "  • The model is still loading (check logs: docker logs democlaw-vllm)" >&2
+        fail "  • llama.cpp container is not running" >&2
+        fail "  • llama.cpp container is not on the same container network" >&2
+        fail "  • The model is still loading (check logs: docker logs democlaw-llamacpp)" >&2
         fail "  • Wrong URL — current: ${MODELS_URL}" >&2
         echo "" >&2
         fail "Quick checks:" >&2
-        fail "  curl ${VLLM_SERVER_ROOT}/health" >&2
+        fail "  curl ${LLAMACPP_SERVER_ROOT}/health" >&2
         fail "  curl ${MODELS_URL}" >&2
         exit 1
     fi
@@ -484,11 +484,11 @@ except Exception as e:
             fi
             echo ""
             fail "FAIL: /v1/models responded with an empty model list."
-            fail "      The vLLM server is running but no model has finished loading."
+            fail "      The llama.cpp server is running but no model has finished loading."
             fail "      This may take several minutes on first start."
             echo "" >&2
             fail "Monitor loading progress:" >&2
-            fail "  docker logs -f democlaw-vllm" >&2
+            fail "  docker logs -f democlaw-llamacpp" >&2
             fail "  curl ${MODELS_URL}" >&2
             exit 1
             ;;
@@ -515,7 +515,7 @@ except Exception as e:
             model_ids_display="${model_ids_raw//|/, }"
 
             echo ""
-            success "PASS: vLLM provider connection is LIVE"
+            success "PASS: llama.cpp provider connection is LIVE"
             echo ""
             echo -e "  ${GREEN}✓${NC} Endpoint  : ${MODELS_URL}"
             echo -e "  ${GREEN}✓${NC} HTTP code : 200"
@@ -529,11 +529,11 @@ except Exception as e:
                 echo -e "  ${YELLOW}⚠${NC}  Available : ${model_ids_display}"
                 warn_ "The expected model '${MODEL_NAME}' was not found in the /v1/models response."
                 warn_ "OpenClaw will start but may receive errors if the model name is mismatched."
-                warn_ "Set MODEL_NAME or VLLM_MODEL_NAME to one of: ${model_ids_display}"
+                warn_ "Set MODEL_NAME or LLAMACPP_MODEL_NAME to one of: ${model_ids_display}"
             fi
 
             echo ""
-            success "OpenClaw can use the vLLM provider at: ${VLLM_BASE_URL}"
+            success "OpenClaw can use the llama.cpp provider at: ${LLAMACPP_BASE_URL}"
             echo ""
             exit 0
             ;;

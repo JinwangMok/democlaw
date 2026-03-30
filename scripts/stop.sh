@@ -2,7 +2,7 @@
 # =============================================================================
 # stop.sh -- Stop and clean up the entire DemoClaw stack
 #
-# Removes: containers (democlaw-openclaw, democlaw-llamacpp, democlaw-vllm) + network (democlaw-net)
+# Removes: containers (democlaw-openclaw, democlaw-llamacpp) + network (democlaw-net)
 #
 # Usage:
 #   ./scripts/stop.sh
@@ -32,9 +32,9 @@ log "========================================"
 log "Runtime: ${RUNTIME}"
 
 # ---------------------------------------------------------------------------
-# Remove containers (order: openclaw first, then vllm)
+# Remove containers (order: openclaw first, then llamacpp)
 # ---------------------------------------------------------------------------
-for cname in democlaw-openclaw democlaw-llamacpp democlaw-vllm; do
+for cname in democlaw-openclaw democlaw-llamacpp; do
     if "${RUNTIME}" container inspect "${cname}" >/dev/null 2>&1; then
         log "Removing container '${cname}' ..."
         "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true

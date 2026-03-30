@@ -153,7 +153,7 @@ elif [ "${CHECKSUM_AVAILABLE}" = "true" ]; then
         log "  Model     : ${MODEL_NAME}"
         log "  Cache dir : ${HF_CACHE_DIR}"
         log ""
-        log "  vLLM will use this cache on next startup."
+        log "  llama.cpp will use this cache on next startup."
         log "  Start the stack with: ./scripts/start.sh"
         log "======================================================="
         exit 0
@@ -444,6 +444,6 @@ else
 fi
 log "  Resume    : Supported (interrupted downloads resume automatically)"
 log ""
-log "  vLLM will use this cache on next startup."
+log "  llama.cpp will use this cache on next startup."
 log "  Start the stack with: ./scripts/start.sh"
 log "======================================================="

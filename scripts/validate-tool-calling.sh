@@ -20,8 +20,8 @@
 #
 # Usage:
 #   ./scripts/validate-tool-calling.sh
-#   VLLM_HOST_PORT=8001 ./scripts/validate-tool-calling.sh
-#   VLLM_BASE_URL=http://192.168.1.10:8000 ./scripts/validate-tool-calling.sh
+#   LLAMACPP_HOST_PORT=8001 ./scripts/validate-tool-calling.sh
+#   LLAMACPP_BASE_URL=http://192.168.1.10:8000 ./scripts/validate-tool-calling.sh
 #   SKIP_LIVE_TEST=true ./scripts/validate-tool-calling.sh   # schema-only
 # =============================================================================
 set -euo pipefail
@@ -41,14 +41,14 @@ if [ -f "${ENV_FILE}" ]; then
     set +a
 fi
 
-VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
-VLLM_BASE_URL="${VLLM_BASE_URL:-http://localhost:${VLLM_HOST_PORT}}"
+LLAMACPP_HOST_PORT="${LLAMACPP_HOST_PORT:-8000}"
+LLAMACPP_BASE_URL="${LLAMACPP_BASE_URL:-http://localhost:${LLAMACPP_HOST_PORT}}"
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3.5-9B}"
 CURL_TIMEOUT="${CURL_TIMEOUT:-10}"
 INFERENCE_TIMEOUT="${INFERENCE_TIMEOUT:-60}"
 
 # Optional API key
-VLLM_API_KEY="${VLLM_API_KEY:-}"
+LLAMACPP_API_KEY="${LLAMACPP_API_KEY:-}"
 
 # Set to "true" to skip live inference tests (only validate request schemas)
 SKIP_LIVE_TEST="${SKIP_LIVE_TEST:-false}"
@@ -80,12 +80,12 @@ FAILED=0
 # ---------------------------------------------------------------------------
 _CURL_AUTH_ARGS=()
 _AUTH_MODE_LABEL="no-auth"
-case "${VLLM_API_KEY:-}" in
+case "${LLAMACPP_API_KEY:-}" in
     "" | EMPTY | none | no-auth )
         _AUTH_MODE_LABEL="no-auth"
         ;;
     *)
-        _CURL_AUTH_ARGS=(-H "Authorization: Bearer ${VLLM_API_KEY}")
+        _CURL_AUTH_ARGS=(-H "Authorization: Bearer ${LLAMACPP_API_KEY}")
         _AUTH_MODE_LABEL="api-key"
         ;;
 esac
@@ -105,7 +105,7 @@ echo ""
 echo "======================================================="
 echo "  llama.cpp Tool/Function Calling API Validation"
 echo "======================================================="
-echo "  Base URL  : ${VLLM_BASE_URL}"
+echo "  Base URL  : ${LLAMACPP_BASE_URL}"
 echo "  Model     : ${MODEL_NAME}"
 echo "  Auth mode : ${_AUTH_MODE_LABEL}"
 echo "======================================================="
@@ -119,7 +119,7 @@ echo ""
 # recognizes OpenAI function calling schema.
 # ===========================================================================
 header "1. POST /v1/chat/completions — tools parameter accepted"
-info "Endpoint: ${VLLM_BASE_URL}/v1/chat/completions"
+info "Endpoint: ${LLAMACPP_BASE_URL}/v1/chat/completions"
 
 if [ "${SKIP_LIVE_TEST}" = "true" ]; then
     skip "Live test skipped (SKIP_LIVE_TEST=true)"
@@ -173,13 +173,13 @@ TOOLS_EOF
         -H "Accept: application/json" \
         ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
         -d "${TOOLS_PAYLOAD}" \
-        "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
     RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
 
     if [ "${HTTP_CODE}" = "000" ]; then
-        fail "HTTP 000 — server unreachable at ${VLLM_BASE_URL}"
+        fail "HTTP 000 — server unreachable at ${LLAMACPP_BASE_URL}"
     elif [ "${HTTP_CODE}" = "200" ]; then
         pass "HTTP 200 — server accepts tools parameter"
 
@@ -434,7 +434,7 @@ NONE_EOF
         -H "Content-Type: application/json" \
         ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
         -d "${NONE_PAYLOAD}" \
-        "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
     RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
@@ -499,7 +499,7 @@ REQ_EOF
         -H "Content-Type: application/json" \
         ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
         -d "${REQUIRED_PAYLOAD}" \
-        "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
     RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
@@ -564,7 +564,7 @@ SPEC_EOF
         -H "Content-Type: application/json" \
         ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
         -d "${SPECIFIC_PAYLOAD}" \
-        "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
     RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
@@ -634,7 +634,7 @@ S1_EOF
         -H "Content-Type: application/json" \
         ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
         -d "${STEP1_PAYLOAD}" \
-        "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
     STEP1_RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
@@ -734,7 +734,7 @@ print(json.dumps(payload))
                 -H "Content-Type: application/json" \
                 ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
                 -d "${STEP2_PAYLOAD}" \
-                "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
+                "${LLAMACPP_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
             STEP2_RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
             rm -f "${TMPFILE}"
@@ -863,7 +863,7 @@ MT_EOF
         -H "Content-Type: application/json" \
         ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
         -d "${MULTI_TOOLS_PAYLOAD}" \
-        "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
     RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
@@ -928,7 +928,7 @@ else
     HTTP_CODE=$(curl -sf -o "${TMPFILE}" -w "%{http_code}" \
         --max-time "${CURL_TIMEOUT}" \
         ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
-        "${VLLM_BASE_URL}/props" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/props" 2>/dev/null || echo "000")
 
     PROPS_RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
@@ -976,7 +976,7 @@ except Exception as e:
     HTTP_CODE=$(curl -sf -o "${TMPFILE}" -w "%{http_code}" \
         --max-time "${CURL_TIMEOUT}" \
         ${_CURL_AUTH_ARGS[@]+"${_CURL_AUTH_ARGS[@]}"} \
-        "${VLLM_BASE_URL}/v1/models" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/models" 2>/dev/null || echo "000")
 
     MODELS_RESPONSE=$(cat "${TMPFILE}" 2>/dev/null || echo "")
     rm -f "${TMPFILE}"
@@ -1011,7 +1011,7 @@ echo "======================================================="
 if [ "${FAILED}" -eq 0 ]; then
     echo -e "  ${GREEN}${BOLD}PASS${NC} — All tool/function calling checks passed"
     echo ""
-    echo "  The llama.cpp server at ${VLLM_BASE_URL} correctly exposes"
+    echo "  The llama.cpp server at ${LLAMACPP_BASE_URL} correctly exposes"
     echo "  OpenAI-compatible tool/function calling on /v1/chat/completions."
     echo ""
     echo "  Verified capabilities:"
@@ -1021,7 +1021,7 @@ if [ "${FAILED}" -eq 0 ]; then
     echo "    ✓ Multiple tool definitions in single request"
     echo ""
     echo "  OpenClaw Integration:"
-    echo "    URL : http://vllm:${VLLM_HOST_PORT}/v1"
+    echo "    URL : http://llamacpp:${LLAMACPP_HOST_PORT}/v1"
     echo "    Auth: ${_AUTH_MODE_LABEL}"
     echo "    Tool calling: SUPPORTED"
 else

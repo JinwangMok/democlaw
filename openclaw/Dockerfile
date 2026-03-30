@@ -1,12 +1,12 @@
 # =============================================================================
 # OpenClaw Container — Ubuntu 24.04 + Node.js + OpenClaw
-# Configured to use vLLM as its LLM provider via OpenAI-compatible endpoint
+# Configured to use llama.cpp as its LLM provider via OpenAI-compatible endpoint
 #
 # Build arguments (all overridable via --build-arg):
 #   NODE_MAJOR           — Node.js major version to install (default: 20)
 #   OPENCLAW_NPM_VERSION — npm package version/tag to install (default: latest)
-#   VLLM_BASE_URL        — default vLLM backend URL   (default: http://vllm:8000/v1)
-#   VLLM_MODEL_NAME      — default model name          (default: Qwen/Qwen3.5-9B-AWQ)
+#   LLAMACPP_BASE_URL    — default llama.cpp backend URL   (default: http://llamacpp:8000/v1)
+#   LLAMACPP_MODEL_NAME  — default model name          (default: Qwen3.5-9B-Q4_K_M)
 #   OPENCLAW_PORT        — port the dashboard listens on (default: 18789)
 #   VERSION              — image version label          (default: dev)
 #   BUILD_DATE           — ISO-8601 build timestamp     (default: unknown)
@@ -18,8 +18,8 @@
 # ---------------------------------------------------------------------------
 ARG NODE_MAJOR=22
 ARG OPENCLAW_NPM_VERSION=latest
-ARG VLLM_BASE_URL=http://vllm:8000/v1
-ARG VLLM_MODEL_NAME=Qwen/Qwen3.5-9B-AWQ
+ARG LLAMACPP_BASE_URL=http://llamacpp:8000/v1
+ARG LLAMACPP_MODEL_NAME=Qwen3.5-9B-Q4_K_M
 ARG OPENCLAW_PORT=18789
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
@@ -30,17 +30,17 @@ FROM docker.io/ubuntu:24.04
 # Re-declare ARGs after FROM so they are visible in this build stage
 ARG NODE_MAJOR
 ARG OPENCLAW_NPM_VERSION
-ARG VLLM_BASE_URL
-ARG VLLM_MODEL_NAME
+ARG LLAMACPP_BASE_URL
+ARG LLAMACPP_MODEL_NAME
 ARG OPENCLAW_PORT
 ARG VERSION
 ARG BUILD_DATE
 ARG GIT_COMMIT
 
 LABEL maintainer="democlaw"
-LABEL description="OpenClaw AI assistant configured with vLLM backend"
+LABEL description="OpenClaw AI assistant configured with llama.cpp backend"
 LABEL org.opencontainers.image.title="democlaw-openclaw"
-LABEL org.opencontainers.image.description="OpenClaw AI assistant configured with vLLM backend"
+LABEL org.opencontainers.image.description="OpenClaw AI assistant configured with llama.cpp backend"
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
@@ -48,7 +48,7 @@ LABEL org.opencontainers.image.source="https://github.com/democlaw/democlaw"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.vendor="democlaw"
 LABEL democlaw.node-major="${NODE_MAJOR}"
-LABEL democlaw.vllm-url="${VLLM_BASE_URL}"
+LABEL democlaw.llamacpp-url="${LLAMACPP_BASE_URL}"
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -102,34 +102,34 @@ RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh \
     && chown -R openclaw:openclaw /app
 
 # ---------------------------------------------------------------------------
-# Environment variables — defaults connect to vLLM container on shared network
+# Environment variables — defaults connect to llama.cpp container on shared network
 #
 # The entrypoint.sh script uses these to:
 #   1. Generate /app/config/config.json with resolved values
 #   2. Export OpenAI-compatible env vars (OPENAI_API_BASE, etc.)
 #   3. Export OpenClaw-specific env vars (OPENCLAW_LLM_*)
-#   4. Wait for vLLM readiness before starting OpenClaw
+#   4. Wait for llama.cpp readiness before starting OpenClaw
 # ---------------------------------------------------------------------------
 ENV NODE_ENV="production" \
-    VLLM_BASE_URL="http://vllm:8000/v1" \
-    VLLM_API_KEY="EMPTY" \
-    VLLM_MODEL_NAME="Qwen/Qwen3.5-9B-AWQ" \
-    VLLM_MAX_TOKENS=4096 \
-    VLLM_TEMPERATURE=0.7 \
-    VLLM_HEALTH_RETRIES=60 \
-    VLLM_HEALTH_INTERVAL=5 \
+    LLAMACPP_BASE_URL="http://llamacpp:8000/v1" \
+    LLAMACPP_API_KEY="EMPTY" \
+    LLAMACPP_MODEL_NAME="Qwen3.5-9B-Q4_K_M" \
+    LLAMACPP_MAX_TOKENS=4096 \
+    LLAMACPP_TEMPERATURE=0.7 \
+    LLAMACPP_HEALTH_RETRIES=60 \
+    LLAMACPP_HEALTH_INTERVAL=5 \
     OPENCLAW_PORT=18789 \
     OPENCLAW_CONFIG_DIR="/app/config" \
     OPENCLAW_CONFIG="/app/config/config.json" \
     OPENCLAW_HOST="0.0.0.0" \
-    OPENAI_API_BASE="http://vllm:8000/v1" \
-    OPENAI_BASE_URL="http://vllm:8000/v1" \
+    OPENAI_API_BASE="http://llamacpp:8000/v1" \
+    OPENAI_BASE_URL="http://llamacpp:8000/v1" \
     OPENAI_API_KEY="EMPTY" \
-    OPENAI_MODEL="Qwen/Qwen3.5-9B-AWQ" \
+    OPENAI_MODEL="Qwen3.5-9B-Q4_K_M" \
     OPENCLAW_LLM_PROVIDER="openai-compatible" \
-    OPENCLAW_LLM_BASE_URL="http://vllm:8000/v1" \
+    OPENCLAW_LLM_BASE_URL="http://llamacpp:8000/v1" \
     OPENCLAW_LLM_API_KEY="EMPTY" \
-    OPENCLAW_LLM_MODEL="Qwen/Qwen3.5-9B-AWQ" \
+    OPENCLAW_LLM_MODEL="Qwen3.5-9B-Q4_K_M" \
     OPENCLAW_LLM_MAX_TOKENS=4096 \
     OPENCLAW_LLM_TEMPERATURE=0.7
 

@@ -1,18 +1,18 @@
 # =============================================================================
-# start.ps1 -- Full E2E startup for the DemoClaw stack (vLLM + OpenClaw)
+# start.ps1 -- Full E2E startup for the DemoClaw stack (llama.cpp + OpenClaw)
 #
 # This single script handles the entire lifecycle:
 #   1. Clean up old containers/network
 #   2. Acquire images (pull from Docker Hub first; local build fallback)
 #   3. Create network
-#   4. Start vLLM, wait for /health + /v1/models
+#   4. Start llama.cpp, wait for /health + /v1/models
 #   5. Start OpenClaw, wait for dashboard
 #   6. Print tokenized dashboard URL
 #
 # Usage:
 #   .\scripts\start.ps1
 #   $env:HF_CACHE_DIR = "D:\models" ; .\scripts\start.ps1
-#   $env:DEMOCLAW_VLLM_IMAGE = "myrepo/vllm:dev" ; .\scripts\start.ps1
+#   $env:DEMOCLAW_LLAMACPP_IMAGE = "myrepo/llamacpp:dev" ; .\scripts\start.ps1
 # =============================================================================
 #Requires -Version 5.1
 Set-StrictMode -Version Latest
@@ -33,25 +33,25 @@ $ProjectRoot = Split-Path -Parent $ScriptDir
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-$VllmImage      = if ($env:DEMOCLAW_VLLM_IMAGE)    { $env:DEMOCLAW_VLLM_IMAGE }    else { 'jinwangmok/democlaw-vllm:v1.0.0' }
+$LlamacppImage      = if ($env:DEMOCLAW_LLAMACPP_IMAGE)    { $env:DEMOCLAW_LLAMACPP_IMAGE }    else { 'jinwangmok/democlaw-llamacpp:v1.0.0' }
 $OpenclawImage  = if ($env:DEMOCLAW_OPENCLAW_IMAGE) { $env:DEMOCLAW_OPENCLAW_IMAGE } else { 'jinwangmok/democlaw-openclaw:v1.0.0' }
 $Network        = 'democlaw-net'
-$VllmContainer  = 'democlaw-vllm'
+$LlamacppContainer  = 'democlaw-llamacpp'
 $OcContainer    = 'democlaw-openclaw'
 $ModelName      = 'Qwen/Qwen3-4B-AWQ'
 
-# vLLM tuning for 8GB VRAM
+# llama.cpp tuning for 8GB VRAM
 $MaxModelLen          = '16384'
 $Quantization         = 'awq_marlin'
 $Dtype                = 'float16'
 $GpuMemoryUtilization = '0.95'
 
 # Ports
-$VllmPort = '8000'
+$LlamacppPort = '8000'
 $OcPort   = '18789'
 
 # Timeouts (seconds)
-$VllmHealthTimeout = 300
+$LlamacppHealthTimeout = 300
 $OcHealthTimeout   = 120
 
 # HuggingFace cache
@@ -177,7 +177,7 @@ function Ensure-Image {
 log ""
 log "--- Phase 0: Cleanup ---"
 
-foreach ($cname in @($OcContainer, $VllmContainer)) {
+foreach ($cname in @($OcContainer, $LlamacppContainer)) {
     & $Runtime container inspect $cname >$null 2>&1
     if ($LASTEXITCODE -eq 0) {
         log "Removing old container '$cname' ..."
@@ -197,16 +197,16 @@ if ($LASTEXITCODE -eq 0) {
 log ""
 log "--- Phase 1: Acquire images ---"
 
-Ensure-Image -ImageTag $VllmImage     -BuildContext (Join-Path $ProjectRoot 'vllm')
+Ensure-Image -ImageTag $LlamacppImage     -BuildContext (Join-Path $ProjectRoot 'llamacpp')
 Ensure-Image -ImageTag $OpenclawImage -BuildContext (Join-Path $ProjectRoot 'openclaw')
 
 logok "Images ready."
 
 # ===========================================================================
-# Phase 2: Create network + start vLLM
+# Phase 2: Create network + start llama.cpp
 # ===========================================================================
 log ""
-log "--- Phase 2: Start vLLM ---"
+log "--- Phase 2: Start llama.cpp ---"
 
 log "Creating network '$Network' ..."
 & $Runtime network create $Network
@@ -225,80 +225,79 @@ if (Test-Path $checksumScript) {
         if ($LASTEXITCODE -eq 0 -and $needsDownload -match 'false') {
             logok "Model checksums verified — cached model is intact."
         } else {
-            log "Model not yet cached or checksums missing — vLLM will download on first start."
+            log "Model not yet cached or checksums missing — llama.cpp will download on first start."
         }
     } catch {
-        log "Model not yet cached or checksums missing — vLLM will download on first start."
+        log "Model not yet cached or checksums missing — llama.cpp will download on first start."
     }
 } else {
     log "Checksum script not found — skipping model integrity check."
 }
 
-log "Starting vLLM container ..."
+log "Starting llama.cpp container ..."
 log "  Model        : $ModelName"
 log "  Quantization : $Quantization"
 log "  Context      : $MaxModelLen"
 log "  GPU mem util : $GpuMemoryUtilization"
 
 & $Runtime run -d `
-    --name $VllmContainer `
+    --name $LlamacppContainer `
     --network $Network `
-    --hostname vllm `
-    --network-alias vllm `
+    --hostname llamacpp `
+    --network-alias llamacpp `
     @GpuFlags `
     --restart unless-stopped `
     --shm-size 1g `
-    -p "${VllmPort}:${VllmPort}" `
+    -p "${LlamacppPort}:${LlamacppPort}" `
     -v "${HfCacheDir}:/root/.cache/huggingface:rw" `
     -e "MODEL_NAME=$ModelName" `
     -e "MAX_MODEL_LEN=$MaxModelLen" `
     -e "GPU_MEMORY_UTILIZATION=$GpuMemoryUtilization" `
     -e "QUANTIZATION=$Quantization" `
     -e "DTYPE=$Dtype" `
-    -e 'VLLM_ATTENTION_BACKEND=FLASHINFER' `
-    $VllmImage
+    $LlamacppImage
 
-if ($LASTEXITCODE -ne 0) { logerr "Failed to start vLLM container." }
+if ($LASTEXITCODE -ne 0) { logerr "Failed to start llama.cpp container." }
 
-log "vLLM container started. Waiting for health ..."
+log "llama.cpp container started. Waiting for health ..."
 
 # ---------------------------------------------------------------------------
-# Wait for vLLM /health (with container-died detection)
+# Wait for llama.cpp /health (with container-died detection)
 # ---------------------------------------------------------------------------
 $elapsed = 0
-$vllmHealthUrl = "http://localhost:${VllmPort}/health"
+$llamacppHealthUrl = "http://localhost:${LlamacppPort}/health"
 $healthy = $false
 
-while ($elapsed -lt $VllmHealthTimeout) {
-    $state = Get-ContainerState $VllmContainer
+while ($elapsed -lt $LlamacppHealthTimeout) {
+    $state = Get-ContainerState $LlamacppContainer
     if ($state -eq 'exited' -or $state -eq 'dead') {
-        log "ERROR: vLLM container exited unexpectedly."
-        & $Runtime logs --tail 20 $VllmContainer 2>&1
+        log "ERROR: llama.cpp container exited unexpectedly."
+        & $Runtime logs --tail 20 $LlamacppContainer 2>&1
         exit 1
     }
 
     try {
-        $resp = Invoke-WebRequest -Uri $vllmHealthUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        $resp = Invoke-WebRequest -Uri $llamacppHealthUrl -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
         if ($resp.StatusCode -lt 400) { $healthy = $true; break }
     } catch { }
 
     Start-Sleep -Seconds 5
     $elapsed += 5
     if ($elapsed % 30 -eq 0) {
-        log "  ... vLLM loading ($elapsed/${VllmHealthTimeout}s)"
+        log "  ... llama.cpp loading ($elapsed/${LlamacppHealthTimeout}s)"
     }
 }
 
 if (-not $healthy) {
-    logerr "vLLM did not become healthy within ${VllmHealthTimeout}s. Check logs: $Runtime logs $VllmContainer"
+    logerr "llama.cpp did not become healthy within ${LlamacppHealthTimeout}s. Check logs: $Runtime logs $LlamacppContainer"
 }
-logok "vLLM /health OK."
+logok "llama.cpp /health OK."
 
 # ---------------------------------------------------------------------------
 # Verify /v1/models returns HTTP 200 with the expected model loaded
 # ---------------------------------------------------------------------------
 log "Checking /v1/models for model '$ModelName' ..."
-$ModelsUrl = "http://localhost:${VllmPort}/v1/models"
+$ModelsUrl = "http://localhost:${LlamacppPort}/v1/models"
 $ModelsTimeout = 120
 $modelsElapsed = 0
 $modelsVerified = $false
@@ -314,7 +313,7 @@ while ($modelsElapsed -lt $ModelsTimeout) {
             }
             if ($modelIds.Count -gt 0) {
                 $modelsListed = $modelIds -join ','
-                logok "vLLM /v1/models returned HTTP 200."
+                logok "llama.cpp /v1/models returned HTTP 200."
                 log "  Available models: $modelsListed"
                 if ($modelIds -contains $ModelName) {
                     logok "  Confirmed: '$ModelName' is loaded and serving."
@@ -339,7 +338,7 @@ while ($modelsElapsed -lt $ModelsTimeout) {
 if (-not $modelsVerified) {
     logwarn "/v1/models did not confirm model readiness within ${ModelsTimeout}s."
     log "  The model may still be loading. Check: Invoke-WebRequest $ModelsUrl"
-    log "  Container logs: $Runtime logs -f $VllmContainer"
+    log "  Container logs: $Runtime logs -f $LlamacppContainer"
 }
 
 # ===========================================================================
@@ -358,9 +357,9 @@ log "Starting OpenClaw container ..."
     --restart unless-stopped `
     -p "${OcPort}:${OcPort}" `
     -p '18791:18791' `
-    -e 'VLLM_BASE_URL=http://vllm:8000/v1' `
-    -e 'VLLM_API_KEY=EMPTY' `
-    -e "VLLM_MODEL_NAME=$ModelName" `
+    -e 'LLAMACPP_BASE_URL=http://llamacpp:8000/v1' `
+    -e 'LLAMACPP_API_KEY=EMPTY' `
+    -e "LLAMACPP_MODEL_NAME=$ModelName" `
     -e "OPENCLAW_PORT=$OcPort" `
     $OpenclawImage
 
@@ -420,7 +419,7 @@ if (-not $DashboardUrl) {
     $DashboardUrl = "http://localhost:${OcPort}"
 }
 
-$VllmApiUrl = "http://localhost:${VllmPort}/v1"
+$LlamacppApiUrl = "http://localhost:${LlamacppPort}/v1"
 
 log ""
 log "========================================================"
@@ -428,11 +427,11 @@ logok "  DemoClaw is running!"
 log "========================================================"
 log ""
 log "  Both health-checks passed:"
-log "    * vLLM /v1/models .... HTTP 200"
+log "    * llama.cpp /v1/models .... HTTP 200"
 log "    * OpenClaw dashboard . HTTP 200"
 log ""
 log "  Services:"
-log "    vLLM API  : $VllmApiUrl"
+log "    llama.cpp API  : $LlamacppApiUrl"
 log "    Model     : $ModelName"
 log "    Runtime   : $Runtime"
 log ""
@@ -449,5 +448,5 @@ log "  NOTE: On first connect, click `"Connect`" in the browser."
 log "        The device pairing is auto-approved within ~2 seconds."
 log "        If needed, click `"Connect`" again after approval."
 log ""
-log "  Stop with: .\scripts\stop.ps1  (or docker rm -f democlaw-vllm democlaw-openclaw)"
+log "  Stop with: .\scripts\stop.ps1  (or docker rm -f democlaw-llamacpp democlaw-openclaw)"
 log "========================================================"

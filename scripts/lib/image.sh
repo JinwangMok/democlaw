@@ -49,7 +49,7 @@ fi
 #   ensure_image <image_tag> <build_context_dir> [build_args...]
 #
 # Arguments:
-#   image_tag          Docker image reference (e.g. "democlaw/vllm:v1.0.0")
+#   image_tag          Docker image reference (e.g. "democlaw/llamacpp:v1.0.0")
 #   build_context_dir  Path to Dockerfile directory for local build fallback
 #   build_args...      Optional extra arguments passed to "docker build"
 #                      (e.g. "--build-arg VERSION=1.0" "--build-arg FOO=bar")

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run_vllm.sh — Launch the vLLM container with NVIDIA GPU passthrough serving
+# run_llamacpp.sh — Launch the llama.cpp container with NVIDIA GPU passthrough serving
 #               Qwen3-4B AWQ 4-bit via an OpenAI-compatible API.
 #
 # Supports both docker and podman on Linux hosts.
@@ -11,43 +11,43 @@
 #   2. Detect container runtime (docker or podman)
 #   3. Validate NVIDIA GPU / CUDA prerequisites — exits with clear error if absent
 #   4. Create shared container network if it does not already exist
-#   5. Build the vLLM image if not already present
+#   5. Build the llama.cpp image if not already present
 #   6. Pre-pull Qwen3-4B AWQ 4-bit model weights from HuggingFace
 #        • Uses huggingface-cli on the host if available (preferred)
-#        • Falls back to a temporary vLLM container if CLI not found
+#        • Falls back to a temporary llama.cpp container if CLI not found
 #        • Idempotent: skips download if weights already cached locally
 #        • Set SKIP_MODEL_PULL=true to bypass entirely
-#   7. Launch the vLLM container with:
+#   7. Launch the llama.cpp container with:
 #        • NVIDIA GPU passthrough (--gpus all / --device nvidia.com/gpu=all)
 #        • Qwen/Qwen3-4B-AWQ model (AWQ 4-bit quantization)
 #        • OpenAI-compatible API server bound to a configurable host port
 #
 # Usage:
-#   ./scripts/run_vllm.sh                            # auto-detect runtime, port 8000
-#   VLLM_HOST_PORT=9000 ./scripts/run_vllm.sh        # expose API on host port 9000
-#   CONTAINER_RUNTIME=podman ./scripts/run_vllm.sh   # force podman
-#   SKIP_MODEL_PULL=true ./scripts/run_vllm.sh       # skip model download (cached)
-#   MODEL_NAME=Qwen/Qwen3-4B-AWQ ./scripts/run_vllm.sh
+#   ./scripts/run_llamacpp.sh                            # auto-detect runtime, port 8000
+#   LLAMACPP_HOST_PORT=9000 ./scripts/run_llamacpp.sh        # expose API on host port 9000
+#   CONTAINER_RUNTIME=podman ./scripts/run_llamacpp.sh   # force podman
+#   SKIP_MODEL_PULL=true ./scripts/run_llamacpp.sh       # skip model download (cached)
+#   MODEL_NAME=Qwen/Qwen3-4B-AWQ ./scripts/run_llamacpp.sh
 #
 # Key environment variables (all have sensible defaults):
 #   CONTAINER_RUNTIME       docker | podman  (auto-detected if unset)
 #   MODEL_NAME              HuggingFace model ID          (default: Qwen/Qwen3-4B-AWQ)
-#   QUANTIZATION            vLLM quantization method      (default: awq)
+#   QUANTIZATION            llama.cpp quantization method      (default: awq)
 #   DTYPE                   Weight data type              (default: float16)
 #   MAX_MODEL_LEN           Context window size (tokens)  (default: 8192)
 #   GPU_MEMORY_UTILIZATION  0.0–1.0 GPU fraction          (default: 0.90)
-#   VLLM_HOST               API bind address in container (default: 0.0.0.0)
-#   VLLM_PORT               API port inside container     (default: 8000)
-#   VLLM_HOST_PORT          API port published on host    (default: 8000)
-#   VLLM_CONTAINER_NAME     Container name                (default: democlaw-vllm)
-#   VLLM_IMAGE_TAG          Image tag to build/use        (default: democlaw/vllm:latest)
+#   LLAMACPP_HOST               API bind address in container (default: 0.0.0.0)
+#   LLAMACPP_PORT               API port inside container     (default: 8000)
+#   LLAMACPP_HOST_PORT          API port published on host    (default: 8000)
+#   LLAMACPP_CONTAINER_NAME     Container name                (default: democlaw-llamacpp)
+#   LLAMACPP_IMAGE_TAG          Image tag to build/use        (default: democlaw/llamacpp:latest)
 #   DEMOCLAW_NETWORK        Shared network name           (default: democlaw-net)
 #   HF_CACHE_DIR            Host-side HuggingFace cache   (default: ~/.cache/huggingface)
 #   HF_TOKEN                HuggingFace token (gated models only)
 #   SKIP_MODEL_PULL         Set to "true" to skip model download (default: false)
 #
 # The OpenAI-compatible API will be available at:
-#   http://localhost:<VLLM_HOST_PORT>/v1
+#   http://localhost:<LLAMACPP_HOST_PORT>/v1
 # =============================================================================
 set -euo pipefail
 
@@ -60,9 +60,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ---------------------------------------------------------------------------
 # Logging helpers
 # ---------------------------------------------------------------------------
-log()   { echo "[run_vllm] $*"; }
-warn()  { echo "[run_vllm] WARNING: $*" >&2; }
-error() { printf "[run_vllm] ERROR: %s\n" "$*" >&2; exit 1; }
+log()   { echo "[run_llamacpp] $*"; }
+warn()  { echo "[run_llamacpp] WARNING: $*" >&2; }
+error() { printf "[run_llamacpp] ERROR: %s\n" "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Load .env file if present (key=value, one per line; no export needed here)
@@ -91,16 +91,16 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 
 # --- API server (configurable) ---
-# VLLM_HOST      : bind address inside the container (0.0.0.0 = all interfaces)
-# VLLM_PORT      : port the API server listens on inside the container
-# VLLM_HOST_PORT : port published on the Linux host for external access
-# VLLM_API_KEY   : optional API key for the OpenAI-compatible endpoint.
+# LLAMACPP_HOST      : bind address inside the container (0.0.0.0 = all interfaces)
+# LLAMACPP_PORT      : port the API server listens on inside the container
+# LLAMACPP_HOST_PORT : port published on the Linux host for external access
+# LLAMACPP_API_KEY   : optional API key for the OpenAI-compatible endpoint.
 #                  Leave empty (or "EMPTY") for no-auth mode.
 #                  Set to a real secret to require Authorization: Bearer <key>.
-VLLM_HOST="${VLLM_HOST:-0.0.0.0}"
-VLLM_PORT="${VLLM_PORT:-8000}"
-VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
-VLLM_API_KEY="${VLLM_API_KEY:-}"
+LLAMACPP_HOST="${LLAMACPP_HOST:-0.0.0.0}"
+LLAMACPP_PORT="${LLAMACPP_PORT:-8000}"
+LLAMACPP_HOST_PORT="${LLAMACPP_HOST_PORT:-8000}"
+LLAMACPP_API_KEY="${LLAMACPP_API_KEY:-}"
 
 # --- Model pull ---
 # Set SKIP_MODEL_PULL=true to bypass the weight download step (e.g. weights
@@ -108,8 +108,8 @@ VLLM_API_KEY="${VLLM_API_KEY:-}"
 SKIP_MODEL_PULL="${SKIP_MODEL_PULL:-false}"
 
 # --- Container / image ---
-CONTAINER_NAME="${VLLM_CONTAINER_NAME:-democlaw-vllm}"
-IMAGE_TAG="${VLLM_IMAGE_TAG:-docker.io/jinwangmok/democlaw-vllm:v1.0.0}"
+CONTAINER_NAME="${LLAMACPP_CONTAINER_NAME:-democlaw-llamacpp}"
+IMAGE_TAG="${LLAMACPP_IMAGE_TAG:-docker.io/jinwangmok/democlaw-llamacpp:v1.0.0}"
 NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
 
 # --- HuggingFace model cache ---
@@ -154,7 +154,7 @@ log "Container runtime: ${RUNTIME} (podman=${RUNTIME_IS_PODMAN})"
 #   1. nvidia-smi is installed and can communicate with the kernel driver
 #   2. At least one physical NVIDIA GPU is enumerated
 #   3. NVIDIA driver version >= 520.0 (needed for CUDA >= 11.8)
-#   4. CUDA version >= 11.8 (required by vLLM >= 0.3)
+#   4. CUDA version >= 11.8 (required by llama.cpp >= 0.3)
 #   5. GPU has sufficient VRAM for the AWQ 4-bit model (~8 GB)
 #   6. nvidia-container-toolkit is installed and configured for this runtime
 #
@@ -174,8 +174,8 @@ validate_nvidia_gpu "${RUNTIME}"
 # ---------------------------------------------------------------------------
 # Step 3: Ensure the shared container network exists
 #
-# Both the vLLM container and the OpenClaw container attach to this network
-# so that OpenClaw can reach vLLM by hostname (http://vllm:8000/v1).
+# Both the llama.cpp container and the OpenClaw container attach to this network
+# so that OpenClaw can reach llama.cpp by hostname (http://llamacpp:8000/v1).
 #
 # runtime_ensure_network() from lib/runtime.sh handles this idempotently:
 #   - Creates the network if it does not yet exist
@@ -206,18 +206,18 @@ if "${RUNTIME}" container inspect "${CONTAINER_NAME}" > /dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 5: Acquire vLLM image (pull from Docker Hub first; local build fallback)
+# Step 5: Acquire llama.cpp image (pull from Docker Hub first; local build fallback)
 #
 # Strategy: Always attempt to pull the pre-built image from Docker Hub.
 # If pull fails (non-zero exit), fall back to building from the local
-# Dockerfile at <project_root>/vllm/Dockerfile.
+# Dockerfile at <project_root>/llamacpp/Dockerfile.
 # ---------------------------------------------------------------------------
 _img_log()   { log "$@"; }
 _img_warn()  { warn "$@"; }
 _img_error() { error "$@"; }
 source "${SCRIPT_DIR}/lib/image.sh"
 
-ensure_image "${IMAGE_TAG}" "${PROJECT_ROOT}/vllm"
+ensure_image "${IMAGE_TAG}" "${PROJECT_ROOT}/llamacpp"
 
 # Ensure the HuggingFace cache directory exists on the host
 mkdir -p "${HF_CACHE_DIR}"
@@ -227,7 +227,7 @@ mkdir -p "${HF_CACHE_DIR}"
 # ---------------------------------------------------------------------------
 _cksum_log()   { log "$@"; }
 _cksum_warn()  { warn "$@"; }
-_cksum_error() { echo "[run_vllm] ERROR: $*" >&2; }
+_cksum_error() { echo "[run_llamacpp] ERROR: $*" >&2; }
 
 # shellcheck source=lib/checksum.sh
 source "${SCRIPT_DIR}/lib/checksum.sh"
@@ -237,7 +237,7 @@ source "${SCRIPT_DIR}/lib/checksum.sh"
 #
 # Two-strategy approach (first succeeds wins):
 #   1. huggingface-cli on the host    — preferred; no extra container needed
-#   2. Temporary container (vLLM image) — fallback; guarantees correct tooling
+#   2. Temporary container (llama.cpp image) — fallback; guarantees correct tooling
 #
 # Checksum-verified idempotency:
 #   1. Before download: check existing files against stored .sha256 checksums
@@ -246,7 +246,7 @@ source "${SCRIPT_DIR}/lib/checksum.sh"
 #   4. After download: compute and store new .sha256 sidecar files
 #
 # To skip this step entirely (e.g. weights pre-cached on a shared NFS path):
-#   SKIP_MODEL_PULL=true ./scripts/run_vllm.sh
+#   SKIP_MODEL_PULL=true ./scripts/run_llamacpp.sh
 # ---------------------------------------------------------------------------
 pull_model_weights() {
     if [ "${SKIP_MODEL_PULL}" = "true" ]; then
@@ -294,12 +294,12 @@ pull_model_weights() {
     fi
 
     # ------------------------------------------------------------------
-    # Strategy 2: Short-lived vLLM container.
+    # Strategy 2: Short-lived llama.cpp container.
     # Uses the same image that will serve inference, so the Python /
     # huggingface_hub versions are guaranteed to be compatible.
     # ------------------------------------------------------------------
     if [ "${download_succeeded}" = "false" ]; then
-        log "Downloading model weights via temporary vLLM container ..."
+        log "Downloading model weights via temporary llama.cpp container ..."
 
         local hf_token_flags=""
         if [ -n "${HF_TOKEN:-}" ]; then
@@ -309,7 +309,7 @@ pull_model_weights() {
         # SC2086: GPU_FLAGS and hf_token_flags must word-split into separate args.
         # shellcheck disable=SC2086,SC2046
         "${RUNTIME}" run --rm \
-            --name "democlaw-vllm-pull" \
+            --name "democlaw-llamacpp-pull" \
             $(runtime_gpu_flags) \
             --shm-size 1g \
             -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
@@ -336,7 +336,7 @@ try:
 
 except ImportError as exc:
     print(f'[pull] huggingface_hub not available: {exc}', file=sys.stderr)
-    print('[pull] vLLM will attempt to download the model on first start.', file=sys.stderr)
+    print('[pull] llama.cpp will attempt to download the model on first start.', file=sys.stderr)
     sys.exit(0)
 except Exception as exc:
     print(f'[pull] Download failed: {exc}', file=sys.stderr)
@@ -370,29 +370,29 @@ pull_model_weights
 GPU_FLAGS=$(runtime_gpu_flags)
 
 # ---------------------------------------------------------------------------
-# Step 8: Launch the vLLM container
+# Step 8: Launch the llama.cpp container
 #
 # Key flags explained:
 #   -d                          Run detached (background)
 #   --name                      Container name for log/stop/inspect access
-#   --network / --network-alias Attach to shared network; reachable as "vllm"
+#   --network / --network-alias Attach to shared network; reachable as "llamacpp"
 #   ${GPU_FLAGS}                NVIDIA GPU passthrough (runtime-specific)
 #   --restart unless-stopped    Auto-restart on failure (not on explicit stop)
 #   --shm-size 1g               Shared memory for PyTorch tensor operations
-#   -p ${VLLM_HOST_PORT}:...    Publish API port on the Linux host
+#   -p ${LLAMACPP_HOST_PORT}:...    Publish API port on the Linux host
 #   -v ${HF_CACHE_DIR}:...      Bind-mount HuggingFace model cache
 #   -e MODEL_NAME               Qwen/Qwen3-4B-AWQ — AWQ 4-bit model ID
-#   -e QUANTIZATION             awq — activates vLLM AWQ 4-bit kernel path
-#   -e VLLM_HOST                Bind address inside the container (0.0.0.0)
-#   -e VLLM_PORT                Container-internal API server port
+#   -e QUANTIZATION             awq — activates llama.cpp AWQ 4-bit kernel path
+#   -e LLAMACPP_HOST                Bind address inside the container (0.0.0.0)
+#   -e LLAMACPP_PORT                Container-internal API server port
 #   --cap-drop ALL              Drop all Linux capabilities (minimal surface)
 #   --security-opt no-new-privileges  Prevent privilege escalation
 # ---------------------------------------------------------------------------
 log "======================================================="
-log "  Launching vLLM container"
+log "  Launching llama.cpp container"
 log "======================================================="
 _auth_mode_log="no-auth (any client may call the API)"
-if [ -n "${VLLM_API_KEY:-}" ] && [ "${VLLM_API_KEY}" != "EMPTY" ] && [ "${VLLM_API_KEY}" != "none" ]; then
+if [ -n "${LLAMACPP_API_KEY:-}" ] && [ "${LLAMACPP_API_KEY}" != "EMPTY" ] && [ "${LLAMACPP_API_KEY}" != "none" ]; then
     _auth_mode_log="api-key (clients must send Authorization: Bearer <key>)"
 fi
 
@@ -403,9 +403,9 @@ log "  Quant      : ${QUANTIZATION} (AWQ 4-bit)"
 log "  dtype      : ${DTYPE}"
 log "  Max len    : ${MAX_MODEL_LEN} tokens"
 log "  GPU mem    : ${GPU_MEMORY_UTILIZATION} utilization"
-log "  Bind addr  : ${VLLM_HOST}:${VLLM_PORT}  (0.0.0.0 = reachable from all containers)"
-log "  API port   : host:${VLLM_HOST_PORT} -> container:${VLLM_PORT}"
-log "  Network    : ${NETWORK_NAME} (alias: vllm)"
+log "  Bind addr  : ${LLAMACPP_HOST}:${LLAMACPP_PORT}  (0.0.0.0 = reachable from all containers)"
+log "  API port   : host:${LLAMACPP_HOST_PORT} -> container:${LLAMACPP_PORT}"
+log "  Network    : ${NETWORK_NAME} (alias: llamacpp)"
 log "  Auth mode  : ${_auth_mode_log}"
 log "  GPU flags  : ${GPU_FLAGS}"
 log "  HF cache   : ${HF_CACHE_DIR}"
@@ -424,17 +424,17 @@ fi
 "${RUNTIME}" run -d \
     --name "${CONTAINER_NAME}" \
     --network "${NETWORK_NAME}" \
-    --hostname vllm \
-    --network-alias vllm \
+    --hostname llamacpp \
+    --network-alias llamacpp \
     ${GPU_FLAGS} \
     --restart unless-stopped \
     --shm-size 1g \
-    -p "${VLLM_HOST_PORT}:${VLLM_PORT}" \
+    -p "${LLAMACPP_HOST_PORT}:${LLAMACPP_PORT}" \
     -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
     -e "MODEL_NAME=${MODEL_NAME}" \
-    -e "VLLM_HOST=${VLLM_HOST}" \
-    -e "VLLM_PORT=${VLLM_PORT}" \
-    -e "VLLM_API_KEY=${VLLM_API_KEY:-}" \
+    -e "LLAMACPP_HOST=${LLAMACPP_HOST}" \
+    -e "LLAMACPP_PORT=${LLAMACPP_PORT}" \
+    -e "LLAMACPP_API_KEY=${LLAMACPP_API_KEY:-}" \
     -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}" \
     -e "GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}" \
     -e "QUANTIZATION=${QUANTIZATION}" \
@@ -446,16 +446,16 @@ fi
 
 log "Container '${CONTAINER_NAME}' started."
 log ""
-log "The vLLM OpenAI-compatible API will be available at:"
-log "  http://localhost:${VLLM_HOST_PORT}/v1"
+log "The llama.cpp OpenAI-compatible API will be available at:"
+log "  http://localhost:${LLAMACPP_HOST_PORT}/v1"
 log ""
 log "The model (${MODEL_NAME}) takes several minutes to load on first start."
 log "Monitor progress with:"
 log "  ${RUNTIME} logs -f ${CONTAINER_NAME}"
 log ""
 log "Once loaded, verify the API with:"
-log "  curl http://localhost:${VLLM_HOST_PORT}/health"
-log "  curl http://localhost:${VLLM_HOST_PORT}/v1/models"
+log "  curl http://localhost:${LLAMACPP_HOST_PORT}/health"
+log "  curl http://localhost:${LLAMACPP_HOST_PORT}/v1/models"
 log ""
 log "To stop the container:"
 log "  ${RUNTIME} stop ${CONTAINER_NAME}"

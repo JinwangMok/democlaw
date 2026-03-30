@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# start-vllm.sh — Pull the Qwen3-4B AWQ 4-bit model and launch the vLLM
+# start-llamacpp.sh — Pull the Qwen3-4B AWQ 4-bit model and launch the llama.cpp
 #                  container serving it via an OpenAI-compatible API.
 #
 # Supports both docker and podman on Linux hosts.
@@ -8,15 +8,15 @@
 #
 # Steps performed:
 #   1. Validate host OS, container runtime, and NVIDIA GPU/CUDA
-#   2. Build the vLLM image if not already present
+#   2. Build the llama.cpp image if not already present
 #   3. Pre-pull Qwen3-4B AWQ 4-bit weights from HuggingFace (skip if cached)
-#   4. Launch the vLLM server container with GPU passthrough and model config
+#   4. Launch the llama.cpp server container with GPU passthrough and model config
 #   5. Wait for /health and /v1/models endpoints to confirm readiness
 #
 # Usage:
-#   ./scripts/start-vllm.sh                          # auto-detect runtime
-#   CONTAINER_RUNTIME=podman ./scripts/start-vllm.sh # force podman
-#   SKIP_MODEL_PULL=true ./scripts/start-vllm.sh     # skip step 3 (model cached)
+#   ./scripts/start-llamacpp.sh                          # auto-detect runtime
+#   CONTAINER_RUNTIME=podman ./scripts/start-llamacpp.sh # force podman
+#   SKIP_MODEL_PULL=true ./scripts/start-llamacpp.sh     # skip step 3 (model cached)
 # =============================================================================
 set -euo pipefail
 
@@ -29,9 +29,9 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-log()   { echo "[start-vllm] $*"; }
-warn()  { echo "[start-vllm] WARNING: $*" >&2; }
-error() { printf "[start-vllm] ERROR: %s\n" "$*" >&2; exit 1; }
+log()   { echo "[start-llamacpp] $*"; }
+warn()  { echo "[start-llamacpp] WARNING: $*" >&2; }
+error() { printf "[start-llamacpp] ERROR: %s\n" "$*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Load .env file if present (key=value, no export needed)
@@ -49,14 +49,14 @@ fi
 # ---------------------------------------------------------------------------
 # Configurable defaults (all overridable via environment or .env file)
 # ---------------------------------------------------------------------------
-CONTAINER_NAME="${VLLM_CONTAINER_NAME:-democlaw-vllm}"
+CONTAINER_NAME="${LLAMACPP_CONTAINER_NAME:-democlaw-llamacpp}"
 NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
-IMAGE_TAG="${VLLM_IMAGE_TAG:-docker.io/jinwangmok/democlaw-vllm:v1.0.0}"
+IMAGE_TAG="${LLAMACPP_IMAGE_TAG:-docker.io/jinwangmok/democlaw-llamacpp:v1.0.0}"
 
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
-VLLM_HOST="${VLLM_HOST:-0.0.0.0}"
-VLLM_PORT="${VLLM_PORT:-8000}"
-VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
+LLAMACPP_HOST="${LLAMACPP_HOST:-0.0.0.0}"
+LLAMACPP_PORT="${LLAMACPP_PORT:-8000}"
+LLAMACPP_HOST_PORT="${LLAMACPP_HOST_PORT:-8000}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-8192}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.90}"
 QUANTIZATION="${QUANTIZATION:-awq}"
@@ -66,7 +66,7 @@ DTYPE="${DTYPE:-float16}"
 # Leave empty (or "EMPTY") for no-auth mode — the default, safe on a trusted
 # private container network.  Set to a real secret to require
 # "Authorization: Bearer <key>" on every request from OpenClaw and clients.
-VLLM_API_KEY="${VLLM_API_KEY:-}"
+LLAMACPP_API_KEY="${LLAMACPP_API_KEY:-}"
 
 # HuggingFace cache — share host cache to avoid re-downloading models
 HF_CACHE_DIR="${HF_CACHE_DIR:-${HOME}/.cache/huggingface}"
@@ -114,9 +114,9 @@ validate_nvidia_gpu "${RUNTIME}"
 # identically on both docker and podman.  Creates the network if absent;
 # no-ops (with a log message) if it already exists.
 #
-# Both the vLLM container (--hostname vllm --network-alias vllm) and the
+# Both the llama.cpp container (--hostname llamacpp --network-alias llamacpp) and the
 # OpenClaw container connect to this network, allowing OpenClaw to reach
-# vLLM via the predictable URL:  http://vllm:${VLLM_PORT}/v1
+# llama.cpp via the predictable URL:  http://llamacpp:${LLAMACPP_PORT}/v1
 # ---------------------------------------------------------------------------
 runtime_ensure_network "${NETWORK_NAME}"
 
@@ -142,18 +142,18 @@ handle_existing_container() {
 handle_existing_container
 
 # ---------------------------------------------------------------------------
-# Acquire vLLM image (pull from Docker Hub first; local build fallback)
+# Acquire llama.cpp image (pull from Docker Hub first; local build fallback)
 #
 # Strategy: Always attempt to pull the pre-built image from Docker Hub.
 # If pull fails (non-zero exit), fall back to building from the local
-# Dockerfile at <project_root>/vllm/Dockerfile.
+# Dockerfile at <project_root>/llamacpp/Dockerfile.
 # ---------------------------------------------------------------------------
 _img_log()   { log "$@"; }
 _img_warn()  { warn "$@"; }
 _img_error() { error "$@"; }
 source "${SCRIPT_DIR}/lib/image.sh"
 
-ensure_image "${IMAGE_TAG}" "${PROJECT_ROOT}/vllm"
+ensure_image "${IMAGE_TAG}" "${PROJECT_ROOT}/llamacpp"
 
 # ---------------------------------------------------------------------------
 # Prepare HuggingFace cache directory on the host
@@ -165,7 +165,7 @@ mkdir -p "${HF_CACHE_DIR}"
 # ---------------------------------------------------------------------------
 _cksum_log()   { log "$@"; }
 _cksum_warn()  { warn "$@"; }
-_cksum_error() { echo "[start-vllm] ERROR: $*" >&2; }
+_cksum_error() { echo "[start-llamacpp] ERROR: $*" >&2; }
 
 # shellcheck source=lib/checksum.sh
 source "${SCRIPT_DIR}/lib/checksum.sh"
@@ -173,7 +173,7 @@ source "${SCRIPT_DIR}/lib/checksum.sh"
 # ---------------------------------------------------------------------------
 # pull_model_weights — Pre-download the Qwen3-4B AWQ 4-bit weights
 #
-# Runs a short-lived container using the built vLLM image (which already has
+# Runs a short-lived container using the built llama.cpp image (which already has
 # Python and huggingface_hub installed) to invoke `huggingface-cli download`.
 # The HF cache directory is bind-mounted so weights persist across runs.
 #
@@ -222,11 +222,11 @@ pull_model_weights() {
         hf_token_flags="-e HF_TOKEN=${HF_TOKEN} -e HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}"
     fi
 
-    log "Running model download container (democlaw-vllm-pull) ..."
+    log "Running model download container (democlaw-llamacpp-pull) ..."
 
     # shellcheck disable=SC2086
     "${RUNTIME}" run --rm \
-        --name "democlaw-vllm-pull" \
+        --name "democlaw-llamacpp-pull" \
         ${gpu_flags} \
         --shm-size 1g \
         -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
@@ -253,11 +253,11 @@ try:
     print(f'[pull] Download complete. Weights stored at: {local_path}')
 except ImportError as e:
     print(f'[pull] huggingface_hub not available: {e}', file=sys.stderr)
-    print('[pull] Falling back to vLLM startup download.', file=sys.stderr)
+    print('[pull] Falling back to llama.cpp startup download.', file=sys.stderr)
     sys.exit(0)
 except Exception as e:
     print(f'[pull] Download failed: {e}', file=sys.stderr)
-    print('[pull] The vLLM server will attempt to download on first start.', file=sys.stderr)
+    print('[pull] The llama.cpp server will attempt to download on first start.', file=sys.stderr)
     sys.exit(1)
 "
 
@@ -282,24 +282,24 @@ pull_model_weights
 GPU_FLAGS=$(runtime_gpu_flags)
 
 # ---------------------------------------------------------------------------
-# Launch the vLLM container
+# Launch the llama.cpp container
 # ---------------------------------------------------------------------------
 log "======================================================="
-log "  Step: Launch vLLM server container"
+log "  Step: Launch llama.cpp server container"
 log "======================================================="
 _auth_mode="no-auth (any client may call the API)"
-if [ -n "${VLLM_API_KEY}" ] && [ "${VLLM_API_KEY}" != "EMPTY" ] && [ "${VLLM_API_KEY}" != "none" ]; then
+if [ -n "${LLAMACPP_API_KEY}" ] && [ "${LLAMACPP_API_KEY}" != "EMPTY" ] && [ "${LLAMACPP_API_KEY}" != "none" ]; then
     _auth_mode="api-key (clients must send Authorization: Bearer <key>)"
 fi
 
-log "Starting vLLM container '${CONTAINER_NAME}' ..."
+log "Starting llama.cpp container '${CONTAINER_NAME}' ..."
 log "  Model           : ${MODEL_NAME}"
 log "  Quantization    : ${QUANTIZATION}"
 log "  Max model len   : ${MAX_MODEL_LEN}"
 log "  GPU mem util    : ${GPU_MEMORY_UTILIZATION}"
-log "  Bind address    : ${VLLM_HOST}:${VLLM_PORT}  (0.0.0.0 = reachable from all containers)"
-log "  Network alias   : vllm  (OpenClaw uses http://vllm:${VLLM_PORT}/v1)"
-log "  Host port       : ${VLLM_HOST_PORT} -> container ${VLLM_PORT}"
+log "  Bind address    : ${LLAMACPP_HOST}:${LLAMACPP_PORT}  (0.0.0.0 = reachable from all containers)"
+log "  Network alias   : llamacpp  (OpenClaw uses http://llamacpp:${LLAMACPP_PORT}/v1)"
+log "  Host port       : ${LLAMACPP_HOST_PORT} -> container ${LLAMACPP_PORT}"
 log "  Auth mode       : ${_auth_mode}"
 log "  HF cache        : ${HF_CACHE_DIR}"
 
@@ -307,21 +307,21 @@ log "  HF cache        : ${HF_CACHE_DIR}"
 "${RUNTIME}" run -d \
     --name "${CONTAINER_NAME}" \
     --network "${NETWORK_NAME}" \
-    --hostname vllm \
-    --network-alias vllm \
+    --hostname llamacpp \
+    --network-alias llamacpp \
     ${GPU_FLAGS} \
     --restart unless-stopped \
     --shm-size 1g \
-    -p "${VLLM_HOST_PORT}:${VLLM_PORT}" \
+    -p "${LLAMACPP_HOST_PORT}:${LLAMACPP_PORT}" \
     -v "${HF_CACHE_DIR}:/root/.cache/huggingface:rw" \
     -e "MODEL_NAME=${MODEL_NAME}" \
-    -e "VLLM_HOST=${VLLM_HOST}" \
-    -e "VLLM_PORT=${VLLM_PORT}" \
+    -e "LLAMACPP_HOST=${LLAMACPP_HOST}" \
+    -e "LLAMACPP_PORT=${LLAMACPP_PORT}" \
     -e "MAX_MODEL_LEN=${MAX_MODEL_LEN}" \
     -e "GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}" \
     -e "QUANTIZATION=${QUANTIZATION}" \
     -e "DTYPE=${DTYPE}" \
-    -e "VLLM_API_KEY=${VLLM_API_KEY:-}" \
+    -e "LLAMACPP_API_KEY=${LLAMACPP_API_KEY:-}" \
     -e "HF_TOKEN=${HF_TOKEN:-}" \
     -e "HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}" \
     --cap-drop ALL \
@@ -331,14 +331,14 @@ log "  HF cache        : ${HF_CACHE_DIR}"
 log "Container '${CONTAINER_NAME}' started successfully."
 
 # ---------------------------------------------------------------------------
-# Wait for the vLLM health endpoint to become available
+# Wait for the llama.cpp health endpoint to become available
 # ---------------------------------------------------------------------------
-HEALTH_URL="http://localhost:${VLLM_HOST_PORT}/health"
-MODELS_URL="http://localhost:${VLLM_HOST_PORT}/v1/models"
-HEALTH_TIMEOUT="${VLLM_HEALTH_TIMEOUT:-300}"
+HEALTH_URL="http://localhost:${LLAMACPP_HOST_PORT}/health"
+MODELS_URL="http://localhost:${LLAMACPP_HOST_PORT}/v1/models"
+HEALTH_TIMEOUT="${LLAMACPP_HEALTH_TIMEOUT:-300}"
 HEALTH_INTERVAL=5
 
-log "Waiting for vLLM to become healthy (timeout: ${HEALTH_TIMEOUT}s) ..."
+log "Waiting for llama.cpp to become healthy (timeout: ${HEALTH_TIMEOUT}s) ..."
 
 # ---------------------------------------------------------------------------
 # Phase 1: Wait for /health to respond
@@ -366,7 +366,7 @@ while [ "${elapsed}" -lt "${HEALTH_TIMEOUT}" ]; do
 done
 
 if [ "${elapsed}" -ge "${HEALTH_TIMEOUT}" ]; then
-    warn "vLLM /health did not respond within ${HEALTH_TIMEOUT}s."
+    warn "llama.cpp /health did not respond within ${HEALTH_TIMEOUT}s."
     warn "The container is still running — the model may still be loading."
     warn "Check progress with: ${RUNTIME} logs -f ${CONTAINER_NAME}"
     exit 1
@@ -412,8 +412,8 @@ except Exception:
                 fi
 
                 log ""
-                log "vLLM server is healthy and ready to serve requests."
-                log "  API endpoint: http://localhost:${VLLM_HOST_PORT}/v1"
+                log "llama.cpp server is healthy and ready to serve requests."
+                log "  API endpoint: http://localhost:${LLAMACPP_HOST_PORT}/v1"
                 log "  Models API  : ${MODELS_URL}"
                 log "  Health check: ${HEALTH_URL}"
                 exit 0
@@ -432,7 +432,7 @@ except Exception:
     log "  ... waiting for /v1/models (${models_elapsed}/${MODELS_TIMEOUT}s)"
 done
 
-warn "vLLM /v1/models did not list any models within ${MODELS_TIMEOUT}s after /health became available."
+warn "llama.cpp /v1/models did not list any models within ${MODELS_TIMEOUT}s after /health became available."
 warn "The server is running but the model may still be loading."
 warn "Check with: curl ${MODELS_URL}"
 warn "Check logs: ${RUNTIME} logs -f ${CONTAINER_NAME}"

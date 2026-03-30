@@ -1,7 +1,7 @@
 name: Dockerfile Lint (hadolint)
 
 # ---------------------------------------------------------------------------
-# CI job: validate Dockerfile syntax for the vLLM and OpenClaw containers
+# CI job: validate Dockerfile syntax for the llama.cpp and OpenClaw containers
 #
 # Uses hadolint — the industry-standard Dockerfile linter — to validate both
 # Dockerfiles explicitly by name (not via wildcard).  Each Dockerfile is linted
@@ -17,14 +17,14 @@ on:
   push:
     branches: [main]
     paths:
-      - "vllm/Dockerfile"
+      - "llamacpp/Dockerfile"
       - "openclaw/Dockerfile"
       - ".hadolint.yaml"
       - ".github/workflows/ci-hadolint.yml"
   pull_request:
     branches: [main]
     paths:
-      - "vllm/Dockerfile"
+      - "llamacpp/Dockerfile"
       - "openclaw/Dockerfile"
       - ".hadolint.yaml"
       - ".github/workflows/ci-hadolint.yml"
@@ -46,8 +46,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - dockerfile: vllm/Dockerfile
-            label: vLLM
+          - dockerfile: llamacpp/Dockerfile
+            label: llama.cpp
           - dockerfile: openclaw/Dockerfile
             label: OpenClaw
 
@@ -129,7 +129,7 @@ jobs:
             echo "  Check the individual 'Lint <label> Dockerfile' jobs above."
             exit 1
           fi
-          echo "✓ vllm/Dockerfile — passed"
+          echo "✓ llamacpp/Dockerfile — passed"
           echo "✓ openclaw/Dockerfile — passed"
           echo ""
           echo "All Dockerfile lint jobs passed."

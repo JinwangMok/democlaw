@@ -1,24 +1,24 @@
-# vLLM OpenAI-Compatible API Reference
+# llama.cpp OpenAI-Compatible API Reference
 
-This document describes the OpenAI-compatible REST API exposed by the DemoClaw vLLM
-container (`democlaw-vllm`), how to reach it from the host, and how to verify it
+This document describes the OpenAI-compatible REST API exposed by the DemoClaw llama.cpp
+container (`democlaw-llamacpp`), how to reach it from the host, and how to verify it
 is working correctly.
 
 ---
 
 ## Base URL
 
-The vLLM container listens on **port 8000** inside the container and publishes that
+The llama.cpp container listens on **port 8000** inside the container and publishes that
 port to the Linux host:
 
 | Access context | Base URL | Notes |
 |----------------|----------|-------|
-| **From the host** (browser, curl, SDK) | `http://localhost:8000/v1` | Use after `./scripts/start-vllm.sh` |
-| **From another container** on `democlaw-net` | `http://vllm:8000/v1` | Resolved via container hostname / network alias |
-| **Custom host port** | `http://localhost:${VLLM_HOST_PORT}/v1` | Set `VLLM_HOST_PORT` in `.env` to override `8000` |
+| **From the host** (browser, curl, SDK) | `http://localhost:8000/v1` | Use after `./scripts/start-llamacpp.sh` |
+| **From another container** on `democlaw-net` | `http://llamacpp:8000/v1` | Resolved via container hostname / network alias |
+| **Custom host port** | `http://localhost:${LLAMACPP_HOST_PORT}/v1` | Set `LLAMACPP_HOST_PORT` in `.env` to override `8000` |
 
-> **How the port gets published:** `start-vllm.sh` passes
-> `-p ${VLLM_HOST_PORT}:${VLLM_PORT}` (default `8000:8000`) to `docker run` /
+> **How the port gets published:** `start-llamacpp.sh` passes
+> `-p ${LLAMACPP_HOST_PORT}:${LLAMACPP_PORT}` (default `8000:8000`) to `docker run` /
 > `podman run`, making the API reachable at `http://localhost:8000` from any
 > process on the host.
 
@@ -46,7 +46,7 @@ Any client that works with the official OpenAI API can be pointed at
 
 ```bash
 # Expects HTTP 200 with an empty body
-curl -sf http://localhost:8000/health && echo "vLLM is up"
+curl -sf http://localhost:8000/health && echo "llama.cpp is up"
 ```
 
 ### List loaded models
@@ -62,10 +62,10 @@ Expected response:
   "object": "list",
   "data": [
     {
-      "id": "Qwen/Qwen3-4B-AWQ",
+      "id": "Qwen3.5-9B-Q4_K_M",
       "object": "model",
       "created": 1700000000,
-      "owned_by": "vllm"
+      "owned_by": "llamacpp"
     }
   ]
 }
@@ -77,7 +77,7 @@ Expected response:
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen3-4B-AWQ",
+    "model": "Qwen3.5-9B-Q4_K_M",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user",   "content": "What is the capital of France?"}
@@ -94,7 +94,7 @@ Expected response shape:
   "id": "chatcmpl-...",
   "object": "chat.completion",
   "created": 1700000000,
-  "model": "Qwen/Qwen3-4B-AWQ",
+  "model": "Qwen3.5-9B-Q4_K_M",
   "choices": [
     {
       "index": 0,
@@ -135,7 +135,7 @@ SKIP_INFERENCE_TEST=true ./scripts/validate-api.sh
 Custom base URL (e.g. remote server):
 
 ```bash
-VLLM_BASE_URL=http://192.168.1.10:8000 ./scripts/validate-api.sh
+LLAMACPP_BASE_URL=http://192.168.1.10:8000 ./scripts/validate-api.sh
 ```
 
 Exit code `0` = all checks passed; `1` = one or more checks failed.
@@ -151,14 +151,14 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="EMPTY",          # vLLM accepts any non-empty string by default
+    api_key="EMPTY",          # llama.cpp accepts any non-empty string by default
 )
 
 response = client.chat.completions.create(
-    model="Qwen/Qwen3-4B-AWQ",
+    model="Qwen3.5-9B-Q4_K_M",
     messages=[
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user",   "content": "Explain vLLM in one sentence."},
+        {"role": "user",   "content": "Explain llama.cpp in one sentence."},
     ],
     max_tokens=128,
     temperature=0.7,
@@ -174,7 +174,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY")
 
 with client.chat.completions.create(
-    model="Qwen/Qwen3-4B-AWQ",
+    model="Qwen3.5-9B-Q4_K_M",
     messages=[{"role": "user", "content": "Count to 5."}],
     max_tokens=64,
     stream=True,
@@ -196,7 +196,7 @@ const client = new OpenAI({
 });
 
 const response = await client.chat.completions.create({
-  model: "Qwen/Qwen3-4B-AWQ",
+  model: "Qwen3.5-9B-Q4_K_M",
   messages: [
     { role: "system", content: "You are a helpful assistant." },
     { role: "user",   content: "What is the capital of France?" },
@@ -216,18 +216,18 @@ The default port (`8000`) can be changed via environment variables or `.env`:
 
 ```bash
 # .env
-VLLM_HOST_PORT=8001   # publish to host port 8001 instead of 8000
-VLLM_PORT=8000        # internal container port (keep at 8000 unless image is rebuilt)
+LLAMACPP_HOST_PORT=8001   # publish to host port 8001 instead of 8000
+LLAMACPP_PORT=8000        # internal container port (keep at 8000 unless image is rebuilt)
 ```
 
-After changing `VLLM_HOST_PORT`, the host-side base URL becomes:
+After changing `LLAMACPP_HOST_PORT`, the host-side base URL becomes:
 
 ```
 http://localhost:8001/v1
 ```
 
-The container-internal base URL used by OpenClaw (`http://vllm:8000/v1`) is
-**not** affected by `VLLM_HOST_PORT` — it always routes via the container network.
+The container-internal base URL used by OpenClaw (`http://llamacpp:8000/v1`) is
+**not** affected by `LLAMACPP_HOST_PORT` — it always routes via the container network.
 
 See [`.env.example`](../.env.example) for all configurable variables.
 
@@ -235,37 +235,37 @@ See [`.env.example`](../.env.example) for all configurable variables.
 
 ## Container networking
 
-The vLLM container is launched with:
+The llama.cpp container is launched with:
 
 ```
 --network democlaw-net
---hostname vllm
---network-alias vllm
--p ${VLLM_HOST_PORT}:${VLLM_PORT}
+--hostname llamacpp
+--network-alias llamacpp
+-p ${LLAMACPP_HOST_PORT}:${LLAMACPP_PORT}
 ```
 
 This means:
 
 - **Host access:** `http://localhost:8000/v1` (via the published port)
-- **Container access:** `http://vllm:8000/v1` (via the `democlaw-net` bridge network)
+- **Container access:** `http://llamacpp:8000/v1` (via the `democlaw-net` bridge network)
 
-The OpenClaw container is configured with `VLLM_BASE_URL=http://vllm:8000/v1` by
-default so it reaches vLLM over the container network without going through the
+The OpenClaw container is configured with `LLAMACPP_BASE_URL=http://llamacpp:8000/v1` by
+default so it reaches llama.cpp over the container network without going through the
 host port.
 
 ---
 
 ## API authentication
 
-By default, vLLM runs in **no-auth mode** — it accepts requests with any
+By default, llama.cpp runs in **no-auth mode** — it accepts requests with any
 `Authorization` header value (or none at all). This is safe for an isolated,
 trusted container network.
 
-To require a Bearer token, set `VLLM_API_KEY` to a non-empty value in `.env`:
+To require a Bearer token, set `LLAMACPP_API_KEY` to a non-empty value in `.env`:
 
 ```bash
 # .env
-VLLM_API_KEY=my-secret-key
+LLAMACPP_API_KEY=my-secret-key
 ```
 
 Clients must then include `Authorization: Bearer my-secret-key` in every request:
@@ -281,14 +281,14 @@ curl http://localhost:8000/v1/models \
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
-| `curl: (7) Failed to connect` | Container not started or port blocked | Run `./scripts/start-vllm.sh`; check firewall |
-| `HTTP 000` from `validate-api.sh` | Server not yet ready (model loading) | Wait and retry; monitor with `docker logs -f democlaw-vllm` |
-| `/v1/models` returns empty `data: []` | Model weights still loading | First run downloads ~5 GB; check logs |
-| `HTTP 401 Unauthorized` | `VLLM_API_KEY` set but request has no token | Add `-H "Authorization: Bearer <key>"` |
-| Wrong model in `/v1/models` | `MODEL_NAME` env var mismatch | Verify `MODEL_NAME=Qwen/Qwen3-4B-AWQ` in `.env` |
+| `curl: (7) Failed to connect` | Container not started or port blocked | Run `./scripts/start-llamacpp.sh`; check firewall |
+| `HTTP 000` from `validate-api.sh` | Server not yet ready (model loading) | Wait and retry; monitor with `docker logs -f democlaw-llamacpp` |
+| `/v1/models` returns empty `data: []` | Model weights still loading | First run downloads ~5.7 GB; check logs |
+| `HTTP 401 Unauthorized` | `LLAMACPP_API_KEY` set but request has no token | Add `-H "Authorization: Bearer <key>"` |
+| Wrong model in `/v1/models` | `MODEL_NAME` env var mismatch | Verify `MODEL_NAME=Qwen3.5-9B-Q4_K_M` in `.env` |
 
 For the full healthcheck output:
 
 ```bash
-./scripts/healthcheck.sh --vllm-only
+./scripts/healthcheck.sh --llamacpp-only
 ```

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # run_openclaw.sh — Launch the OpenClaw AI assistant container connected to
-#                   the vLLM server via an OpenAI-compatible endpoint.
+#                   the llama.cpp server via an OpenAI-compatible endpoint.
 #
 # Supports both docker and podman on Linux hosts.
 # The OpenClaw web dashboard is published to the host on a configurable port.
@@ -10,13 +10,13 @@
 #   1. Validate host OS (Linux only)
 #   2. Detect container runtime (docker or podman)
 #   3. Ensure the shared container network exists
-#   4. Verify the vLLM container is running and reachable on the shared network
+#   4. Verify the llama.cpp container is running and reachable on the shared network
 #   5. Build the OpenClaw image if not already present
 #   6. Launch the OpenClaw container with:
-#        • vLLM endpoint env vars (VLLM_BASE_URL, VLLM_API_KEY, VLLM_MODEL_NAME)
+#        • llama.cpp endpoint env vars (LLAMACPP_BASE_URL, LLAMACPP_API_KEY, LLAMACPP_MODEL_NAME)
 #        • OpenAI-compatible env vars (OPENAI_API_BASE, OPENAI_BASE_URL, etc.)
 #        • OpenClaw-specific env vars (OPENCLAW_LLM_PROVIDER, OPENCLAW_LLM_*)
-#        • Shared network attachment so "vllm" hostname resolves
+#        • Shared network attachment so "llamacpp" hostname resolves
 #        • Dashboard port published on the host
 #   7. Post-start validation: wait for the healthcheck to pass and print
 #      a SUCCESS or FAILURE message to the user
@@ -25,31 +25,31 @@
 #   ./scripts/run_openclaw.sh                              # auto-detect runtime, port 18789
 #   OPENCLAW_HOST_PORT=8080 ./scripts/run_openclaw.sh      # expose dashboard on host port 8080
 #   CONTAINER_RUNTIME=podman ./scripts/run_openclaw.sh     # force podman
-#   VLLM_HOST_PORT=9000 ./scripts/run_openclaw.sh          # vLLM published on a non-default port
+#   LLAMACPP_HOST_PORT=9000 ./scripts/run_openclaw.sh          # llama.cpp published on a non-default port
 #
 # Key environment variables (all have sensible defaults):
 #   CONTAINER_RUNTIME         docker | podman  (auto-detected if unset)
-#   VLLM_BASE_URL             OpenAI-compatible endpoint inside the shared network
-#                             (default: http://vllm:8000/v1)
-#   VLLM_API_KEY              API key passed to OpenClaw (default: EMPTY)
-#   VLLM_MODEL_NAME           Model ID for OpenClaw to request (default: Qwen/Qwen3-4B-AWQ)
-#   VLLM_MAX_TOKENS           Max response tokens            (default: 4096)
-#   VLLM_TEMPERATURE          Sampling temperature           (default: 0.7)
-#   VLLM_HEALTH_RETRIES       Max attempts to reach vLLM     (default: 60)
-#   VLLM_HEALTH_INTERVAL      Seconds between retries        (default: 5)
+#   LLAMACPP_BASE_URL             OpenAI-compatible endpoint inside the shared network
+#                             (default: http://llamacpp:8000/v1)
+#   LLAMACPP_API_KEY              API key passed to OpenClaw (default: EMPTY)
+#   LLAMACPP_MODEL_NAME           Model ID for OpenClaw to request (default: Qwen/Qwen3-4B-AWQ)
+#   LLAMACPP_MAX_TOKENS           Max response tokens            (default: 4096)
+#   LLAMACPP_TEMPERATURE          Sampling temperature           (default: 0.7)
+#   LLAMACPP_HEALTH_RETRIES       Max attempts to reach llama.cpp     (default: 60)
+#   LLAMACPP_HEALTH_INTERVAL      Seconds between retries        (default: 5)
 #   OPENCLAW_PORT             Container-internal dashboard port (default: 18789)
 #   OPENCLAW_HOST_PORT        Dashboard port published on host  (default: 18789)
 #   OPENCLAW_CONTAINER_NAME   Container name                 (default: democlaw-openclaw)
 #   OPENCLAW_IMAGE_TAG        Image tag to build/use         (default: democlaw/openclaw:latest)
-#   VLLM_CONTAINER_NAME       vLLM container name for checks (default: democlaw-vllm)
+#   LLAMACPP_CONTAINER_NAME       llama.cpp container name for checks (default: democlaw-llamacpp)
 #   DEMOCLAW_NETWORK          Shared network name            (default: democlaw-net)
 #   OPENCLAW_HEALTH_TIMEOUT   Seconds to wait for dashboard  (default: 120)
 #
 # The OpenClaw dashboard will be available at:
 #   http://localhost:<OPENCLAW_HOST_PORT>
 #
-# The vLLM endpoint is routed inside the container network as:
-#   http://vllm:<VLLM_PORT>/v1  (resolved via the "vllm" network alias)
+# The llama.cpp endpoint is routed inside the container network as:
+#   http://llamacpp:<LLAMACPP_PORT>/v1  (resolved via the "llamacpp" network alias)
 # =============================================================================
 set -euo pipefail
 
@@ -110,18 +110,18 @@ fi
 # All values can be overridden by environment variables or .env file.
 # ---------------------------------------------------------------------------
 
-# --- vLLM endpoint (inside the shared container network) ---
-# VLLM_BASE_URL references the vLLM container by its network alias "vllm" so
+# --- llama.cpp endpoint (inside the shared container network) ---
+# LLAMACPP_BASE_URL references the llama.cpp container by its network alias "llamacpp" so
 # that container-to-container traffic stays on the shared bridge network.
-VLLM_BASE_URL="${VLLM_BASE_URL:-http://vllm:8000/v1}"
-VLLM_API_KEY="${VLLM_API_KEY:-EMPTY}"
-VLLM_MODEL_NAME="${VLLM_MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
-VLLM_MAX_TOKENS="${VLLM_MAX_TOKENS:-4096}"
-VLLM_TEMPERATURE="${VLLM_TEMPERATURE:-0.7}"
+LLAMACPP_BASE_URL="${LLAMACPP_BASE_URL:-http://llamacpp:8000/v1}"
+LLAMACPP_API_KEY="${LLAMACPP_API_KEY:-EMPTY}"
+LLAMACPP_MODEL_NAME="${LLAMACPP_MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
+LLAMACPP_MAX_TOKENS="${LLAMACPP_MAX_TOKENS:-4096}"
+LLAMACPP_TEMPERATURE="${LLAMACPP_TEMPERATURE:-0.7}"
 
-# --- vLLM readiness wait parameters (used by the entrypoint inside the container) ---
-VLLM_HEALTH_RETRIES="${VLLM_HEALTH_RETRIES:-60}"
-VLLM_HEALTH_INTERVAL="${VLLM_HEALTH_INTERVAL:-5}"
+# --- llama.cpp readiness wait parameters (used by the entrypoint inside the container) ---
+LLAMACPP_HEALTH_RETRIES="${LLAMACPP_HEALTH_RETRIES:-60}"
+LLAMACPP_HEALTH_INTERVAL="${LLAMACPP_HEALTH_INTERVAL:-5}"
 
 # --- OpenClaw dashboard port ---
 # OPENCLAW_PORT      : port the dashboard listens on inside the container
@@ -134,11 +134,11 @@ CONTAINER_NAME="${OPENCLAW_CONTAINER_NAME:-democlaw-openclaw}"
 IMAGE_TAG="${OPENCLAW_IMAGE_TAG:-docker.io/jinwangmok/democlaw-openclaw:v1.0.0}"
 NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
 
-# --- vLLM container name for pre-flight checks ---
-VLLM_CONTAINER_NAME="${VLLM_CONTAINER_NAME:-democlaw-vllm}"
+# --- llama.cpp container name for pre-flight checks ---
+LLAMACPP_CONTAINER_NAME="${LLAMACPP_CONTAINER_NAME:-democlaw-llamacpp}"
 
-# --- vLLM host port (used in post-start success banners to show host endpoint) ---
-VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
+# --- llama.cpp host port (used in post-start success banners to show host endpoint) ---
+LLAMACPP_HOST_PORT="${LLAMACPP_HOST_PORT:-8000}"
 
 # --- Dashboard availability wait (host-side, after container starts) ---
 OPENCLAW_HEALTH_TIMEOUT="${OPENCLAW_HEALTH_TIMEOUT:-120}"
@@ -151,7 +151,7 @@ OPENCLAW_HEALTH_TIMEOUT="${OPENCLAW_HEALTH_TIMEOUT:-120}"
 if [ "$(uname -s)" != "Linux" ]; then
     error "Linux host required (detected: $(uname -s)).
   This script uses Linux-specific container networking to connect OpenClaw
-  to the vLLM container on the shared bridge network.
+  to the llama.cpp container on the shared bridge network.
   macOS and Windows are not supported."
 fi
 
@@ -176,9 +176,9 @@ log "Container runtime: ${RUNTIME} (podman=${RUNTIME_IS_PODMAN})"
 # ---------------------------------------------------------------------------
 # Step 2: Ensure the shared container network exists
 #
-# Both the vLLM container (alias: "vllm") and the OpenClaw container attach
-# to this network.  OpenClaw resolves the vLLM endpoint as:
-#   http://vllm:<port>/v1
+# Both the llama.cpp container (alias: "llamacpp") and the OpenClaw container attach
+# to this network.  OpenClaw resolves the llama.cpp endpoint as:
+#   http://llamacpp:<port>/v1
 # which is only reachable when both containers share this bridge network.
 # ---------------------------------------------------------------------------
 log "Ensuring shared network '${NETWORK_NAME}' exists ..."
@@ -188,45 +188,45 @@ log "Ensuring shared network '${NETWORK_NAME}' exists ..."
 runtime_ensure_network "${NETWORK_NAME}"
 
 # ---------------------------------------------------------------------------
-# Step 3: Verify the vLLM container is running and on the shared network
+# Step 3: Verify the llama.cpp container is running and on the shared network
 #
-# OpenClaw's container entrypoint will retry the vLLM health endpoint
-# internally (up to VLLM_HEALTH_RETRIES × VLLM_HEALTH_INTERVAL seconds),
-# so a missing vLLM container here is a warning rather than a hard error.
+# OpenClaw's container entrypoint will retry the llama.cpp health endpoint
+# internally (up to LLAMACPP_HEALTH_RETRIES × LLAMACPP_HEALTH_INTERVAL seconds),
+# so a missing llama.cpp container here is a warning rather than a hard error.
 # This check gives the operator early, actionable feedback.
 # ---------------------------------------------------------------------------
-log "Verifying vLLM container '${VLLM_CONTAINER_NAME}' ..."
+log "Verifying llama.cpp container '${LLAMACPP_CONTAINER_NAME}' ..."
 
-if ! "${RUNTIME}" container inspect "${VLLM_CONTAINER_NAME}" > /dev/null 2>&1; then
-    warn "vLLM container '${VLLM_CONTAINER_NAME}' does not exist."
-    warn "OpenClaw will start but will wait internally for vLLM to become available."
-    warn "Start vLLM first with:  ./scripts/run_vllm.sh"
+if ! "${RUNTIME}" container inspect "${LLAMACPP_CONTAINER_NAME}" > /dev/null 2>&1; then
+    warn "llama.cpp container '${LLAMACPP_CONTAINER_NAME}' does not exist."
+    warn "OpenClaw will start but will wait internally for llama.cpp to become available."
+    warn "Start llama.cpp first with:  ./scripts/run_llamacpp.sh"
     warn ""
 else
-    vllm_state=$("${RUNTIME}" container inspect \
-        --format '{{.State.Status}}' "${VLLM_CONTAINER_NAME}" 2>/dev/null \
+    llamacpp_state=$("${RUNTIME}" container inspect \
+        --format '{{.State.Status}}' "${LLAMACPP_CONTAINER_NAME}" 2>/dev/null \
         || echo "unknown")
 
-    if [ "${vllm_state}" != "running" ]; then
-        warn "vLLM container '${VLLM_CONTAINER_NAME}' is not running (state: ${vllm_state})."
-        warn "OpenClaw will start and wait for vLLM at: ${VLLM_BASE_URL}"
-        warn "Start vLLM with:  ./scripts/run_vllm.sh"
+    if [ "${llamacpp_state}" != "running" ]; then
+        warn "llama.cpp container '${LLAMACPP_CONTAINER_NAME}' is not running (state: ${llamacpp_state})."
+        warn "OpenClaw will start and wait for llama.cpp at: ${LLAMACPP_BASE_URL}"
+        warn "Start llama.cpp with:  ./scripts/run_llamacpp.sh"
         warn ""
     else
-        # Verify the vLLM container is attached to the shared network so the
-        # "vllm" hostname alias resolves within OpenClaw's network scope.
-        vllm_networks=$("${RUNTIME}" container inspect \
+        # Verify the llama.cpp container is attached to the shared network so the
+        # "llamacpp" hostname alias resolves within OpenClaw's network scope.
+        llamacpp_networks=$("${RUNTIME}" container inspect \
             --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}' \
-            "${VLLM_CONTAINER_NAME}" 2>/dev/null | tr -s ' ' || echo "")
+            "${LLAMACPP_CONTAINER_NAME}" 2>/dev/null | tr -s ' ' || echo "")
 
-        if echo "${vllm_networks}" | grep -qw "${NETWORK_NAME}"; then
-            log "vLLM container is running and attached to '${NETWORK_NAME}'."
-            log "OpenClaw will reach vLLM via network alias: ${VLLM_BASE_URL}"
+        if echo "${llamacpp_networks}" | grep -qw "${NETWORK_NAME}"; then
+            log "llama.cpp container is running and attached to '${NETWORK_NAME}'."
+            log "OpenClaw will reach llama.cpp via network alias: ${LLAMACPP_BASE_URL}"
         else
-            warn "vLLM container '${VLLM_CONTAINER_NAME}' is running but NOT on '${NETWORK_NAME}'."
-            warn "Attached networks: ${vllm_networks:-<none detected>}"
-            warn "The hostname 'vllm' may not resolve inside OpenClaw."
-            warn "Ensure vLLM was started with:  ./scripts/run_vllm.sh"
+            warn "llama.cpp container '${LLAMACPP_CONTAINER_NAME}' is running but NOT on '${NETWORK_NAME}'."
+            warn "Attached networks: ${llamacpp_networks:-<none detected>}"
+            warn "The hostname 'llamacpp' may not resolve inside OpenClaw."
+            warn "Ensure llama.cpp was started with:  ./scripts/run_llamacpp.sh"
             warn ""
         fi
     fi
@@ -278,26 +278,26 @@ ensure_image "${IMAGE_TAG}" "${PROJECT_ROOT}/openclaw"
 #   -p OPENCLAW_HOST_PORT:...   Publish dashboard port on the Linux host
 #
 #   OpenAI-compatible provider env vars (three sets for maximum compatibility):
-#   ① vLLM-specific vars consumed by the container entrypoint:
-#       VLLM_BASE_URL           URL of the OpenAI-compatible API endpoint
-#       VLLM_API_KEY            API key (vLLM accepts any non-empty value)
-#       VLLM_MODEL_NAME         Model ID to request (must match vLLM's served model)
-#       VLLM_MAX_TOKENS         Max tokens per response
-#       VLLM_TEMPERATURE        Sampling temperature
-#       VLLM_HEALTH_RETRIES     How many times to retry the vLLM health probe
-#       VLLM_HEALTH_INTERVAL    Seconds between health probe retries
+#   ① llama.cpp-specific vars consumed by the container entrypoint:
+#       LLAMACPP_BASE_URL           URL of the OpenAI-compatible API endpoint
+#       LLAMACPP_API_KEY            API key (llama.cpp accepts any non-empty value)
+#       LLAMACPP_MODEL_NAME         Model ID to request (must match llama.cpp's served model)
+#       LLAMACPP_MAX_TOKENS         Max tokens per response
+#       LLAMACPP_TEMPERATURE        Sampling temperature
+#       LLAMACPP_HEALTH_RETRIES     How many times to retry the llama.cpp health probe
+#       LLAMACPP_HEALTH_INTERVAL    Seconds between health probe retries
 #   ② Standard OpenAI SDK env vars (honoured by openai / LangChain / LiteLLM):
 #       OPENAI_API_BASE         (legacy LangChain convention)
 #       OPENAI_BASE_URL         (current openai-node / openai-python convention)
-#       OPENAI_API_KEY          Must be non-empty; vLLM accepts any value
+#       OPENAI_API_KEY          Must be non-empty; llama.cpp accepts any value
 #       OPENAI_MODEL            Model ID for client libraries that read this var
 #   ③ OpenClaw-specific env vars (OPENCLAW_LLM_*):
-#       OPENCLAW_LLM_PROVIDER   "openai-compatible" selects vLLM as the backend
-#       OPENCLAW_LLM_BASE_URL   Mirrors VLLM_BASE_URL
-#       OPENCLAW_LLM_API_KEY    Mirrors VLLM_API_KEY
-#       OPENCLAW_LLM_MODEL      Mirrors VLLM_MODEL_NAME
-#       OPENCLAW_LLM_MAX_TOKENS Mirrors VLLM_MAX_TOKENS
-#       OPENCLAW_LLM_TEMPERATURE Mirrors VLLM_TEMPERATURE
+#       OPENCLAW_LLM_PROVIDER   "openai-compatible" selects llama.cpp as the backend
+#       OPENCLAW_LLM_BASE_URL   Mirrors LLAMACPP_BASE_URL
+#       OPENCLAW_LLM_API_KEY    Mirrors LLAMACPP_API_KEY
+#       OPENCLAW_LLM_MODEL      Mirrors LLAMACPP_MODEL_NAME
+#       OPENCLAW_LLM_MAX_TOKENS Mirrors LLAMACPP_MAX_TOKENS
+#       OPENCLAW_LLM_TEMPERATURE Mirrors LLAMACPP_TEMPERATURE
 #
 #   Security flags:
 #   --cap-drop ALL              Drop all Linux capabilities (minimal surface)
@@ -313,11 +313,11 @@ log "  Container  : ${CONTAINER_NAME}"
 log "  Image      : ${IMAGE_TAG}"
 log "  Network    : ${NETWORK_NAME} (alias: openclaw)"
 log "  Dashboard  : host:${OPENCLAW_HOST_PORT} -> container:${OPENCLAW_PORT}"
-log "  vLLM URL   : ${VLLM_BASE_URL}"
-log "  Model      : ${VLLM_MODEL_NAME}"
-log "  API Key    : ${VLLM_API_KEY:0:4}****"
-log "  Max tokens : ${VLLM_MAX_TOKENS}"
-log "  Temperature: ${VLLM_TEMPERATURE}"
+log "  llama.cpp URL   : ${LLAMACPP_BASE_URL}"
+log "  Model      : ${LLAMACPP_MODEL_NAME}"
+log "  API Key    : ${LLAMACPP_API_KEY:0:4}****"
+log "  Max tokens : ${LLAMACPP_MAX_TOKENS}"
+log "  Temperature: ${LLAMACPP_TEMPERATURE}"
 log "======================================================="
 
 "${RUNTIME}" run -d \
@@ -327,25 +327,25 @@ log "======================================================="
     --network-alias openclaw \
     --restart unless-stopped \
     -p "${OPENCLAW_HOST_PORT}:${OPENCLAW_PORT}" \
-    -e "VLLM_BASE_URL=${VLLM_BASE_URL}" \
-    -e "VLLM_API_KEY=${VLLM_API_KEY}" \
-    -e "VLLM_MODEL_NAME=${VLLM_MODEL_NAME}" \
-    -e "VLLM_MAX_TOKENS=${VLLM_MAX_TOKENS}" \
-    -e "VLLM_TEMPERATURE=${VLLM_TEMPERATURE}" \
-    -e "VLLM_HEALTH_RETRIES=${VLLM_HEALTH_RETRIES}" \
-    -e "VLLM_HEALTH_INTERVAL=${VLLM_HEALTH_INTERVAL}" \
+    -e "LLAMACPP_BASE_URL=${LLAMACPP_BASE_URL}" \
+    -e "LLAMACPP_API_KEY=${LLAMACPP_API_KEY}" \
+    -e "LLAMACPP_MODEL_NAME=${LLAMACPP_MODEL_NAME}" \
+    -e "LLAMACPP_MAX_TOKENS=${LLAMACPP_MAX_TOKENS}" \
+    -e "LLAMACPP_TEMPERATURE=${LLAMACPP_TEMPERATURE}" \
+    -e "LLAMACPP_HEALTH_RETRIES=${LLAMACPP_HEALTH_RETRIES}" \
+    -e "LLAMACPP_HEALTH_INTERVAL=${LLAMACPP_HEALTH_INTERVAL}" \
     -e "OPENCLAW_PORT=${OPENCLAW_PORT}" \
     -e "OPENCLAW_HOST=0.0.0.0" \
-    -e "OPENAI_API_BASE=${VLLM_BASE_URL}" \
-    -e "OPENAI_BASE_URL=${VLLM_BASE_URL}" \
-    -e "OPENAI_API_KEY=${VLLM_API_KEY}" \
-    -e "OPENAI_MODEL=${VLLM_MODEL_NAME}" \
+    -e "OPENAI_API_BASE=${LLAMACPP_BASE_URL}" \
+    -e "OPENAI_BASE_URL=${LLAMACPP_BASE_URL}" \
+    -e "OPENAI_API_KEY=${LLAMACPP_API_KEY}" \
+    -e "OPENAI_MODEL=${LLAMACPP_MODEL_NAME}" \
     -e "OPENCLAW_LLM_PROVIDER=openai-compatible" \
-    -e "OPENCLAW_LLM_BASE_URL=${VLLM_BASE_URL}" \
-    -e "OPENCLAW_LLM_API_KEY=${VLLM_API_KEY}" \
-    -e "OPENCLAW_LLM_MODEL=${VLLM_MODEL_NAME}" \
-    -e "OPENCLAW_LLM_MAX_TOKENS=${VLLM_MAX_TOKENS}" \
-    -e "OPENCLAW_LLM_TEMPERATURE=${VLLM_TEMPERATURE}" \
+    -e "OPENCLAW_LLM_BASE_URL=${LLAMACPP_BASE_URL}" \
+    -e "OPENCLAW_LLM_API_KEY=${LLAMACPP_API_KEY}" \
+    -e "OPENCLAW_LLM_MODEL=${LLAMACPP_MODEL_NAME}" \
+    -e "OPENCLAW_LLM_MAX_TOKENS=${LLAMACPP_MAX_TOKENS}" \
+    -e "OPENCLAW_LLM_TEMPERATURE=${LLAMACPP_TEMPERATURE}" \
     --cap-drop ALL \
     --security-opt no-new-privileges \
     --read-only \
@@ -356,7 +356,7 @@ log "======================================================="
 
 log "Container '${CONTAINER_NAME}' started."
 log ""
-log "OpenClaw is starting up and waiting for the vLLM server ..."
+log "OpenClaw is starting up and waiting for the llama.cpp server ..."
 log "Monitor progress with:"
 log "  ${RUNTIME} logs -f ${CONTAINER_NAME}"
 log ""
@@ -458,8 +458,8 @@ while [ "${elapsed}" -lt "${OPENCLAW_HEALTH_TIMEOUT}" ]; do
                 log "  Healthcheck: ${hc_status}"
                 log "============================================="
                 log ""
-                log "vLLM OpenAI-compatible endpoint (from host):"
-                log "  http://localhost:${VLLM_HOST_PORT:-8000}/v1"
+                log "llama.cpp OpenAI-compatible endpoint (from host):"
+                log "  http://localhost:${LLAMACPP_HOST_PORT:-8000}/v1"
                 log ""
                 log "To stop both containers:"
                 log "  ./scripts/stop.sh"
@@ -477,8 +477,8 @@ while [ "${elapsed}" -lt "${OPENCLAW_HEALTH_TIMEOUT}" ]; do
                 log "  Healthcheck: not configured (HTTP 200 OK)"
                 log "============================================="
                 log ""
-                log "vLLM OpenAI-compatible endpoint (from host):"
-                log "  http://localhost:${VLLM_HOST_PORT:-8000}/v1"
+                log "llama.cpp OpenAI-compatible endpoint (from host):"
+                log "  http://localhost:${LLAMACPP_HOST_PORT:-8000}/v1"
                 log ""
                 log "To stop both containers:"
                 log "  ./scripts/stop.sh"
@@ -529,8 +529,8 @@ if [ "${http_ready}" = "true" ]; then
     log "may still be running its first probe — this is normal for large model loads."
     log "Monitor with:  ${RUNTIME} inspect --format '{{json .State.Health}}' ${CONTAINER_NAME}"
     log ""
-    log "vLLM OpenAI-compatible endpoint (from host):"
-    log "  http://localhost:${VLLM_HOST_PORT:-8000}/v1"
+    log "llama.cpp OpenAI-compatible endpoint (from host):"
+    log "  http://localhost:${LLAMACPP_HOST_PORT:-8000}/v1"
     log ""
     log "To stop both containers:"
     log "  ./scripts/stop.sh"
@@ -547,13 +547,13 @@ warn "============================================="
 warn "  Dashboard  : ${DASHBOARD_URL}"
 warn "  Healthcheck: ${hc_status_final}"
 warn "  OpenClaw logs : ${RUNTIME} logs -f ${CONTAINER_NAME}"
-warn "  vLLM logs     : ${RUNTIME} logs -f ${VLLM_CONTAINER_NAME}"
+warn "  llama.cpp logs     : ${RUNTIME} logs -f ${LLAMACPP_CONTAINER_NAME}"
 warn "============================================="
 warn ""
 warn "The Qwen3-4B AWQ model can take several minutes to load on first run."
 warn "Re-check the dashboard in a few minutes, or increase OPENCLAW_HEALTH_TIMEOUT:"
 warn "  OPENCLAW_HEALTH_TIMEOUT=300 ./scripts/run_openclaw.sh"
 warn ""
-warn "If vLLM is not yet running, start it first:"
-warn "  ./scripts/run_vllm.sh"
+warn "If llama.cpp is not yet running, start it first:"
+warn "  ./scripts/run_llamacpp.sh"
 exit 1

@@ -271,7 +271,7 @@ elseif ($checksumAvailable) {
             Write-DlLog "  Model     : $ModelName"
             Write-DlLog "  Cache dir : $CacheDir"
             Write-DlLog ""
-            Write-DlLog "  vLLM will use this cache on next startup."
+            Write-DlLog "  llama.cpp will use this cache on next startup."
             Write-DlLog "  Start the stack with: .\scripts\start.sh (WSL2) or scripts\windows\start.bat"
             Write-DlLog "======================================================="
             exit 0
@@ -618,6 +618,6 @@ if ($checksumAvailable) {
 }
 Write-DlLog "  Resume    : Supported (interrupted downloads resume automatically)"
 Write-DlLog ""
-Write-DlLog "  vLLM will use this cache on next startup."
+Write-DlLog "  llama.cpp will use this cache on next startup."
 Write-DlLog "  Start the stack with: .\scripts\start.sh (WSL2) or scripts\windows\start.bat"
 Write-DlLog "======================================================="

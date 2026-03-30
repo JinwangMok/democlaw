@@ -355,7 +355,7 @@ _section "Test 9: all orchestration scripts source lib/runtime.sh"
 
 for script in \
     "${SCRIPT_DIR}/start.sh" \
-    "${SCRIPT_DIR}/start-vllm.sh" \
+    "${SCRIPT_DIR}/start-llamacpp.sh" \
     "${SCRIPT_DIR}/start-openclaw.sh" \
     "${SCRIPT_DIR}/stop.sh" \
     "${SCRIPT_DIR}/healthcheck.sh" \

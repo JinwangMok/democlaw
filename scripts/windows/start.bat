@@ -1,12 +1,12 @@
 @echo off
 :: =============================================================================
-:: start.bat -- Full E2E startup for the DemoClaw stack (vLLM + OpenClaw)
+:: start.bat -- Full E2E startup for the DemoClaw stack (llama.cpp + OpenClaw)
 ::
 :: This single script handles the entire lifecycle:
 ::   1. Clean up old containers/network
 ::   2. Build images (always rebuild to pick up Dockerfile changes)
 ::   3. Create network
-::   4. Start vLLM, wait for /health + /v1/models
+::   4. Start llama.cpp, wait for /health + /v1/models
 ::   5. Start OpenClaw, wait for dashboard
 ::   6. Print tokenized dashboard URL
 ::
@@ -29,27 +29,27 @@ for %%i in ("%SCRIPT_DIR%\..\..") do set "PROJECT_ROOT=%%~fi"
 :: ---------------------------------------------------------------------------
 :: Configuration
 :: ---------------------------------------------------------------------------
-if not defined DEMOCLAW_VLLM_IMAGE    set "DEMOCLAW_VLLM_IMAGE=jinwangmok/democlaw-vllm:v1.0.0"
+if not defined DEMOCLAW_LLAMACPP_IMAGE    set "DEMOCLAW_LLAMACPP_IMAGE=jinwangmok/democlaw-llamacpp:v1.0.0"
 if not defined DEMOCLAW_OPENCLAW_IMAGE set "DEMOCLAW_OPENCLAW_IMAGE=jinwangmok/democlaw-openclaw:v1.0.0"
-set "VLLM_IMAGE=%DEMOCLAW_VLLM_IMAGE%"
+set "LLAMACPP_IMAGE=%DEMOCLAW_LLAMACPP_IMAGE%"
 set "OPENCLAW_IMAGE=%DEMOCLAW_OPENCLAW_IMAGE%"
 set "NETWORK=democlaw-net"
-set "VLLM_CONTAINER=democlaw-vllm"
+set "LLAMACPP_CONTAINER=democlaw-llamacpp"
 set "OPENCLAW_CONTAINER=democlaw-openclaw"
 set "MODEL_NAME=Qwen/Qwen3-4B-AWQ"
 
-:: vLLM tuning for 8GB VRAM
+:: llama.cpp tuning for 8GB VRAM
 set "MAX_MODEL_LEN=16384"
 set "QUANTIZATION=awq_marlin"
 set "DTYPE=float16"
 set "GPU_MEMORY_UTILIZATION=0.95"
 
 :: Ports
-set "VLLM_PORT=8000"
+set "LLAMACPP_PORT=8000"
 set "OPENCLAW_PORT=18789"
 
 :: Timeouts (seconds)
-set "VLLM_HEALTH_TIMEOUT=300"
+set "LLAMACPP_HEALTH_TIMEOUT=300"
 set "OPENCLAW_HEALTH_TIMEOUT=120"
 
 :: HuggingFace cache
@@ -105,7 +105,7 @@ echo [start] NVIDIA GPU OK.
 echo [start]
 echo [start] --- Phase 0: Cleanup ---
 
-for %%c in (%OPENCLAW_CONTAINER% %VLLM_CONTAINER%) do (
+for %%c in (%OPENCLAW_CONTAINER% %LLAMACPP_CONTAINER%) do (
     %RUNTIME% container inspect "%%c" >nul 2>&1
     if not errorlevel 1 (
         echo [start] Removing old container '%%c' ...
@@ -125,19 +125,19 @@ if not errorlevel 1 (
 echo [start]
 echo [start] --- Phase 1: Acquire images ---
 
-:: --- vLLM image: pull first, build on failure ---
-echo [start] Pulling vLLM image '%VLLM_IMAGE%' from registry ...
-%RUNTIME% pull %VLLM_IMAGE% >nul 2>&1
+:: --- llama.cpp image: pull first, build on failure ---
+echo [start] Pulling llama.cpp image '%LLAMACPP_IMAGE%' from registry ...
+%RUNTIME% pull %LLAMACPP_IMAGE% >nul 2>&1
 if errorlevel 1 (
-    echo [start] WARNING: Pull failed for '%VLLM_IMAGE%'. Falling back to local build ...
-    %RUNTIME% build -t %VLLM_IMAGE% "%PROJECT_ROOT%\vllm"
+    echo [start] WARNING: Pull failed for '%LLAMACPP_IMAGE%'. Falling back to local build ...
+    %RUNTIME% build -t %LLAMACPP_IMAGE% "%PROJECT_ROOT%\llamacpp"
     if errorlevel 1 (
-        echo [start] ERROR: Both pull and local build failed for vLLM image.
+        echo [start] ERROR: Both pull and local build failed for llama.cpp image.
         exit /b 1
     )
-    echo [start] vLLM image built locally.
+    echo [start] llama.cpp image built locally.
 ) else (
-    echo [start] vLLM image pulled from registry.
+    echo [start] llama.cpp image pulled from registry.
 )
 
 :: --- OpenClaw image: pull first, build on failure ---
@@ -158,10 +158,10 @@ if errorlevel 1 (
 echo [start] Images ready.
 
 :: ===========================================================================
-:: Phase 2: Create network + start vLLM
+:: Phase 2: Create network + start llama.cpp
 :: ===========================================================================
 echo [start]
-echo [start] --- Phase 2: Start vLLM ---
+echo [start] --- Phase 2: Start llama.cpp ---
 
 echo [start] Creating network '%NETWORK%' ...
 %RUNTIME% network create %NETWORK%
@@ -173,93 +173,92 @@ if errorlevel 1 (
 :: Ensure HF cache dir exists
 if not exist "%HF_CACHE_DIR%" mkdir "%HF_CACHE_DIR%" 2>nul
 
-echo [start] Starting vLLM container ...
+echo [start] Starting llama.cpp container ...
 echo [start]   Model        : %MODEL_NAME%
 echo [start]   Quantization : %QUANTIZATION%
 echo [start]   Context      : %MAX_MODEL_LEN%
 echo [start]   GPU mem util : %GPU_MEMORY_UTILIZATION%
 
 %RUNTIME% run -d ^
-    --name %VLLM_CONTAINER% ^
+    --name %LLAMACPP_CONTAINER% ^
     --network %NETWORK% ^
-    --hostname vllm ^
-    --network-alias vllm ^
+    --hostname llamacpp ^
+    --network-alias llamacpp ^
     %GPU_FLAGS% ^
     --restart unless-stopped ^
     --shm-size 1g ^
-    -p %VLLM_PORT%:%VLLM_PORT% ^
+    -p %LLAMACPP_PORT%:%LLAMACPP_PORT% ^
     -v "%HF_CACHE_DIR%:/root/.cache/huggingface:rw" ^
     -e "MODEL_NAME=%MODEL_NAME%" ^
     -e "MAX_MODEL_LEN=%MAX_MODEL_LEN%" ^
     -e "GPU_MEMORY_UTILIZATION=%GPU_MEMORY_UTILIZATION%" ^
     -e "QUANTIZATION=%QUANTIZATION%" ^
     -e "DTYPE=%DTYPE%" ^
-    -e "VLLM_ATTENTION_BACKEND=FLASHINFER" ^
-    %VLLM_IMAGE%
+    %LLAMACPP_IMAGE%
 
 if errorlevel 1 (
-    echo [start] ERROR: Failed to start vLLM container.
+    echo [start] ERROR: Failed to start llama.cpp container.
     exit /b 1
 )
 
-echo [start] vLLM container started. Waiting for health ...
+echo [start] llama.cpp container started. Waiting for health ...
 
 :: ---------------------------------------------------------------------------
-:: Wait for vLLM /health
+:: Wait for llama.cpp /health
 :: ---------------------------------------------------------------------------
 set /a "elapsed=0"
 
-:vllm_health_loop
-if %elapsed% geq %VLLM_HEALTH_TIMEOUT% (
-    echo [start] ERROR: vLLM did not become healthy within %VLLM_HEALTH_TIMEOUT%s.
-    echo [start] Check logs: %RUNTIME% logs %VLLM_CONTAINER%
+:llamacpp_health_loop
+if %elapsed% geq %LLAMACPP_HEALTH_TIMEOUT% (
+    echo [start] ERROR: llama.cpp did not become healthy within %LLAMACPP_HEALTH_TIMEOUT%s.
+    echo [start] Check logs: %RUNTIME% logs %LLAMACPP_CONTAINER%
     exit /b 1
 )
 
 :: Check container still alive
-for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" %VLLM_CONTAINER% 2^>nul') do set "CSTATE=%%s"
+for /f "tokens=*" %%s in ('%RUNTIME% container inspect --format "{{.State.Status}}" %LLAMACPP_CONTAINER% 2^>nul') do set "CSTATE=%%s"
 if "!CSTATE!"=="exited" (
-    echo [start] ERROR: vLLM container exited unexpectedly.
-    %RUNTIME% logs --tail 20 %VLLM_CONTAINER% 2>&1
+    echo [start] ERROR: llama.cpp container exited unexpectedly.
+    %RUNTIME% logs --tail 20 %LLAMACPP_CONTAINER% 2>&1
     exit /b 1
 )
 
-curl -sf http://localhost:%VLLM_PORT%/health >nul 2>&1
+curl -sf http://localhost:%LLAMACPP_PORT%/health >nul 2>&1
 if not errorlevel 1 (
-    echo [start] vLLM /health OK.
-    goto :vllm_models_check
+    echo [start] llama.cpp /health OK.
+    goto :llamacpp_models_check
 )
 
 timeout /t 5 >nul 2>&1
 set /a "elapsed=elapsed+5"
 if !elapsed! geq 10 (
     set /a "mod=elapsed %% 30"
-    if !mod! equ 0 echo [start]   ... vLLM loading (%elapsed%/%VLLM_HEALTH_TIMEOUT%s)
+    if !mod! equ 0 echo [start]   ... llama.cpp loading (%elapsed%/%LLAMACPP_HEALTH_TIMEOUT%s)
 )
-goto :vllm_health_loop
+goto :llamacpp_health_loop
 
 :: ---------------------------------------------------------------------------
 :: Verify /v1/models
 :: ---------------------------------------------------------------------------
-:vllm_models_check
+:llamacpp_models_check
 echo [start] Checking /v1/models ...
 set /a "models_elapsed=0"
 
-:vllm_models_loop
+:llamacpp_models_loop
 if %models_elapsed% geq 60 (
     echo [start] WARNING: /v1/models not responding. Proceeding anyway.
     goto :start_openclaw
 )
 
-curl -sf http://localhost:%VLLM_PORT%/v1/models >nul 2>&1
+curl -sf http://localhost:%LLAMACPP_PORT%/v1/models >nul 2>&1
 if not errorlevel 1 (
-    echo [start] vLLM /v1/models OK. Model ready.
+    echo [start] llama.cpp /v1/models OK. Model ready.
     goto :start_openclaw
 )
 
 timeout /t 5 >nul 2>&1
 set /a "models_elapsed=models_elapsed+5"
-goto :vllm_models_loop
+goto :llamacpp_models_loop
 
 :: ===========================================================================
 :: Phase 3: Start OpenClaw
@@ -278,9 +277,9 @@ echo [start] Starting OpenClaw container ...
     --restart unless-stopped ^
     -p %OPENCLAW_PORT%:%OPENCLAW_PORT% ^
     -p 18791:18791 ^
-    -e "VLLM_BASE_URL=http://vllm:8000/v1" ^
-    -e "VLLM_API_KEY=EMPTY" ^
-    -e "VLLM_MODEL_NAME=%MODEL_NAME%" ^
+    -e "LLAMACPP_BASE_URL=http://llamacpp:8000/v1" ^
+    -e "LLAMACPP_API_KEY=EMPTY" ^
+    -e "LLAMACPP_MODEL_NAME=%MODEL_NAME%" ^
     -e "OPENCLAW_PORT=%OPENCLAW_PORT%" ^
     %OPENCLAW_IMAGE%
 
@@ -333,7 +332,7 @@ echo [start] ========================================================
 echo [start]   DemoClaw is running!
 echo [start] ========================================================
 echo [start]
-echo [start]   vLLM API : http://localhost:%VLLM_PORT%/v1
+echo [start]   llama.cpp API : http://localhost:%LLAMACPP_PORT%/v1
 echo [start]   Model    : %MODEL_NAME%
 echo [start]   Runtime  : %RUNTIME%
 echo [start]

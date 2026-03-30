@@ -1,15 +1,15 @@
 @echo off
 :: =============================================================================
-:: healthcheck.bat -- Verify vLLM and OpenClaw containers are healthy
+:: healthcheck.bat -- Verify llama.cpp and OpenClaw containers are healthy
 ::
 :: Checks:
 ::   1. Container runtime (docker or podman) is available
 ::   2. Container network democlaw-net exists
-::   3. vLLM container is running
-::   4. vLLM /health endpoint responds HTTP 200
-::   5. vLLM /v1/models endpoint lists at least one model
-::   6. OpenClaw container is running (unless --vllm-only)
-::   7. OpenClaw dashboard responds HTTP 2xx (unless --vllm-only)
+::   3. llama.cpp container is running
+::   4. llama.cpp /health endpoint responds HTTP 200
+::   5. llama.cpp /v1/models endpoint lists at least one model
+::   6. OpenClaw container is running (unless --llamacpp-only)
+::   7. OpenClaw dashboard responds HTTP 2xx (unless --llamacpp-only)
 ::
 :: Exit codes:
 ::   0 -- All checks passed (or only warnings)
@@ -17,7 +17,7 @@
 ::
 :: Usage:
 ::   scripts\windows\healthcheck.bat
-::   scripts\windows\healthcheck.bat --vllm-only
+::   scripts\windows\healthcheck.bat --llamacpp-only
 ::   set CONTAINER_RUNTIME=podman && scripts\windows\healthcheck.bat
 :: =============================================================================
 setlocal EnableDelayedExpansion
@@ -25,9 +25,9 @@ setlocal EnableDelayedExpansion
 :: ---------------------------------------------------------------------------
 :: Parse arguments
 :: ---------------------------------------------------------------------------
-set "VLLM_ONLY=false"
+set "LLAMACPP_ONLY=false"
 for %%a in (%*) do (
-    if "%%a"=="--vllm-only" set "VLLM_ONLY=true"
+    if "%%a"=="--llamacpp-only" set "LLAMACPP_ONLY=true"
     if "%%a"=="--help"      goto :show_help
     if "%%a"=="-h"          goto :show_help
 )
@@ -59,15 +59,15 @@ if exist "%ENV_FILE%" (
 :: ---------------------------------------------------------------------------
 :: Defaults
 :: ---------------------------------------------------------------------------
-if not defined VLLM_CONTAINER_NAME    set "VLLM_CONTAINER_NAME=democlaw-vllm"
+if not defined LLAMACPP_CONTAINER_NAME    set "LLAMACPP_CONTAINER_NAME=democlaw-llamacpp"
 if not defined OPENCLAW_CONTAINER_NAME set "OPENCLAW_CONTAINER_NAME=democlaw-openclaw"
 if not defined DEMOCLAW_NETWORK        set "DEMOCLAW_NETWORK=democlaw-net"
-if not defined VLLM_HOST_PORT          set "VLLM_HOST_PORT=8000"
+if not defined LLAMACPP_HOST_PORT          set "LLAMACPP_HOST_PORT=8000"
 if not defined OPENCLAW_HOST_PORT      set "OPENCLAW_HOST_PORT=18789"
 if not defined MODEL_NAME              set "MODEL_NAME=Qwen/Qwen3-4B-AWQ"
 if not defined HEALTHCHECK_CURL_TIMEOUT set "HEALTHCHECK_CURL_TIMEOUT=10"
 
-set "VLLM_BASE_URL=http://localhost:%VLLM_HOST_PORT%"
+set "LLAMACPP_BASE_URL=http://localhost:%LLAMACPP_HOST_PORT%"
 set "OPENCLAW_URL=http://localhost:%OPENCLAW_HOST_PORT%"
 
 :: ---------------------------------------------------------------------------
@@ -112,57 +112,57 @@ if errorlevel 1 (
 )
 
 :: ---------------------------------------------------------------------------
-:: 3. vLLM container state
+:: 3. llama.cpp container state
 :: ---------------------------------------------------------------------------
-echo [healthcheck] Checking vLLM service ...
-call :check_container_running "%VLLM_CONTAINER_NAME%" "vLLM"
-set "VLLM_CONTAINER_OK=!_CONTAINER_OK!"
+echo [healthcheck] Checking llama.cpp service ...
+call :check_container_running "%LLAMACPP_CONTAINER_NAME%" "llama.cpp"
+set "LLAMACPP_CONTAINER_OK=!_CONTAINER_OK!"
 
 :: ---------------------------------------------------------------------------
-:: 4. vLLM /health endpoint
+:: 4. llama.cpp /health endpoint
 :: ---------------------------------------------------------------------------
-echo [healthcheck] Checking vLLM health endpoint ...
-set "VLLM_HEALTHY=false"
-set "TMPCODE=%TEMP%\democlaw-hc-vllm-health-%RANDOM%.txt"
-curl -sf -o nul -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/health" >"%TMPCODE%" 2>nul
+echo [healthcheck] Checking llama.cpp health endpoint ...
+set "LLAMACPP_HEALTHY=false"
+set "TMPCODE=%TEMP%\democlaw-hc-llamacpp-health-%RANDOM%.txt"
+curl -sf -o nul -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%LLAMACPP_BASE_URL%/health" >"%TMPCODE%" 2>nul
 set /p "HTTP_CODE=" <"%TMPCODE%"
 del /f /q "%TMPCODE%" >nul 2>&1
 if not defined HTTP_CODE set "HTTP_CODE=000"
 if "%HTTP_CODE%"=="200" (
-    call :record_pass "vLLM /health endpoint" "HTTP 200"
-    set "VLLM_HEALTHY=true"
+    call :record_pass "llama.cpp /health endpoint" "HTTP 200"
+    set "LLAMACPP_HEALTHY=true"
 ) else (
-    call :record_fail "vLLM /health endpoint" "HTTP %HTTP_CODE% (expected 200) at %VLLM_BASE_URL%/health"
+    call :record_fail "llama.cpp /health endpoint" "HTTP %HTTP_CODE% (expected 200) at %LLAMACPP_BASE_URL%/health"
 )
 
 :: ---------------------------------------------------------------------------
-:: 5. vLLM /v1/models endpoint
+:: 5. llama.cpp /v1/models endpoint
 :: ---------------------------------------------------------------------------
-if "!VLLM_HEALTHY!"=="true" (
-    echo [healthcheck] Checking vLLM /v1/models endpoint ...
+if "!LLAMACPP_HEALTHY!"=="true" (
+    echo [healthcheck] Checking llama.cpp /v1/models endpoint ...
     set "TMPFILE=%TEMP%\democlaw-models-%RANDOM%.json"
-    set "TMPCODE=%TEMP%\democlaw-hc-vllm-models-%RANDOM%.txt"
-    curl -sf -o "!TMPFILE!" -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%VLLM_BASE_URL%/v1/models" >"!TMPCODE!" 2>nul
+    set "TMPCODE=%TEMP%\democlaw-hc-llamacpp-models-%RANDOM%.txt"
+    curl -sf -o "!TMPFILE!" -w "%%{http_code}" --max-time %HEALTHCHECK_CURL_TIMEOUT% "%LLAMACPP_BASE_URL%/v1/models" >"!TMPCODE!" 2>nul
     set /p "HTTP_CODE=" <"!TMPCODE!"
     del /f /q "!TMPCODE!" >nul 2>&1
     if not defined HTTP_CODE set "HTTP_CODE=000"
 
     if "!HTTP_CODE!"=="200" (
-        call :record_pass "vLLM /v1/models endpoint" "HTTP 200"
+        call :record_pass "llama.cpp /v1/models endpoint" "HTTP 200"
         :: Check if model name appears in response
         findstr /i "%MODEL_NAME%" "!TMPFILE!" >nul 2>&1
         if not errorlevel 1 (
-            call :record_pass "vLLM model loaded" "'%MODEL_NAME%' found in /v1/models"
+            call :record_pass "llama.cpp model loaded" "'%MODEL_NAME%' found in /v1/models"
         ) else (
-            call :record_warn "vLLM model loaded" "'%MODEL_NAME%' not confirmed in /v1/models response"
+            call :record_warn "llama.cpp model loaded" "'%MODEL_NAME%' not confirmed in /v1/models response"
         )
     ) else (
-        call :record_fail "vLLM /v1/models endpoint" "HTTP !HTTP_CODE! (expected 200)"
+        call :record_fail "llama.cpp /v1/models endpoint" "HTTP !HTTP_CODE! (expected 200)"
     )
     if exist "!TMPFILE!" del /f /q "!TMPFILE!" >nul 2>&1
 )
 
-if "%VLLM_ONLY%"=="true" goto :print_summary
+if "%LLAMACPP_ONLY%"=="true" goto :print_summary
 
 :: ---------------------------------------------------------------------------
 :: 6. OpenClaw container state
@@ -220,10 +220,10 @@ if %CHECKS_FAILED% gtr 0 (
 )
 
 :show_help
-echo Usage: %~nx0 [--vllm-only] [--help]
+echo Usage: %~nx0 [--llamacpp-only] [--help]
 echo.
 echo Options:
-echo   --vllm-only   Only check the vLLM service (skip OpenClaw)
+echo   --llamacpp-only   Only check the llama.cpp service (skip OpenClaw)
 echo   --help        Show this help message
 exit /b 0
 

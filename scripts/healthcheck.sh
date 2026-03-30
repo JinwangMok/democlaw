@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
-# healthcheck.sh — Verify vLLM and OpenClaw containers are healthy
+# healthcheck.sh — Verify llama.cpp and OpenClaw containers are healthy
 #
 # Checks that:
 #   1. The container runtime (docker/podman) is available
-#   2. The vLLM container is running
-#   3. The vLLM /health endpoint responds
-#   4. The vLLM /v1/models endpoint lists the expected model
-#   5. The vLLM /v1/chat/completions endpoint handles a test request
+#   2. The llama.cpp container is running
+#   3. The llama.cpp /health endpoint responds
+#   4. The llama.cpp /v1/models endpoint lists the expected model
+#   5. The llama.cpp /v1/chat/completions endpoint handles a test request
 #   6. (Optional) The OpenClaw container is running and dashboard responds
 #
 # Exit codes:
@@ -18,7 +18,7 @@
 #
 # Usage:
 #   ./scripts/healthcheck.sh              # check all services
-#   ./scripts/healthcheck.sh --vllm-only  # check vLLM only
+#   ./scripts/healthcheck.sh --llamacpp-only  # check llama.cpp only
 #   ./scripts/healthcheck.sh --json       # output results as JSON
 #   CONTAINER_RUNTIME=podman ./scripts/healthcheck.sh
 # =============================================================================
@@ -44,15 +44,15 @@ fi
 # ---------------------------------------------------------------------------
 # Configurable defaults (all overridable via environment or .env file)
 # ---------------------------------------------------------------------------
-VLLM_CONTAINER_NAME="${VLLM_CONTAINER_NAME:-democlaw-vllm}"
+LLAMACPP_CONTAINER_NAME="${LLAMACPP_CONTAINER_NAME:-democlaw-llamacpp}"
 OPENCLAW_CONTAINER_NAME="${OPENCLAW_CONTAINER_NAME:-democlaw-openclaw}"
 NETWORK_NAME="${DEMOCLAW_NETWORK:-democlaw-net}"
 
-VLLM_HOST_PORT="${VLLM_HOST_PORT:-8000}"
+LLAMACPP_HOST_PORT="${LLAMACPP_HOST_PORT:-8000}"
 OPENCLAW_HOST_PORT="${OPENCLAW_HOST_PORT:-18789}"
 MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-4B-AWQ}"
 
-VLLM_BASE_URL="http://localhost:${VLLM_HOST_PORT}"
+LLAMACPP_BASE_URL="http://localhost:${LLAMACPP_HOST_PORT}"
 OPENCLAW_URL="http://localhost:${OPENCLAW_HOST_PORT}"
 
 # Timeout for individual curl requests (seconds)
@@ -61,18 +61,18 @@ CURL_TIMEOUT="${HEALTHCHECK_CURL_TIMEOUT:-10}"
 # ---------------------------------------------------------------------------
 # Parse CLI flags
 # ---------------------------------------------------------------------------
-VLLM_ONLY=false
+LLAMACPP_ONLY=false
 JSON_OUTPUT=false
 
 for arg in "$@"; do
     case "${arg}" in
-        --vllm-only)  VLLM_ONLY=true ;;
+        --llamacpp-only)  LLAMACPP_ONLY=true ;;
         --json)       JSON_OUTPUT=true ;;
         --help|-h)
-            echo "Usage: $0 [--vllm-only] [--json] [--help]"
+            echo "Usage: $0 [--llamacpp-only] [--json] [--help]"
             echo ""
             echo "Options:"
-            echo "  --vllm-only   Only check the vLLM service (skip OpenClaw)"
+            echo "  --llamacpp-only   Only check the llama.cpp service (skip OpenClaw)"
             echo "  --json        Output results as JSON"
             echo "  --help        Show this help message"
             exit 0
@@ -249,30 +249,30 @@ check_container_health() {
 }
 
 # ---------------------------------------------------------------------------
-# Check: vLLM /health endpoint
+# Check: llama.cpp /health endpoint
 # ---------------------------------------------------------------------------
-check_vllm_health_endpoint() {
-    info "Checking vLLM health endpoint ..."
+check_llamacpp_health_endpoint() {
+    info "Checking llama.cpp health endpoint ..."
 
     local http_code
     http_code=$(curl -sf -o /dev/null -w "%{http_code}" \
         --max-time "${CURL_TIMEOUT}" \
-        "${VLLM_BASE_URL}/health" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/health" 2>/dev/null || echo "000")
 
     if [ "${http_code}" = "200" ]; then
-        record_pass "vLLM /health endpoint" "HTTP 200"
+        record_pass "llama.cpp /health endpoint" "HTTP 200"
         return 0
     else
-        record_fail "vLLM /health endpoint" "HTTP ${http_code} (expected 200) at ${VLLM_BASE_URL}/health"
+        record_fail "llama.cpp /health endpoint" "HTTP ${http_code} (expected 200) at ${LLAMACPP_BASE_URL}/health"
         return 1
     fi
 }
 
 # ---------------------------------------------------------------------------
-# Check: vLLM /v1/models endpoint — verifies OpenAI-compatible API works
+# Check: llama.cpp /v1/models endpoint — verifies OpenAI-compatible API works
 # ---------------------------------------------------------------------------
-check_vllm_models_endpoint() {
-    info "Checking vLLM /v1/models endpoint ..."
+check_llamacpp_models_endpoint() {
+    info "Checking llama.cpp /v1/models endpoint ..."
 
     local http_code
     local response
@@ -281,18 +281,18 @@ check_vllm_models_endpoint() {
 
     http_code=$(curl -sf -o "${tmpfile}" -w "%{http_code}" \
         --max-time "${CURL_TIMEOUT}" \
-        "${VLLM_BASE_URL}/v1/models" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/models" 2>/dev/null || echo "000")
 
     response=$(cat "${tmpfile}" 2>/dev/null || echo "")
     rm -f "${tmpfile}"
 
     if [ "${http_code}" = "000" ] || [ -z "${response}" ]; then
-        record_fail "vLLM /v1/models endpoint" "No response from ${VLLM_BASE_URL}/v1/models (HTTP ${http_code})"
+        record_fail "llama.cpp /v1/models endpoint" "No response from ${LLAMACPP_BASE_URL}/v1/models (HTTP ${http_code})"
         return 1
     fi
 
     if [ "${http_code}" != "200" ]; then
-        record_fail "vLLM /v1/models endpoint" "HTTP ${http_code} (expected 200)"
+        record_fail "llama.cpp /v1/models endpoint" "HTTP ${http_code} (expected 200)"
         return 1
     fi
 
@@ -325,20 +325,20 @@ except Exception:
     fi
 
     if [ "${is_valid_json}" != "true" ]; then
-        record_fail "vLLM /v1/models response" "Response is not valid JSON"
+        record_fail "llama.cpp /v1/models response" "Response is not valid JSON"
         return 1
     fi
 
     if [ "${model_count}" -le 0 ]; then
-        record_fail "vLLM /v1/models response" "No models listed in response"
+        record_fail "llama.cpp /v1/models response" "No models listed in response"
         return 1
     fi
 
-    record_pass "vLLM /v1/models endpoint" "HTTP 200 — ${model_count} model(s) available"
+    record_pass "llama.cpp /v1/models endpoint" "HTTP 200 — ${model_count} model(s) available"
 
     # Check if expected model is listed
     if echo "${response}" | grep -q "${MODEL_NAME}"; then
-        record_pass "vLLM model loaded" "'${MODEL_NAME}' found in /v1/models"
+        record_pass "llama.cpp model loaded" "'${MODEL_NAME}' found in /v1/models"
     else
         # Try to extract what models are available
         local models_listed
@@ -354,17 +354,17 @@ except Exception: print('parse-error')
         else
             models_listed=$(echo "${response}" | grep -oP '"id"\s*:\s*"\K[^"]+' | paste -sd ',' || echo "unknown")
         fi
-        record_warn "vLLM model loaded" "'${MODEL_NAME}' not found; available: ${models_listed}"
+        record_warn "llama.cpp model loaded" "'${MODEL_NAME}' not found; available: ${models_listed}"
     fi
 
     return 0
 }
 
 # ---------------------------------------------------------------------------
-# Check: vLLM /v1/chat/completions — end-to-end inference test
+# Check: llama.cpp /v1/chat/completions — end-to-end inference test
 # ---------------------------------------------------------------------------
-check_vllm_chat_completions() {
-    info "Checking vLLM /v1/chat/completions (inference test) ..."
+check_llamacpp_chat_completions() {
+    info "Checking llama.cpp /v1/chat/completions (inference test) ..."
 
     local payload
     payload=$(cat <<'PAYLOAD_EOF'
@@ -388,7 +388,7 @@ PAYLOAD_EOF
         --max-time 30 \
         -H "Content-Type: application/json" \
         -d "${payload}" \
-        "${VLLM_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
+        "${LLAMACPP_BASE_URL}/v1/chat/completions" 2>/dev/null || echo "000")
 
     response_body=$(cat "${tmpfile}" 2>/dev/null || echo "")
     rm -f "${tmpfile}"
@@ -409,13 +409,13 @@ except: print('error')
 " 2>/dev/null || echo "error")
 
         if [ "${has_choices}" = "yes" ]; then
-            record_pass "vLLM chat completions" "Inference working — HTTP 200 with valid response"
+            record_pass "llama.cpp chat completions" "Inference working — HTTP 200 with valid response"
         else
-            record_warn "vLLM chat completions" "HTTP 200 but response structure unexpected"
+            record_warn "llama.cpp chat completions" "HTTP 200 but response structure unexpected"
         fi
         return 0
     else
-        record_fail "vLLM chat completions" "HTTP ${http_code} at ${VLLM_BASE_URL}/v1/chat/completions"
+        record_fail "llama.cpp chat completions" "HTTP ${http_code} at ${LLAMACPP_BASE_URL}/v1/chat/completions"
         return 1
     fi
 }
@@ -541,28 +541,28 @@ fi
 # 2. Network
 check_network || true
 
-# 3. vLLM container
-info "Checking vLLM service ..."
-VLLM_CONTAINER_OK=true
-if ! check_container_running "${VLLM_CONTAINER_NAME}" "vLLM"; then
-    VLLM_CONTAINER_OK=false
+# 3. llama.cpp container
+info "Checking llama.cpp service ..."
+LLAMACPP_CONTAINER_OK=true
+if ! check_container_running "${LLAMACPP_CONTAINER_NAME}" "llama.cpp"; then
+    LLAMACPP_CONTAINER_OK=false
 fi
 
-if [ "${VLLM_CONTAINER_OK}" = true ]; then
-    check_container_health "${VLLM_CONTAINER_NAME}" "vLLM" || true
+if [ "${LLAMACPP_CONTAINER_OK}" = true ]; then
+    check_container_health "${LLAMACPP_CONTAINER_NAME}" "llama.cpp" || true
 fi
 
-# 4. vLLM API endpoints (check even if container check failed — might be external)
-VLLM_HEALTHY=0
-check_vllm_health_endpoint || VLLM_HEALTHY=$?
+# 4. llama.cpp API endpoints (check even if container check failed — might be external)
+LLAMACPP_HEALTHY=0
+check_llamacpp_health_endpoint || LLAMACPP_HEALTHY=$?
 
-if [ "${VLLM_HEALTHY}" -eq 0 ]; then
-    check_vllm_models_endpoint || true
-    check_vllm_chat_completions || true
+if [ "${LLAMACPP_HEALTHY}" -eq 0 ]; then
+    check_llamacpp_models_endpoint || true
+    check_llamacpp_chat_completions || true
 fi
 
-# 5. OpenClaw (unless --vllm-only)
-if [ "${VLLM_ONLY}" = false ]; then
+# 5. OpenClaw (unless --llamacpp-only)
+if [ "${LLAMACPP_ONLY}" = false ]; then
     info "Checking OpenClaw service ..."
     OPENCLAW_CONTAINER_OK=true
     if ! check_container_running "${OPENCLAW_CONTAINER_NAME}" "OpenClaw"; then

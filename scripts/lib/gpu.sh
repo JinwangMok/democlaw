@@ -51,10 +51,10 @@ fi
 DEFAULT_MIN_VRAM_MIB=7500
 
 # ---------------------------------------------------------------------------
-# Minimum NVIDIA driver and CUDA versions required by vLLM + Qwen3-4B AWQ
+# Minimum NVIDIA driver and CUDA versions required by llama.cpp + Qwen3-4B AWQ
 #
 # CUDA 11.8 requires NVIDIA driver >= 520.61.05 on Linux.
-# vLLM >= 0.3.x officially requires CUDA >= 11.8.
+# llama.cpp >= 0.3.x officially requires CUDA >= 11.8.
 # We use 520 (no patch) as the integer floor for driver comparisons.
 # ---------------------------------------------------------------------------
 MIN_CUDA_VERSION="11.8"
@@ -149,7 +149,7 @@ check_gpu_hardware() {
     sudo modprobe nvidia             # Attempt to reload the kernel module
     sudo nvidia-smi -r               # Attempt driver reset
 
-  This stack requires a physical NVIDIA CUDA GPU to run vLLM with
+  This stack requires a physical NVIDIA CUDA GPU to run llama.cpp with
   Qwen3-4B AWQ 4-bit quantisation. There is no CPU fallback.
 "
     fi
@@ -171,7 +171,7 @@ check_gpu_hardware() {
 #   Minimum NVIDIA driver : MIN_DRIVER_VERSION (default: 520.0)
 #   Minimum CUDA version  : MIN_CUDA_VERSION   (default: 11.8)
 #
-# vLLM >= 0.3 requires CUDA >= 11.8; CUDA 11.8 requires driver >= 520.61.05.
+# llama.cpp >= 0.3 requires CUDA >= 11.8; CUDA 11.8 requires driver >= 520.61.05.
 # ---------------------------------------------------------------------------
 check_cuda_driver() {
     local min_driver="${MIN_DRIVER_VERSION:-520.0}"
@@ -256,7 +256,7 @@ check_cuda_driver() {
         _gpu_error "CUDA version ${cuda_ver} is too old.
 
   Minimum required CUDA version: ${min_cuda}
-  vLLM requires CUDA >= ${min_cuda} to run Qwen3-4B AWQ 4-bit.
+  llama.cpp requires CUDA >= ${min_cuda} to run Qwen3-4B AWQ 4-bit.
 
   Your current driver (${driver_ver}) only supports CUDA ${cuda_ver}.
 
@@ -393,7 +393,7 @@ check_nvidia_container_runtime() {
 #
 # The NVIDIA OCI runtime must be registered with the Docker daemon so that
 # --gpus flags work.  Without this, Docker silently ignores GPU requests
-# and the vLLM server will start without GPU access, then fail to load the
+# and the llama.cpp server will start without GPU access, then fail to load the
 # model.
 #
 # Detection strategy (first match wins):
@@ -434,7 +434,7 @@ _check_nvidia_docker_runtime() {
   has not been configured to use the NVIDIA OCI runtime.
 
   Without this configuration, the --gpus flag is silently ignored and
-  the vLLM container will start without any GPU access.
+  the llama.cpp container will start without any GPU access.
 
   To fix this:
     1. Configure the NVIDIA runtime:

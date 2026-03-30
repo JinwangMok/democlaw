@@ -66,9 +66,9 @@ DemoClaw requires a **Linux x86_64** host. The following distributions are teste
 The NVIDIA CUDA ecosystem has two distinct components:
 
 - **CUDA driver API** (host-side): Provided automatically by your NVIDIA driver. The version shown by `nvidia-smi` (e.g. `CUDA Version: 12.4`) is this value. **This is the only CUDA-related component required on the host.**
-- **CUDA Toolkit** (compiler, libraries, headers): Used by developers to build CUDA applications from source. **You do NOT need to install the CUDA Toolkit on the host.** The vLLM container image (`vllm/vllm-openai`) bundles its own CUDA runtime libraries and runs entirely within the container.
+- **CUDA Toolkit** (compiler, libraries, headers): Used by developers to build CUDA applications from source. **You do NOT need to install the CUDA Toolkit on the host.** The llama.cpp container image bundles its own CUDA runtime libraries and runs entirely within the container.
 
-In summary: install NVIDIA driver ≥ 520 and you have everything the host needs. CUDA 12.x Toolkit is packaged inside the `vllm/vllm-openai` container image.
+In summary: install NVIDIA driver ≥ 520 and you have everything the host needs. CUDA 12.x Toolkit is packaged inside the llama.cpp container image.
 
 ### 사전 요구사항 확인 / Verify prerequisites
 
@@ -258,18 +258,18 @@ Open `.env` in your editor and review the settings. The defaults work out-of-the
 | Variable | Default | When to change |
 |----------|---------|----------------|
 | `CONTAINER_RUNTIME` | *(auto-detect)* | Set to `docker` or `podman` to force a specific runtime |
-| `MODEL_NAME` | `Qwen/Qwen3-4B-AWQ` | Change only if you want a different AWQ 4-bit model |
-| `VLLM_HOST_PORT` | `8000` | Change if port 8000 is already in use on your machine |
+| `MODEL_NAME` | `Qwen3.5-9B-Q4_K_M` | Change only if you want a different GGUF model |
+| `LLAMACPP_HOST_PORT` | `8000` | Change if port 8000 is already in use on your machine |
 | `OPENCLAW_HOST_PORT` | `18789` | Change if port 18789 is already in use on your machine |
 | `MAX_MODEL_LEN` | `8192` | Reduce (e.g. `4096`) to lower VRAM usage |
-| `GPU_MEMORY_UTILIZATION` | `0.90` | Reduce (e.g. `0.80`) if vLLM reports out-of-memory |
+| `GPU_MEMORY_UTILIZATION` | `0.90` | Reduce (e.g. `0.80`) if llama.cpp reports out-of-memory |
 | `HF_CACHE_DIR` | `~/.cache/huggingface` | Point to a disk with ≥ 10 GB free space for model weights |
 | `HF_TOKEN` | *(empty)* | Required only for gated HuggingFace models |
 
 **Example `.env` for a machine with port conflicts:**
 
 ```bash
-VLLM_HOST_PORT=8001
+LLAMACPP_HOST_PORT=8001
 OPENCLAW_HOST_PORT=18790
 ```
 
@@ -322,7 +322,7 @@ This script checks (in order):
 | 2 | `nvidia-smi` | Must be in `PATH` and communicate with the driver |
 | 3 | NVIDIA GPU | At least one physical GPU detected |
 | 4 | NVIDIA driver | Version ≥ 520 (exposes CUDA 11.8 driver API) |
-| 5 | CUDA version | ≥ 11.8, required by vLLM |
+| 5 | CUDA version | ≥ 11.8, required by llama.cpp |
 | 6 | GPU VRAM | ≥ 7500 MiB (~7.3 GB) for Qwen3-4B AWQ 4-bit |
 | 7 | Container toolkit | `nvidia-container-toolkit` configured for detected runtime |
 
@@ -359,7 +359,7 @@ Exit code: `0` — all checks passed, proceed to the next step.
 | `ERROR: Insufficient GPU VRAM: 6144 MiB detected, but 7500 MiB required` | GPU has < 8 GB VRAM | Use a GPU with ≥ 8 GB VRAM, or reduce `MAX_MODEL_LEN` in `.env` |
 | `ERROR: nvidia-container-toolkit not configured for docker` | Toolkit missing | Run `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker` |
 
-> **Note:** `check-gpu.sh` is also called automatically by `start.sh`, `start-vllm.sh`, and all orchestration scripts before launching any containers. If you skip this step, the start scripts will still catch GPU issues before pulling or running images — but running `check-gpu.sh` first gives faster feedback.
+> **Note:** `check-gpu.sh` is also called automatically by `start.sh`, `start-llamacpp.sh`, and all orchestration scripts before launching any containers. If you skip this step, the start scripts will still catch GPU issues before pulling or running images — but running `check-gpu.sh` first gives faster feedback.
 
 If `nvidia-smi` is not found or the NVIDIA runtime is missing, follow the full installation instructions in the [Prerequisites](#prerequisites) section above.
 
@@ -372,21 +372,21 @@ Before launching, build both container images from the local Dockerfiles. This s
 make build
 
 # Or build each image individually
-make build-vllm      # builds democlaw/vllm:latest
+make build-llamacpp  # builds democlaw/llamacpp:latest
 make build-openclaw  # builds democlaw/openclaw:latest
 ```
 
 **With Docker** (direct runtime commands):
 
 ```bash
-docker build -t democlaw/vllm:latest     vllm/
+docker build -t democlaw/llamacpp:latest     llamacpp/
 docker build -t democlaw/openclaw:latest openclaw/
 ```
 
 **With Podman** (direct runtime commands):
 
 ```bash
-podman build -t democlaw/vllm:latest     vllm/
+podman build -t democlaw/llamacpp:latest     llamacpp/
 podman build -t democlaw/openclaw:latest openclaw/
 ```
 
@@ -409,9 +409,9 @@ CONTAINER_RUNTIME=docker ./scripts/start.sh
 
 What happens:
 1. The script detects Docker and validates your NVIDIA GPU/CUDA drivers.
-2. Both container images (`democlaw/vllm:latest` and `democlaw/openclaw:latest`) are built from the local Dockerfiles (first run only; subsequent runs reuse cached images).
-3. The vLLM server starts and downloads the Qwen3-4B AWQ 4-bit model weights from HuggingFace (~5 GB on first run; cached afterwards).
-4. Once the vLLM `/health` endpoint responds, the OpenClaw container starts and connects to it.
+2. Both container images (`democlaw/llamacpp:latest` and `democlaw/openclaw:latest`) are built from the local Dockerfiles (first run only; subsequent runs reuse cached images).
+3. The llama.cpp server starts and loads the Qwen3.5-9B Q4_K_M GGUF model (~5.7 GB on first run; cached afterwards).
+4. Once the llama.cpp `/health` endpoint responds, the OpenClaw container starts and connects to it.
 5. A final healthcheck confirms the OpenClaw dashboard is reachable.
 
 Expected final output:
@@ -419,7 +419,7 @@ Expected final output:
 ```
 [start] ========================================================
 [start]   Both services started successfully!
-[start]   vLLM API     : http://localhost:8000/v1
+[start]   llama.cpp API: http://localhost:8000/v1
 [start]   OpenClaw UI  : http://localhost:18789
 [start]   Runtime      : docker
 [start] ========================================================
@@ -458,17 +458,17 @@ Expected final output is the same as for Docker, with `Runtime: podman`.
 
 ---
 
-### 7단계 — vLLM 컨테이너 개별 실행 / Step 7 — Launch the vLLM container (individual)
+### 7단계 — llama.cpp 컨테이너 개별 실행 / Step 7 — Launch the llama.cpp container (individual)
 
-> **Skip this step if you already ran `make start` or `./scripts/start.sh` in Steps 5–6.** This section shows how to launch the vLLM server on its own, which is useful when you want to monitor model loading before starting OpenClaw, or when troubleshooting the vLLM service independently.
+> **Skip this step if you already ran `make start` or `./scripts/start.sh` in Steps 5–6.** This section shows how to launch the llama.cpp server on its own, which is useful when you want to monitor model loading before starting OpenClaw, or when troubleshooting the llama.cpp service independently.
 
 ```bash
 # Auto-detect runtime (Docker or Podman)
-./scripts/start-vllm.sh
+./scripts/start-llamacpp.sh
 
 # Or force a specific runtime
-CONTAINER_RUNTIME=docker ./scripts/start-vllm.sh
-CONTAINER_RUNTIME=podman ./scripts/start-vllm.sh
+CONTAINER_RUNTIME=docker ./scripts/start-llamacpp.sh
+CONTAINER_RUNTIME=podman ./scripts/start-llamacpp.sh
 ```
 
 **What the script does:**
@@ -476,53 +476,53 @@ CONTAINER_RUNTIME=podman ./scripts/start-vllm.sh
 | Phase | Action |
 |-------|--------|
 | 1 | Validates Linux host OS, container runtime, and NVIDIA GPU/CUDA drivers |
-| 2 | Builds `democlaw/vllm:latest` from `vllm/Dockerfile` (skipped if image exists) |
-| 3 | Downloads Qwen3-4B AWQ 4-bit weights from HuggingFace (~5 GB, first run only) |
-| 4 | Starts the `democlaw-vllm` container on `democlaw-net` with GPU passthrough |
+| 2 | Builds `democlaw/llamacpp:latest` from `llamacpp/Dockerfile` (skipped if image exists) |
+| 3 | Downloads Qwen3.5-9B Q4_K_M GGUF weights (~5.7 GB, first run only) |
+| 4 | Starts the `democlaw-llamacpp` container on `democlaw-net` with GPU passthrough |
 | 5 | Polls `GET /health` every 5 s until the server responds (timeout: 300 s) |
-| 6 | Confirms `Qwen/Qwen3-4B-AWQ` appears in `GET /v1/models`, then exits |
+| 6 | Confirms `Qwen3.5-9B-Q4_K_M` appears in `GET /v1/models`, then exits |
 
 **Expected output when the model is loaded and the server is healthy:**
 
 ```
-[start-vllm] Phase 1/2: Waiting for /health endpoint at http://localhost:8000/health ...
-[start-vllm]   ... waiting for /health (5/300s)
-[start-vllm]   ... waiting for /health (10/300s)
+[start-llamacpp] Phase 1/2: Waiting for /health endpoint at http://localhost:8000/health ...
+[start-llamacpp]   ... waiting for /health (5/300s)
+[start-llamacpp]   ... waiting for /health (10/300s)
 ...
-[start-vllm] /health endpoint is responding.
-[start-vllm] Phase 2/2: Verifying /v1/models endpoint lists 'Qwen/Qwen3-4B-AWQ' ...
-[start-vllm] /v1/models responded successfully.
-[start-vllm]   Available models: Qwen/Qwen3-4B-AWQ
-[start-vllm] Expected model 'Qwen/Qwen3-4B-AWQ' confirmed.
-[start-vllm]
-[start-vllm] vLLM server is healthy and ready to serve requests.
-[start-vllm]   API endpoint: http://localhost:8000/v1
-[start-vllm]   Models API  : http://localhost:8000/v1/models
-[start-vllm]   Health check: http://localhost:8000/health
+[start-llamacpp] /health endpoint is responding.
+[start-llamacpp] Phase 2/2: Verifying /v1/models endpoint lists 'Qwen3.5-9B-Q4_K_M' ...
+[start-llamacpp] /v1/models responded successfully.
+[start-llamacpp]   Available models: Qwen3.5-9B-Q4_K_M
+[start-llamacpp] Expected model 'Qwen3.5-9B-Q4_K_M' confirmed.
+[start-llamacpp]
+[start-llamacpp] llama.cpp server is healthy and ready to serve requests.
+[start-llamacpp]   API endpoint: http://localhost:8000/v1
+[start-llamacpp]   Models API  : http://localhost:8000/v1/models
+[start-llamacpp]   Health check: http://localhost:8000/health
 ```
 
-**Verify vLLM is accepting requests before proceeding:**
+**Verify llama.cpp is accepting requests before proceeding:**
 
 ```bash
 # Liveness check — expects HTTP 200 (empty body)
-curl -sf http://localhost:8000/health && echo "vLLM is up"
+curl -sf http://localhost:8000/health && echo "llama.cpp is up"
 
-# List loaded models — confirm Qwen/Qwen3-4B-AWQ appears
+# List loaded models — confirm Qwen3.5-9B-Q4_K_M appears
 curl http://localhost:8000/v1/models | python3 -m json.tool
 ```
 
-> **First-run note:** On first launch, vLLM downloads ~5 GB of model weights. The download takes several minutes depending on your internet connection. Monitor progress with:
+> **First-run note:** On first launch, the model file (~5.7 GB) is downloaded. The download takes several minutes depending on your internet connection. Monitor progress with:
 > ```bash
-> docker logs -f democlaw-vllm   # Docker
-> podman logs -f democlaw-vllm   # Podman
-> make logs-vllm                 # via Makefile
+> docker logs -f democlaw-llamacpp   # Docker
+> podman logs -f democlaw-llamacpp   # Podman
+> make logs-llamacpp                 # via Makefile
 > ```
 > The server is ready when the log shows `INFO: Application startup complete.`
 
 > **GPU error — what it looks like:**
-> If `start-vllm.sh` cannot find a valid NVIDIA GPU or CUDA driver, it exits immediately with a message like:
+> If `start-llamacpp.sh` cannot find a valid NVIDIA GPU or CUDA driver, it exits immediately with a message like:
 > ```
-> [start-vllm] ERROR: nvidia-smi not found in PATH. Install the NVIDIA driver and try again.
+> [start-llamacpp] ERROR: nvidia-smi not found in PATH. Install the NVIDIA driver and try again.
 > ```
 > See the [Prerequisites](#prerequisites) section for NVIDIA driver and container toolkit installation instructions.
 
@@ -530,9 +530,9 @@ curl http://localhost:8000/v1/models | python3 -m json.tool
 
 ### 8단계 — OpenClaw 컨테이너 개별 실행 / Step 8 — Launch the OpenClaw container (individual)
 
-> **Skip this step if you already ran `make start` or `./scripts/start.sh` in Steps 5–6.** This section shows how to launch the OpenClaw dashboard container on its own, after the vLLM server is running.
+> **Skip this step if you already ran `make start` or `./scripts/start.sh` in Steps 5–6.** This section shows how to launch the OpenClaw dashboard container on its own, after the llama.cpp server is running.
 >
-> **Important:** The vLLM container (`democlaw-vllm`) must be running before you start OpenClaw. Confirm with `curl -sf http://localhost:8000/health` — it should return HTTP 200.
+> **Important:** The llama.cpp container (`democlaw-llamacpp`) must be running before you start OpenClaw. Confirm with `curl -sf http://localhost:8000/health` — it should return HTTP 200.
 
 ```bash
 # Auto-detect runtime (Docker or Podman)
@@ -549,10 +549,10 @@ CONTAINER_RUNTIME=podman ./scripts/start-openclaw.sh
 |-------|--------|
 | 1 | Detects the container runtime and verifies Linux host OS |
 | 2 | Ensures the `democlaw-net` container network exists |
-| 3 | Verifies `democlaw-vllm` is running and connected to `democlaw-net` |
+| 3 | Verifies `democlaw-llamacpp` is running and connected to `democlaw-net` |
 | 4 | Builds `democlaw/openclaw:latest` from `openclaw/Dockerfile` (skipped if image exists) |
 | 5 | Starts `democlaw-openclaw` on `democlaw-net`, publishing port `18789` on the host |
-| 6 | The entrypoint writes an LLM provider config pointing at `http://vllm:8000/v1` and starts the Node.js web server |
+| 6 | The entrypoint writes an LLM provider config pointing at `http://llamacpp:8000/v1` and starts the Node.js web server |
 | 7 | Polls `http://localhost:18789` every 3 s until it returns HTTP 200 (timeout: 120 s) |
 | 8 | Validates the provider connection from within the container network, then exits |
 
@@ -566,8 +566,8 @@ CONTAINER_RUNTIME=podman ./scripts/start-openclaw.sh
 [start-openclaw]   Image      : democlaw/openclaw:latest
 [start-openclaw]   Network    : democlaw-net (alias: openclaw)
 [start-openclaw]   Dashboard  : localhost:18789 -> container:18789
-[start-openclaw]   vLLM URL   : http://vllm:8000/v1
-[start-openclaw]   Model      : Qwen/Qwen3-4B-AWQ
+[start-openclaw]   llama.cpp URL : http://llamacpp:8000/v1
+[start-openclaw]   Model         : Qwen3.5-9B-Q4_K_M
 [start-openclaw] =======================================================
 [start-openclaw] Container 'democlaw-openclaw' started successfully.
 [start-openclaw] Waiting for OpenClaw dashboard at http://localhost:18789 (timeout: 120s) ...
@@ -590,13 +590,13 @@ Open **http://localhost:18789** in your browser to access the OpenClaw AI assist
 > ```
 > Then open **http://localhost:18789** in your local browser while the tunnel is active.
 
-> **If OpenClaw times out waiting for vLLM:** This normally means the vLLM model is still loading. Check vLLM status with `./scripts/healthcheck.sh --vllm-only` and wait until the model appears in `GET /v1/models` before retrying `./scripts/start-openclaw.sh`.
+> **If OpenClaw times out waiting for llama.cpp:** This normally means the llama.cpp model is still loading. Check llama.cpp status with `./scripts/healthcheck.sh --llamacpp-only` and wait until the model appears in `GET /v1/models` before retrying `./scripts/start-openclaw.sh`.
 
 ---
 
 ### 9단계 — 설치 확인 / Step 9 — Verify the installation
 
-Once `./scripts/start.sh` (or `make start`) exits with the **"Both services started successfully!"** banner — or after you have run both `./scripts/start-vllm.sh` and `./scripts/start-openclaw.sh` individually — run the bundled healthcheck script to confirm both containers are fully operational:
+Once `./scripts/start.sh` (or `make start`) exits with the **"Both services started successfully!"** banner — or after you have run both `./scripts/start-llamacpp.sh` and `./scripts/start-openclaw.sh` individually — run the bundled healthcheck script to confirm both containers are fully operational:
 
 ```bash
 # Run the full healthcheck (all services)
@@ -617,16 +617,16 @@ make health
   ✓ Container runtime — docker available (Docker version 26.1.0, build a5ee5b1)
 ▶ Checking container network ...
   ✓ Container network — 'democlaw-net' exists
-▶ Checking vLLM service ...
-  ✓ vLLM container — 'democlaw-vllm' is running
-  ✓ vLLM container health — Docker HEALTHCHECK reports healthy
-▶ Checking vLLM health endpoint ...
-  ✓ vLLM /health endpoint — HTTP 200
-▶ Checking vLLM /v1/models endpoint ...
-  ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
-  ✓ vLLM model loaded — 'Qwen/Qwen3-4B-AWQ' found in /v1/models
-▶ Checking vLLM /v1/chat/completions (inference test) ...
-  ✓ vLLM chat completions — Inference working — HTTP 200 with valid response
+▶ Checking llama.cpp service ...
+  ✓ llama.cpp container — 'democlaw-llamacpp' is running
+  ✓ llama.cpp container health — Docker HEALTHCHECK reports healthy
+▶ Checking llama.cpp health endpoint ...
+  ✓ llama.cpp /health endpoint — HTTP 200
+▶ Checking llama.cpp /v1/models endpoint ...
+  ✓ llama.cpp /v1/models endpoint — HTTP 200 — 1 model(s) available
+  ✓ llama.cpp model loaded — 'Qwen3.5-9B-Q4_K_M' found in /v1/models
+▶ Checking llama.cpp /v1/chat/completions (inference test) ...
+  ✓ llama.cpp chat completions — Inference working — HTTP 200 with valid response
 ▶ Checking OpenClaw service ...
   ✓ OpenClaw container — 'democlaw-openclaw' is running
   ✓ OpenClaw dashboard reachable — HTTP 200 at http://localhost:18789
@@ -640,12 +640,12 @@ make health
 
 Exit code: `0`
 
-> **First-launch timing:** On the first run, vLLM downloads ~5 GB of model weights. Running the healthcheck immediately after `start.sh` completes may show `Overall: DEGRADED` — the `⚠ vLLM container health — HEALTHCHECK still starting` warning is normal while the runtime's built-in health probe completes. All API endpoint checks (`/health`, `/v1/models`, `/v1/chat/completions`) should already pass. Wait 2–3 minutes and re-run to see `Overall: HEALTHY`.
+> **First-launch timing:** On the first run, the model file (~5.7 GB) is downloaded. Running the healthcheck immediately after `start.sh` completes may show `Overall: DEGRADED` — the `⚠ llama.cpp container health — HEALTHCHECK still starting` warning is normal while the runtime's built-in health probe completes. All API endpoint checks (`/health`, `/v1/models`, `/v1/chat/completions`) should already pass. Wait 2–3 minutes and re-run to see `Overall: HEALTHY`.
 
-**Check vLLM only during model loading** (faster; skips the OpenClaw checks):
+**Check llama.cpp only during model loading** (faster; skips the OpenClaw checks):
 
 ```bash
-./scripts/healthcheck.sh --vllm-only
+./scripts/healthcheck.sh --llamacpp-only
 ```
 
 **Machine-readable JSON output** (useful for CI or monitoring):
@@ -659,12 +659,12 @@ For the full expected output for each healthcheck state (HEALTHY, DEGRADED, UNHE
 Additional verification commands:
 
 ```bash
-# Validate the vLLM OpenAI-compatible API endpoints
+# Validate the llama.cpp OpenAI-compatible API endpoints
 ./scripts/validate-api.sh
 # or via Makefile
 make validate-api
 
-# Quick curl to confirm vLLM is responding
+# Quick curl to confirm llama.cpp is responding
 curl http://localhost:8000/health                  # expects HTTP 200
 curl http://localhost:8000/v1/models | python3 -m json.tool
 
@@ -699,7 +699,7 @@ make stop           # Stop and remove containers
 make restart        # Stop then start
 make status         # Show container status
 make health         # Run healthchecks on both services
-make logs-vllm      # Follow vLLM container logs
+make logs-llamacpp  # Follow llama.cpp container logs
 make logs-openclaw  # Follow OpenClaw container logs
 make build          # Build container images without starting
 make clean          # Stop containers and remove images
@@ -713,7 +713,7 @@ make help           # Show all available targets
 ./scripts/start.sh
 
 # Start individual services
-./scripts/start-vllm.sh
+./scripts/start-llamacpp.sh
 ./scripts/start-openclaw.sh
 
 # Stop everything
@@ -721,10 +721,10 @@ make help           # Show all available targets
 
 # Run healthchecks
 ./scripts/healthcheck.sh              # Check all services
-./scripts/healthcheck.sh --vllm-only  # Check vLLM only
+./scripts/healthcheck.sh --llamacpp-only  # Check llama.cpp only
 ./scripts/healthcheck.sh --json       # JSON output
 
-# Validate vLLM OpenAI-compatible API endpoints
+# Validate llama.cpp OpenAI-compatible API endpoints
 ./scripts/validate-api.sh                          # Full validation (including inference)
 SKIP_INFERENCE_TEST=true ./scripts/validate-api.sh # Skip inference test
 ```
@@ -738,7 +738,7 @@ Step 1  Verify GPU and runtime       make env-check
                                   or ./scripts/check-gpu.sh
 
 Step 2  Build container images       make build
-                                  or docker build -t democlaw/vllm:latest     vllm/
+                                  or docker build -t democlaw/llamacpp:latest     llamacpp/
                                      docker build -t democlaw/openclaw:latest openclaw/
 
 Step 3  Start both services          make start
@@ -759,9 +759,9 @@ start.sh
   ├── [1] Auto-detect container runtime (lib/runtime.sh)
   ├── [2] Validate NVIDIA GPU / CUDA drivers (lib/gpu.sh)
   │         → exits with error if GPU absent — no CPU fallback
-  ├── [3] Phase 1: start-vllm.sh
-  │         → pulls / starts vLLM container
-  │         → waits for /health endpoint (up to VLLM_HEALTH_TIMEOUT seconds)
+  ├── [3] Phase 1: start-llamacpp.sh
+  │         → pulls / starts llama.cpp container
+  │         → waits for /health endpoint (up to LLAMACPP_HEALTH_TIMEOUT seconds)
   ├── [4] Phase 2: start-openclaw.sh
   │         → starts OpenClaw container
   │         → waits for dashboard HTTP 200 (up to OPENCLAW_HEALTH_TIMEOUT seconds)
@@ -775,10 +775,10 @@ start.sh
 # 1. GPU check — exits non-zero if GPU/CUDA absent
 ./scripts/check-gpu.sh
 
-# 2. Start vLLM (includes GPU validation and health wait)
-./scripts/start-vllm.sh
+# 2. Start llama.cpp (includes GPU validation and health wait)
+./scripts/start-llamacpp.sh
 
-# 3. Start OpenClaw only after vLLM is healthy
+# 3. Start OpenClaw only after llama.cpp is healthy
 ./scripts/start-openclaw.sh
 
 # 4. Verify both are running
@@ -788,9 +788,9 @@ start.sh
 ./scripts/stop.sh
 ```
 
-> **Important:** Always start `start-vllm.sh` before `start-openclaw.sh`.
-> OpenClaw polls the vLLM `/health` endpoint at startup and will time out
-> if vLLM is not reachable yet.
+> **Important:** Always start `start-llamacpp.sh` before `start-openclaw.sh`.
+> OpenClaw polls the llama.cpp `/health` endpoint at startup and will time out
+> if llama.cpp is not reachable yet.
 
 ### 특정 컨테이너 런타임 강제 지정 / Forcing a specific container runtime
 
@@ -822,8 +822,8 @@ It checks that:
 
 - The container runtime (`docker` or `podman`) is available
 - The container network `democlaw-net` exists
-- Both `democlaw-vllm` and `democlaw-openclaw` containers are in the **running** state
-- The vLLM `/health`, `/v1/models`, and `/v1/chat/completions` endpoints respond correctly
+- Both `democlaw-llamacpp` and `democlaw-openclaw` containers are in the **running** state
+- The llama.cpp `/health`, `/v1/models`, and `/v1/chat/completions` endpoints respond correctly
 - The OpenClaw dashboard responds with HTTP 2xx and serves HTML content
 
 Expected output when everything is healthy:
@@ -837,16 +837,16 @@ Expected output when everything is healthy:
   ✓ Container runtime — docker available (Docker version 26.1.0, ...)
 ▶ Checking container network ...
   ✓ Container network — 'democlaw-net' exists
-▶ Checking vLLM service ...
-  ✓ vLLM container — 'democlaw-vllm' is running
-  ✓ vLLM container health — Docker HEALTHCHECK reports healthy
-▶ Checking vLLM health endpoint ...
-  ✓ vLLM /health endpoint — HTTP 200
-▶ Checking vLLM /v1/models endpoint ...
-  ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
-  ✓ vLLM model loaded — 'Qwen/Qwen3-4B-AWQ' found in /v1/models
-▶ Checking vLLM /v1/chat/completions (inference test) ...
-  ✓ vLLM chat completions — Inference working — HTTP 200 with valid response
+▶ Checking llama.cpp service ...
+  ✓ llama.cpp container — 'democlaw-llamacpp' is running
+  ✓ llama.cpp container health — Docker HEALTHCHECK reports healthy
+▶ Checking llama.cpp health endpoint ...
+  ✓ llama.cpp /health endpoint — HTTP 200
+▶ Checking llama.cpp /v1/models endpoint ...
+  ✓ llama.cpp /v1/models endpoint — HTTP 200 — 1 model(s) available
+  ✓ llama.cpp model loaded — 'Qwen3.5-9B-Q4_K_M' found in /v1/models
+▶ Checking llama.cpp /v1/chat/completions (inference test) ...
+  ✓ llama.cpp chat completions — Inference working — HTTP 200 with valid response
 ▶ Checking OpenClaw service ...
   ✓ OpenClaw container — 'democlaw-openclaw' is running
   ✓ OpenClaw dashboard reachable — HTTP 200 at http://localhost:18789
@@ -872,7 +872,7 @@ Expected output — both containers should show **Up** status:
 
 ```
 CONTAINER ID   IMAGE                      COMMAND   STATUS         NAMES
-a1b2c3d4e5f6   democlaw/vllm:latest       ...       Up 5 minutes   democlaw-vllm
+a1b2c3d4e5f6   democlaw/llamacpp:latest    ...       Up 5 minutes   democlaw-llamacpp
 b2c3d4e5f6a1   democlaw/openclaw:latest   ...       Up 4 minutes   democlaw-openclaw
 ```
 
@@ -900,10 +900,10 @@ Then open **http://localhost:18789** in your local browser while the SSH tunnel 
 Logs are the first place to look when a service does not start as expected:
 
 ```bash
-# Follow vLLM logs — useful while the model is downloading/loading (~5 GB on first run)
-docker logs -f democlaw-vllm          # Docker
-podman logs -f democlaw-vllm          # Podman
-make logs-vllm                        # via Makefile
+# Follow llama.cpp logs — useful while the model is loading (~5.7 GB on first run)
+docker logs -f democlaw-llamacpp      # Docker
+podman logs -f democlaw-llamacpp      # Podman
+make logs-llamacpp                    # via Makefile
 
 # Follow OpenClaw logs
 docker logs -f democlaw-openclaw      # Docker
@@ -913,11 +913,11 @@ make logs-openclaw                    # via Makefile
 
 ### 빠른 API 테스트 / Quick API smoke test
 
-Verify the vLLM API is responding without running the full healthcheck suite:
+Verify the llama.cpp API is responding without running the full healthcheck suite:
 
 ```bash
 # Liveness probe — expects HTTP 200
-curl -sf http://localhost:8000/health && echo "vLLM is up"
+curl -sf http://localhost:8000/health && echo "llama.cpp is up"
 
 # List loaded models
 curl http://localhost:8000/v1/models | python3 -m json.tool
@@ -932,12 +932,12 @@ curl http://localhost:8000/v1/models | python3 -m json.tool
 |---------|-------------|-----|
 | `nvidia-smi not found` | NVIDIA driver not installed | `sudo apt install nvidia-driver-560` (Ubuntu) or see [Prerequisites](#prerequisites) |
 | `Insufficient GPU VRAM` | GPU has < 8 GB VRAM | Use a GPU with ≥ 8 GB VRAM, or reduce `MAX_MODEL_LEN` in `.env` |
-| vLLM container stuck on first run | Model downloading from HuggingFace (~5 GB) | Wait and monitor with `make logs-vllm`; progress shows in the log |
-| `OpenClaw says "waiting for vLLM"` | vLLM model still loading | Normal on first launch; wait for model to finish loading |
+| llama.cpp container stuck on first run | Model downloading (~5.7 GB) | Wait and monitor with `make logs-llamacpp`; progress shows in the log |
+| `OpenClaw says "waiting for llama.cpp"` | llama.cpp model still loading | Normal on first launch; wait for model to finish loading |
 | `HTTP 000` from healthcheck | Port blocked or container not started | Check `docker ps`, verify firewall allows the port, re-run `./scripts/start.sh` |
-| Port 8000 or 18789 already in use | Another service occupies the port | Set `VLLM_HOST_PORT=8001` and/or `OPENCLAW_HOST_PORT=18790` in `.env` |
+| Port 8000 or 18789 already in use | Another service occupies the port | Set `LLAMACPP_HOST_PORT=8001` and/or `OPENCLAW_HOST_PORT=18790` in `.env` |
 | Podman: `no GPU device found` | CDI spec not generated | Run `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` then retry |
-| Dashboard loads but shows no model | vLLM URL misconfigured in OpenClaw | Check `VLLM_BASE_URL` in `.env`; default is `http://vllm:8000/v1` |
+| Dashboard loads but shows no model | llama.cpp URL misconfigured in OpenClaw | Check `LLAMACPP_BASE_URL` in `.env`; default is `http://llamacpp:8000/v1` |
 
 For more detailed troubleshooting steps, see the [Troubleshooting](#troubleshooting) section below.
 
@@ -960,8 +960,8 @@ After `./scripts/start.sh` (or `make start`) completes, run the following comman
 # Via Makefile
 make health
 
-# Check vLLM only (useful while the model is still loading)
-./scripts/healthcheck.sh --vllm-only
+# Check llama.cpp only (useful while the model is still loading)
+./scripts/healthcheck.sh --llamacpp-only
 
 # JSON output for scripted/CI use
 ./scripts/healthcheck.sh --json
@@ -973,7 +973,7 @@ CONTAINER_RUNTIME=docker ./scripts/healthcheck.sh
 
 The script exits `0` when all checks pass (or only warnings remain) and `1` when one or more checks fail.
 
-> **First-launch note:** On the very first run, vLLM downloads ~5 GB of model weights from HuggingFace. The in-container `HEALTHCHECK` may remain in the `starting` state for several minutes after the API endpoints are already serving requests. Running the healthcheck immediately after `start.sh` may show `Overall: DEGRADED` with a `⚠ HEALTHCHECK still starting` warning. This is expected — wait 2–3 minutes and re-run to see `Overall: HEALTHY`.
+> **First-launch note:** On the very first run, the model file (~5.7 GB) is downloaded. The in-container `HEALTHCHECK` may remain in the `starting` state for several minutes after the API endpoints are already serving requests. Running the healthcheck immediately after `start.sh` may show `Overall: DEGRADED` with a `⚠ HEALTHCHECK still starting` warning. This is expected — wait 2–3 minutes and re-run to see `Overall: HEALTHY`.
 
 ### 개요 / Overview
 
@@ -981,14 +981,14 @@ The script exits `0` when all checks pass (or only warnings remain) and `1` when
 |--------|-------|---------|
 | `scripts/healthcheck.sh` | Host | Full stack check — runtime, network, both containers, all API endpoints |
 | `scripts/healthcheck_openclaw.sh` | Host | Poll-until-ready for the OpenClaw dashboard (used by start scripts) |
-| `vllm/healthcheck.sh` | In-container | Docker/Podman `HEALTHCHECK` for the vLLM container |
+| `llamacpp/healthcheck.sh` | In-container | Docker/Podman `HEALTHCHECK` for the llama.cpp container |
 | `openclaw/healthcheck.sh` | In-container | Docker/Podman `HEALTHCHECK` for the OpenClaw container |
 
 ---
 
 ### `scripts/healthcheck.sh` — Full stack health check
 
-The primary health-check script. Inspects the container runtime, the shared network, both containers, and all vLLM API endpoints.
+The primary health-check script. Inspects the container runtime, the shared network, both containers, and all llama.cpp API endpoints.
 
 #### Usage
 
@@ -996,8 +996,8 @@ The primary health-check script. Inspects the container runtime, the shared netw
 # Check all services (default)
 ./scripts/healthcheck.sh
 
-# Check vLLM only (skip OpenClaw)
-./scripts/healthcheck.sh --vllm-only
+# Check llama.cpp only (skip OpenClaw)
+./scripts/healthcheck.sh --llamacpp-only
 
 # Output results as machine-readable JSON
 ./scripts/healthcheck.sh --json
@@ -1006,7 +1006,7 @@ The primary health-check script. Inspects the container runtime, the shared netw
 CONTAINER_RUNTIME=podman ./scripts/healthcheck.sh
 
 # Combine flags
-./scripts/healthcheck.sh --vllm-only --json
+./scripts/healthcheck.sh --llamacpp-only --json
 
 # Via the Makefile (runs ./scripts/healthcheck.sh internally)
 make health
@@ -1020,16 +1020,16 @@ make health-check
 |---|-------|-------------|
 | 1 | Container runtime | Verifies `docker` or `podman` is in `PATH` and responds |
 | 2 | Container network | Confirms `democlaw-net` exists |
-| 3 | vLLM container state | Container must be in `running` state |
-| 4 | vLLM container health | Docker/Podman `HEALTHCHECK` status (`healthy` / `starting` / `unhealthy`) |
-| 5 | `GET /health` | vLLM liveness endpoint — expects HTTP 200 |
+| 3 | llama.cpp container state | Container must be in `running` state |
+| 4 | llama.cpp container health | Docker/Podman `HEALTHCHECK` status (`healthy` / `starting` / `unhealthy`) |
+| 5 | `GET /health` | llama.cpp liveness endpoint — expects HTTP 200 |
 | 6 | `GET /v1/models` | OpenAI-compatible models list — expects HTTP 200 with ≥ 1 model |
 | 7 | Model loaded | Verifies `Qwen/Qwen3-4B-AWQ` appears in `/v1/models` response |
 | 8 | `POST /v1/chat/completions` | End-to-end inference smoke test — expects HTTP 200 with valid response |
 | 9 | OpenClaw container state | Container must be in `running` state |
 | 10 | OpenClaw dashboard | HTTP 2xx at `http://localhost:18789` with non-empty HTML content |
 
-> Checks 9–10 are skipped when `--vllm-only` is passed.
+> Checks 9–10 are skipped when `--llamacpp-only` is passed.
 
 #### Expected output — HEALTHY
 
@@ -1044,16 +1044,16 @@ When all services are running and the model has finished loading:
   ✓ Container runtime — docker available (Docker version 26.1.0, build a5ee5b1)
 ▶ Checking container network ...
   ✓ Container network — 'democlaw-net' exists
-▶ Checking vLLM service ...
-  ✓ vLLM container — 'democlaw-vllm' is running
-  ✓ vLLM container health — Docker HEALTHCHECK reports healthy
-▶ Checking vLLM health endpoint ...
-  ✓ vLLM /health endpoint — HTTP 200
-▶ Checking vLLM /v1/models endpoint ...
-  ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
-  ✓ vLLM model loaded — 'Qwen/Qwen3-4B-AWQ' found in /v1/models
-▶ Checking vLLM /v1/chat/completions (inference test) ...
-  ✓ vLLM chat completions — Inference working — HTTP 200 with valid response
+▶ Checking llama.cpp service ...
+  ✓ llama.cpp container — 'democlaw-llamacpp' is running
+  ✓ llama.cpp container health — Docker HEALTHCHECK reports healthy
+▶ Checking llama.cpp health endpoint ...
+  ✓ llama.cpp /health endpoint — HTTP 200
+▶ Checking llama.cpp /v1/models endpoint ...
+  ✓ llama.cpp /v1/models endpoint — HTTP 200 — 1 model(s) available
+  ✓ llama.cpp model loaded — 'Qwen3.5-9B-Q4_K_M' found in /v1/models
+▶ Checking llama.cpp /v1/chat/completions (inference test) ...
+  ✓ llama.cpp chat completions — Inference working — HTTP 200 with valid response
 ▶ Checking OpenClaw service ...
   ✓ OpenClaw container — 'democlaw-openclaw' is running
   ✓ OpenClaw dashboard reachable — HTTP 200 at http://localhost:18789
@@ -1080,14 +1080,14 @@ A `DEGRADED` result occurs when no checks outright fail but one or more produce 
   ✓ Container runtime — docker available (Docker version 26.1.0, ...)
 ▶ Checking container network ...
   ✓ Container network — 'democlaw-net' exists
-▶ Checking vLLM service ...
-  ✓ vLLM container — 'democlaw-vllm' is running
-  ⚠ vLLM container health — HEALTHCHECK still starting (model may be loading)
-▶ Checking vLLM health endpoint ...
-  ✓ vLLM /health endpoint — HTTP 200
-▶ Checking vLLM /v1/models endpoint ...
-  ✓ vLLM /v1/models endpoint — HTTP 200 — 1 model(s) available
-  ⚠ vLLM model loaded — 'Qwen/Qwen3-4B-AWQ' not found; available: my-other-model
+▶ Checking llama.cpp service ...
+  ✓ llama.cpp container — 'democlaw-llamacpp' is running
+  ⚠ llama.cpp container health — HEALTHCHECK still starting (model may be loading)
+▶ Checking llama.cpp health endpoint ...
+  ✓ llama.cpp /health endpoint — HTTP 200
+▶ Checking llama.cpp /v1/models endpoint ...
+  ✓ llama.cpp /v1/models endpoint — HTTP 200 — 1 model(s) available
+  ⚠ llama.cpp model loaded — 'Qwen3.5-9B-Q4_K_M' not found; available: my-other-model
 ...
 
 --------------------------------------
@@ -1109,10 +1109,10 @@ Exit code: **`0`**
   ✓ Container runtime — docker available (Docker version 26.1.0, ...)
 ▶ Checking container network ...
   ✗ Container network — 'democlaw-net' not found
-▶ Checking vLLM service ...
-  ✗ vLLM container — Container 'democlaw-vllm' does not exist
-▶ Checking vLLM health endpoint ...
-  ✗ vLLM /health endpoint — HTTP 000 (expected 200) at http://localhost:8000/health
+▶ Checking llama.cpp service ...
+  ✗ llama.cpp container — Container 'democlaw-llamacpp' does not exist
+▶ Checking llama.cpp health endpoint ...
+  ✗ llama.cpp /health endpoint — HTTP 000 (expected 200) at http://localhost:8000/health
 ▶ Checking OpenClaw service ...
   ✗ OpenClaw container — Container 'democlaw-openclaw' does not exist
   ✗ OpenClaw dashboard reachable — No response at http://localhost:18789 (port 18789)
@@ -1145,12 +1145,12 @@ Example JSON output (healthy):
   "results": [
     {"check": "Container runtime",        "status": "pass", "detail": "docker available (Docker version 26.1.0, ...)"},
     {"check": "Container network",        "status": "pass", "detail": "'democlaw-net' exists"},
-    {"check": "vLLM container",           "status": "pass", "detail": "'democlaw-vllm' is running"},
-    {"check": "vLLM container health",    "status": "pass", "detail": "Docker HEALTHCHECK reports healthy"},
-    {"check": "vLLM /health endpoint",    "status": "pass", "detail": "HTTP 200"},
-    {"check": "vLLM /v1/models endpoint", "status": "pass", "detail": "HTTP 200 — 1 model(s) available"},
-    {"check": "vLLM model loaded",        "status": "pass", "detail": "'Qwen/Qwen3-4B-AWQ' found in /v1/models"},
-    {"check": "vLLM chat completions",    "status": "pass", "detail": "Inference working — HTTP 200 with valid response"},
+    {"check": "llama.cpp container",           "status": "pass", "detail": "'democlaw-llamacpp' is running"},
+    {"check": "llama.cpp container health",    "status": "pass", "detail": "Docker HEALTHCHECK reports healthy"},
+    {"check": "llama.cpp /health endpoint",    "status": "pass", "detail": "HTTP 200"},
+    {"check": "llama.cpp /v1/models endpoint", "status": "pass", "detail": "HTTP 200 — 1 model(s) available"},
+    {"check": "llama.cpp model loaded",        "status": "pass", "detail": "'Qwen3.5-9B-Q4_K_M' found in /v1/models"},
+    {"check": "llama.cpp chat completions",    "status": "pass", "detail": "Inference working — HTTP 200 with valid response"},
     {"check": "OpenClaw container",       "status": "pass", "detail": "'democlaw-openclaw' is running"},
     {"check": "OpenClaw dashboard reachable", "status": "pass", "detail": "HTTP 200 at http://localhost:18789"},
     {"check": "OpenClaw dashboard content",  "status": "pass", "detail": "HTML content verified (42381 bytes)"}
@@ -1175,9 +1175,9 @@ All defaults can be overridden via environment variables or a `.env` file:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONTAINER_RUNTIME` | *(auto-detect)* | Force `docker` or `podman` |
-| `VLLM_HOST_PORT` | `8000` | Host port for vLLM API |
+| `LLAMACPP_HOST_PORT` | `8000` | Host port for llama.cpp API |
 | `OPENCLAW_HOST_PORT` | `18789` | Host port for OpenClaw dashboard |
-| `VLLM_CONTAINER_NAME` | `democlaw-vllm` | Name of the vLLM container |
+| `LLAMACPP_CONTAINER_NAME` | `democlaw-llamacpp` | Name of the llama.cpp container |
 | `OPENCLAW_CONTAINER_NAME` | `democlaw-openclaw` | Name of the OpenClaw container |
 | `DEMOCLAW_NETWORK` | `democlaw-net` | Name of the shared container network |
 | `MODEL_NAME` | `Qwen/Qwen3-4B-AWQ` | Expected model ID in `/v1/models` |
@@ -1240,7 +1240,7 @@ Exit code: **`0`**
 [healthcheck-openclaw] WARNING:   - The OpenClaw container is not running. Start it with:
 [healthcheck-openclaw] WARNING:       ./scripts/start-openclaw.sh
 [healthcheck-openclaw] WARNING:   - The container is still initialising. Increase OPENCLAW_HEALTH_TIMEOUT and retry.
-[healthcheck-openclaw] WARNING:   - The vLLM server is not reachable; OpenClaw may be waiting for it.
+[healthcheck-openclaw] WARNING:   - The llama.cpp server is not reachable; OpenClaw may be waiting for it.
 [healthcheck-openclaw] WARNING:   - Port 18789 is blocked by a firewall or in use by another process.
 ```
 
@@ -1269,9 +1269,9 @@ Exit code: **`1`**
 
 Each container image bundles its own lightweight healthcheck script that the Docker/Podman `HEALTHCHECK` instruction calls at regular intervals (every 30 s by default). These run **inside** the container and are not meant to be invoked manually, but understanding them helps interpret `docker ps` / `podman ps` health status.
 
-#### `vllm/healthcheck.sh`
+#### `llamacpp/healthcheck.sh`
 
-Executed inside `democlaw-vllm`. Verifies:
+Executed inside `democlaw-llamacpp`. Verifies:
 
 1. `GET /health` responds with HTTP 200 (liveness)
 2. `GET /v1/models` returns valid JSON with at least one loaded model
@@ -1288,10 +1288,10 @@ UNHEALTHY: /v1/models returned no models
 View the current health status reported by the runtime:
 
 ```bash
-docker inspect --format '{{.State.Health.Status}}' democlaw-vllm
+docker inspect --format '{{.State.Health.Status}}' democlaw-llamacpp
 # → healthy  |  starting  |  unhealthy
 
-podman inspect --format '{{.State.Health.Status}}' democlaw-vllm
+podman inspect --format '{{.State.Health.Status}}' democlaw-llamacpp
 ```
 
 #### `openclaw/healthcheck.sh`
@@ -1333,13 +1333,13 @@ Quick reference commands:
 
 ```bash
 # Inspect both container health states at once
-docker inspect --format '{{.Name}}: {{.State.Health.Status}}' democlaw-vllm democlaw-openclaw
+docker inspect --format '{{.Name}}: {{.State.Health.Status}}' democlaw-llamacpp democlaw-openclaw
 
 # Full host-side health report (all checks + API endpoints)
 ./scripts/healthcheck.sh
 
-# vLLM only (faster, useful during model loading)
-./scripts/healthcheck.sh --vllm-only
+# llama.cpp only (faster, useful during model loading)
+./scripts/healthcheck.sh --llamacpp-only
 
 # Machine-readable JSON (for CI or monitoring)
 ./scripts/healthcheck.sh --json
@@ -1350,13 +1350,13 @@ watch -n 5 'docker ps --filter "name=democlaw" --format "table {{.Names}}\t{{.St
 
 ---
 
-## vLLM OpenAI 호환 API / vLLM OpenAI-Compatible API
+## llama.cpp OpenAI 호환 API / llama.cpp OpenAI-Compatible API
 
-vLLM 서버는 **포트 8000** (기본값)에서 OpenAI 호환 REST API를 제공합니다. OpenAI API와 호환되는 모든 클라이언트(공식 Python/JS SDK, curl, LangChain, LlamaIndex, OpenClaw 등)가 `http://localhost:8000/v1`을 가리키면 수정 없이 사용할 수 있습니다.
+llama.cpp 서버는 **포트 8000** (기본값)에서 OpenAI 호환 REST API를 제공합니다. OpenAI API와 호환되는 모든 클라이언트(공식 Python/JS SDK, curl, LangChain, LlamaIndex, OpenClaw 등)가 `http://localhost:8000/v1`을 가리키면 수정 없이 사용할 수 있습니다.
 
-The vLLM server exposes a fully OpenAI-compatible REST API on **port 8000** (host default).  Any client that works with the OpenAI API — including the official Python/JS SDKs, `curl`, LangChain, LlamaIndex, and OpenClaw — can use it without modification by pointing at `http://localhost:8000/v1`.
+The llama.cpp server exposes a fully OpenAI-compatible REST API on **port 8000** (host default).  Any client that works with the OpenAI API — including the official Python/JS SDKs, `curl`, LangChain, LlamaIndex, and OpenClaw — can use it without modification by pointing at `http://localhost:8000/v1`.
 
-> **Full API reference:** [`docs/vllm-api.md`](docs/vllm-api.md) — base URLs, all endpoints, curl/Python/JS examples, authentication, and troubleshooting.
+> **Full API reference:** [`docs/llamacpp-api.md`](docs/llamacpp-api.md) — base URLs, all endpoints, curl/Python/JS examples, authentication, and troubleshooting.
 
 ### 엔드포인트 / Endpoints
 
@@ -1372,10 +1372,10 @@ The vLLM server exposes a fully OpenAI-compatible REST API on **port 8000** (hos
 
 | Setting | Default | Override |
 |---------|---------|----------|
-| Container-internal port | `8000` | `VLLM_PORT` |
-| Host-published port | `8000` | `VLLM_HOST_PORT` |
-| Base URL (from host) | `http://localhost:8000/v1` | `VLLM_BASE_URL` |
-| Base URL (container→container) | `http://vllm:8000/v1` | `VLLM_BASE_URL` |
+| Container-internal port | `8000` | `LLAMACPP_PORT` |
+| Host-published port | `8000` | `LLAMACPP_HOST_PORT` |
+| Base URL (from host) | `http://localhost:8000/v1` | `LLAMACPP_BASE_URL` |
+| Base URL (container→container) | `http://llamacpp:8000/v1` | `LLAMACPP_BASE_URL` |
 
 ### 사용 예시 / Usage examples
 
@@ -1399,10 +1399,10 @@ Expected response shape:
   "object": "list",
   "data": [
     {
-      "id": "Qwen/Qwen3-4B-AWQ",
+      "id": "Qwen3.5-9B-Q4_K_M",
       "object": "model",
       "created": 1700000000,
-      "owned_by": "vllm"
+      "owned_by": "llamacpp"
     }
   ]
 }
@@ -1454,14 +1454,14 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://localhost:8000/v1",
-    api_key="EMPTY",          # vLLM accepts any non-empty value
+    api_key="EMPTY",          # llama.cpp accepts any non-empty value
 )
 
 response = client.chat.completions.create(
     model="Qwen/Qwen3-4B-AWQ",
     messages=[
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user",   "content": "Explain vLLM in one sentence."},
+        {"role": "user",   "content": "Explain llama.cpp in one sentence."},
     ],
     max_tokens=128,
     temperature=0.7,
@@ -1505,7 +1505,7 @@ SKIP_INFERENCE_TEST=true ./scripts/validate-api.sh
 You can also use the full health check which includes the same endpoint verification alongside container-status checks:
 
 ```bash
-./scripts/healthcheck.sh --vllm-only
+./scripts/healthcheck.sh --llamacpp-only
 ```
 
 ## 설정 레퍼런스 / Configuration Reference
@@ -1519,7 +1519,7 @@ cp .env.example .env
 # Edit .env with your preferred text editor
 ```
 
-Every script (`start.sh`, `start-vllm.sh`, `start-openclaw.sh`, `stop.sh`, `healthcheck.sh`, etc.) automatically loads `.env` at startup using `source` — no `export` or manual sourcing is required.
+Every script (`start.sh`, `start-llamacpp.sh`, `start-openclaw.sh`, `stop.sh`, `healthcheck.sh`, etc.) automatically loads `.env` at startup using `source` — no `export` or manual sourcing is required.
 
 You can also pass any variable inline for a one-off override:
 
@@ -1535,20 +1535,20 @@ The following ports are published from containers to the Linux host:
 
 | Service | Container-internal port | Host port (default) | Override variable | Access URL |
 |---------|------------------------|---------------------|-------------------|------------|
-| **vLLM API** | `8000` | `8000` | `VLLM_HOST_PORT` | `http://localhost:8000/v1` |
+| **llama.cpp API** | `8000` | `8000` | `LLAMACPP_HOST_PORT` | `http://localhost:8000/v1` |
 | **OpenClaw dashboard** | `18789` | `18789` | `OPENCLAW_HOST_PORT` | `http://localhost:18789` |
 
-**Container-to-container communication** uses the shared `democlaw-net` bridge network. OpenClaw always reaches vLLM via the internal alias `http://vllm:8000/v1` regardless of what host ports are configured. The `VLLM_BASE_URL` variable controls this internal URL.
+**Container-to-container communication** uses the shared `democlaw-net` bridge network. OpenClaw always reaches llama.cpp via the internal alias `http://llamacpp:8000/v1` regardless of what host ports are configured. The `LLAMACPP_BASE_URL` variable controls this internal URL.
 
 **Example — resolve port conflicts:**
 
 ```bash
 # In .env
-VLLM_HOST_PORT=8001
+LLAMACPP_HOST_PORT=8001
 OPENCLAW_HOST_PORT=18790
 ```
 
-After restarting, the vLLM API is at `http://localhost:8001/v1` and the dashboard at `http://localhost:18790`.
+After restarting, the llama.cpp API is at `http://localhost:8001/v1` and the dashboard at `http://localhost:18790`.
 
 ---
 
@@ -1561,36 +1561,34 @@ Variables are grouped by the component they configure. All variables are **optio
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONTAINER_RUNTIME` | *(auto-detect)* | Force a specific container runtime. Valid values: `docker`, `podman`. When unset, scripts prefer `docker` if it is in `PATH`, then fall back to `podman`. |
-| `DEMOCLAW_NETWORK` | `democlaw-net` | Name of the shared bridge network that connects the vLLM and OpenClaw containers. Created automatically if it does not exist. |
+| `DEMOCLAW_NETWORK` | `democlaw-net` | Name of the shared bridge network that connects the llama.cpp and OpenClaw containers. Created automatically if it does not exist. |
 
-#### vLLM Server — Model
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MODEL_NAME` | `Qwen/Qwen3-4B-AWQ` | HuggingFace model repository ID. Must be an AWQ 4-bit quantized model to stay within the 8 GB VRAM budget. |
-| `QUANTIZATION` | `awq` | Quantization method passed to vLLM (`--quantization`). Must match the model format. |
-| `DTYPE` | `float16` | Weight data type (`--dtype`). `float16` is required for AWQ models on most consumer GPUs. |
-| `MAX_MODEL_LEN` | `8192` | Maximum context window in tokens (`--max-model-len`). Reduce (e.g. `4096`) to lower VRAM usage. |
-| `GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of GPU VRAM vLLM is allowed to use (0.0–1.0). Reduce to `0.80`–`0.85` if you see out-of-memory errors. |
-
-#### vLLM Server — Container
+#### llama.cpp Server — Model
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VLLM_CONTAINER_NAME` | `democlaw-vllm` | Name assigned to the vLLM container (`--name`). |
-| `VLLM_IMAGE_TAG` | `democlaw/vllm:latest` | Local image tag built from `vllm/Dockerfile`. |
-| `VLLM_HOST` | `0.0.0.0` | Address the vLLM HTTP server binds to inside the container. |
-| `VLLM_PORT` | `8000` | Port the vLLM server listens on **inside** the container. |
-| `VLLM_HOST_PORT` | `8000` | Port published on the **host** for direct API access (`http://localhost:VLLM_HOST_PORT/v1`). |
-| `VLLM_API_KEY` | *(empty)* | Optional API key for the OpenAI-compatible endpoint. When empty, `EMPTY`, or `none`, vLLM runs in no-auth mode and accepts any request. Set to a real secret to require `Authorization: Bearer <key>` on every API call. |
-| `VLLM_HEALTH_TIMEOUT` | `300` | Seconds `start-vllm.sh` waits for the `/health` endpoint to respond before giving up. Increase on slow machines or slow internet connections. |
+| `MODEL_NAME` | `Qwen3.5-9B-Q4_K_M` | GGUF model identifier. Must be a Q4_K_M quantized GGUF model to stay within the 8 GB VRAM budget. |
+| `MAX_MODEL_LEN` | `8192` | Maximum context window in tokens. Reduce (e.g. `4096`) to lower VRAM usage. |
+| `GPU_MEMORY_UTILIZATION` | `0.90` | Fraction of GPU VRAM llama.cpp is allowed to use (0.0–1.0). Reduce to `0.80`–`0.85` if you see out-of-memory errors. |
+
+#### llama.cpp Server — Container
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLAMACPP_CONTAINER_NAME` | `democlaw-llamacpp` | Name assigned to the llama.cpp container (`--name`). |
+| `LLAMACPP_IMAGE_TAG` | `democlaw/llamacpp:latest` | Local image tag built from `llamacpp/Dockerfile`. |
+| `LLAMACPP_HOST` | `0.0.0.0` | Address the llama.cpp HTTP server binds to inside the container. |
+| `LLAMACPP_PORT` | `8000` | Port the llama.cpp server listens on **inside** the container. |
+| `LLAMACPP_HOST_PORT` | `8000` | Port published on the **host** for direct API access (`http://localhost:LLAMACPP_HOST_PORT/v1`). |
+| `LLAMACPP_API_KEY` | *(empty)* | Optional API key for the OpenAI-compatible endpoint. When empty, `EMPTY`, or `none`, llama.cpp runs in no-auth mode and accepts any request. Set to a real secret to require `Authorization: Bearer <key>` on every API call. |
+| `LLAMACPP_HEALTH_TIMEOUT` | `300` | Seconds `start-llamacpp.sh` waits for the `/health` endpoint to respond before giving up. Increase on slow machines or slow internet connections. |
 | `SKIP_MODEL_PULL` | `false` | Set to `true` to skip the model pre-download step. Use this when the weights are already cached in `HF_CACHE_DIR`. |
 
 #### HuggingFace Cache
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HF_CACHE_DIR` | `~/.cache/huggingface` | Host directory bind-mounted into the vLLM container as `/root/.cache/huggingface`. Model weights (~5 GB) are stored here so they survive container restarts. Must have ≥ 10 GB free space. |
+| `HF_CACHE_DIR` | `~/.cache/huggingface` | Host directory bind-mounted into the llama.cpp container as `/root/.cache/huggingface`. Model weights (~5.7 GB) are stored here so they survive container restarts. Must have ≥ 10 GB free space. |
 | `HF_TOKEN` | *(empty)* | HuggingFace access token. Required only for gated/private model repositories. Generate one at <https://huggingface.co/settings/tokens>. |
 
 #### OpenClaw — Container
@@ -1605,17 +1603,17 @@ Variables are grouped by the component they configure. All variables are **optio
 
 #### OpenClaw — LLM Provider Connection
 
-These variables configure how OpenClaw connects to the vLLM backend. Three parallel naming conventions are supported for maximum compatibility with different OpenAI SDK versions.
+These variables configure how OpenClaw connects to the llama.cpp backend. Three parallel naming conventions are supported for maximum compatibility with different OpenAI SDK versions.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VLLM_BASE_URL` | `http://vllm:8000/v1` | Base URL of the vLLM OpenAI-compatible API. Uses the container hostname `vllm` which resolves inside the `democlaw-net` network. Change only if you rename the vLLM container or use a non-default port. |
-| `VLLM_MODEL_NAME` | `Qwen/Qwen3-4B-AWQ` | Model ID that OpenClaw sends in API requests. Must exactly match `MODEL_NAME` as returned by `/v1/models`. |
-| `VLLM_API_KEY` | `EMPTY` | Placeholder API key passed to OpenClaw. vLLM accepts any non-empty value in no-auth mode; set to your real secret if `VLLM_API_KEY` on the server side is a real key. |
-| `VLLM_MAX_TOKENS` | `4096` | Maximum tokens per LLM response requested by OpenClaw. |
-| `VLLM_TEMPERATURE` | `0.7` | Sampling temperature (0.0 = deterministic, 1.0+ = more random). |
-| `VLLM_HEALTH_RETRIES` | `60` | Number of times OpenClaw retries the vLLM health probe at container startup before giving up. |
-| `VLLM_HEALTH_INTERVAL` | `5` | Seconds between each vLLM health probe retry from inside the OpenClaw container. |
+| `LLAMACPP_BASE_URL` | `http://llamacpp:8000/v1` | Base URL of the llama.cpp OpenAI-compatible API. Uses the container hostname `llamacpp` which resolves inside the `democlaw-net` network. Change only if you rename the llama.cpp container or use a non-default port. |
+| `LLAMACPP_MODEL_NAME` | `Qwen3.5-9B-Q4_K_M` | Model ID that OpenClaw sends in API requests. Must exactly match `MODEL_NAME` as returned by `/v1/models`. |
+| `LLAMACPP_API_KEY` | `EMPTY` | Placeholder API key passed to OpenClaw. llama.cpp accepts any non-empty value in no-auth mode; set to your real secret if `LLAMACPP_API_KEY` on the server side is a real key. |
+| `LLAMACPP_MAX_TOKENS` | `4096` | Maximum tokens per LLM response requested by OpenClaw. |
+| `LLAMACPP_TEMPERATURE` | `0.7` | Sampling temperature (0.0 = deterministic, 1.0+ = more random). |
+| `LLAMACPP_HEALTH_RETRIES` | `60` | Number of times OpenClaw retries the llama.cpp health probe at container startup before giving up. |
+| `LLAMACPP_HEALTH_INTERVAL` | `5` | Seconds between each llama.cpp health probe retry from inside the OpenClaw container. |
 
 #### Healthcheck Scripts
 
@@ -1624,7 +1622,7 @@ These variables configure how OpenClaw connects to the vLLM backend. Three paral
 | `HEALTHCHECK_CURL_TIMEOUT` | `10` | `scripts/healthcheck.sh` | Per-request curl timeout in seconds. |
 | `OPENCLAW_HEALTH_RETRIES` | `10` | `scripts/healthcheck.sh` | Retry attempts for the OpenClaw dashboard check. |
 | `OPENCLAW_HEALTH_INTERVAL` | `3` | `scripts/healthcheck.sh` | Seconds between OpenClaw dashboard retries. |
-| `VLLM_HEALTH_CURL_TIMEOUT` | `10` | `scripts/healthcheck_vllm.sh` | Per-request curl timeout for the vLLM poller. |
+| `LLAMACPP_HEALTH_CURL_TIMEOUT` | `10` | `scripts/healthcheck_llamacpp.sh` | Per-request curl timeout for the llama.cpp poller. |
 | `OPENCLAW_HEALTH_TIMEOUT` | `120` | `scripts/healthcheck_openclaw.sh` | Total seconds to wait before giving up on the dashboard. |
 | `OPENCLAW_HEALTH_CURL_TIMEOUT` | `5` | `scripts/healthcheck_openclaw.sh` | Per-request curl timeout for dashboard polling. |
 
@@ -1640,7 +1638,7 @@ These variables configure how OpenClaw connects to the vLLM backend. Three paral
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VALIDATE_RETRIES` | `12` | Retry attempts when checking vLLM provider reachability. |
+| `VALIDATE_RETRIES` | `12` | Retry attempts when checking llama.cpp provider reachability. |
 | `VALIDATE_INTERVAL` | `5` | Seconds between connection validation retries. |
 | `VALIDATE_TIMEOUT` | `10` | Per-request curl timeout for connection validation. |
 
@@ -1650,7 +1648,7 @@ These variables configure how OpenClaw connects to the vLLM backend. Three paral
 |----------|---------|-------------|
 | `MIN_VRAM_MIB` | `7500` | Minimum GPU VRAM in MiB required to start the stack (~7.5 GB). |
 | `MIN_DRIVER_VERSION` | `520.0` | Minimum NVIDIA kernel driver version (needed for CUDA ≥ 11.8). |
-| `MIN_CUDA_VERSION` | `11.8` | Minimum CUDA driver API version required by vLLM. |
+| `MIN_CUDA_VERSION` | `11.8` | Minimum CUDA driver API version required by llama.cpp. |
 
 #### Stop Script
 
@@ -1755,7 +1753,7 @@ GPU_MEMORY_UTILIZATION=0.85
 **Resolve port conflicts (both ports already in use):**
 
 ```bash
-VLLM_HOST_PORT=8001
+LLAMACPP_HOST_PORT=8001
 OPENCLAW_HOST_PORT=18790
 ```
 
@@ -1767,13 +1765,13 @@ HF_CACHE_DIR=/data/hf-cache
 MODEL_NAME=my-org/my-private-awq-model
 ```
 
-**Enable API key authentication on the vLLM endpoint:**
+**Enable API key authentication on the llama.cpp endpoint:**
 
 ```bash
-VLLM_API_KEY=my-very-secret-key
+LLAMACPP_API_KEY=my-very-secret-key
 ```
 
-> When `VLLM_API_KEY` is set, all API clients (including OpenClaw) must include `Authorization: Bearer my-very-secret-key` in their requests. The scripts pass this key through to the OpenClaw container automatically via `VLLM_API_KEY`.
+> When `LLAMACPP_API_KEY` is set, all API clients (including OpenClaw) must include `Authorization: Bearer my-very-secret-key` in their requests. The scripts pass this key through to the OpenClaw container automatically via `LLAMACPP_API_KEY`.
 
 See [`.env.example`](.env.example) for the complete annotated template with every available variable.
 
@@ -1786,10 +1784,10 @@ See [`.env.example`](.env.example) for the complete annotated template with ever
 │  Linux Host                                          │
 │                                                      │
 │  ┌────────────────┐       ┌────────────────────────┐ │
-│  │  vLLM Server   │       │  OpenClaw              │ │
-│  │                │       │                        │ │
-│  │  Qwen3-4B    │◄──────│  Web Dashboard         │ │
-│  │  AWQ 4-bit     │ HTTP  │  (Node.js)             │ │
+│  │  llama.cpp     │       │  OpenClaw              │ │
+│  │  Server        │       │                        │ │
+│  │  Qwen3.5-9B  │◄──────│  Web Dashboard         │ │
+│  │  Q4_K_M GGUF   │ HTTP  │  (Node.js)             │ │
 │  │                │       │                        │ │
 │  │  :8000/v1      │       │  :18789                │ │
 │  └───────┬────────┘       └───────┬────────────────┘ │
@@ -1797,15 +1795,15 @@ See [`.env.example`](.env.example) for the complete annotated template with ever
 │          │  (container network)   │                   │
 │  ────────┴────────────────────────┴──────────────     │
 │                                                      │
-│  Host ports: :8000 (vLLM API)  :18789 (Dashboard)    │
+│  Host ports: :8000 (llama.cpp API)  :18789 (Dashboard)│
 └──────────────────────────────────────────────────────┘
 ```
 
 ### 컨테이너 상세 / Container details
 
-**vLLM container** (`democlaw-vllm`):
-- Base image: `vllm/vllm-openai:v0.8.3`
-- Serves the Qwen3-4B AWQ 4-bit model
+**llama.cpp container** (`democlaw-llamacpp`):
+- Base image: `ghcr.io/ggerganov/llama.cpp:server-cuda`
+- Serves the Qwen3.5-9B Q4_K_M GGUF model
 - OpenAI-compatible API at `/v1/chat/completions`, `/v1/models`, etc.
 - GPU passthrough via `--gpus all` (Docker) or CDI (Podman)
 - Built-in healthcheck on `/health` and `/v1/models`
@@ -1814,8 +1812,8 @@ See [`.env.example`](.env.example) for the complete annotated template with ever
 - Base image: Ubuntu 24.04 with Node.js 20
 - Runs as non-root user
 - Read-only filesystem (tmpfs for writable dirs)
-- Connects to vLLM via the `democlaw-net` container network
-- Waits for vLLM readiness before starting
+- Connects to llama.cpp via the `democlaw-net` container network
+- Waits for llama.cpp readiness before starting
 
 ### 보안 / Security
 
@@ -1823,7 +1821,7 @@ Both containers follow a minimal-privilege model:
 - `--cap-drop ALL` — no Linux capabilities
 - `--security-opt no-new-privileges` — prevents privilege escalation
 - OpenClaw runs as non-root with `--read-only` filesystem
-- No unnecessary host mounts (only HuggingFace cache for vLLM)
+- No unnecessary host mounts (only HuggingFace cache for llama.cpp)
 
 ## 멱등성 실행 / Idempotent Execution
 
@@ -1858,17 +1856,17 @@ Before investigating individual problems, run the full stack healthcheck to get 
 # Machine-readable JSON (useful for scripting)
 ./scripts/healthcheck.sh --json
 
-# vLLM only (fastest — useful while the model is still loading)
-./scripts/healthcheck.sh --vllm-only
+# llama.cpp only (fastest — useful while the model is still loading)
+./scripts/healthcheck.sh --llamacpp-only
 ```
 
-#### Verify the vLLM server is healthy
+#### Verify the llama.cpp server is healthy
 
-The vLLM server exposes three endpoints you can probe directly:
+The llama.cpp server exposes three endpoints you can probe directly:
 
 ```bash
 # 1. Liveness probe — expects HTTP 200 with an empty body
-curl -sf http://localhost:8000/health && echo "vLLM OK"
+curl -sf http://localhost:8000/health && echo "llama.cpp OK"
 
 # 2. List loaded models — confirm Qwen/Qwen3-4B-AWQ appears
 curl -s http://localhost:8000/v1/models | python3 -m json.tool
@@ -1880,13 +1878,13 @@ curl -s http://localhost:8000/v1/chat/completions \
   | python3 -m json.tool
 
 # 4. Check the in-container HEALTHCHECK status
-docker inspect --format '{{.State.Health.Status}}' democlaw-vllm
-# podman inspect --format '{{.State.Health.Status}}' democlaw-vllm
+docker inspect --format '{{.State.Health.Status}}' democlaw-llamacpp
+# podman inspect --format '{{.State.Health.Status}}' democlaw-llamacpp
 
-# 5. Stream the vLLM logs
-make logs-vllm
-# docker logs -f democlaw-vllm
-# podman logs -f democlaw-vllm
+# 5. Stream the llama.cpp logs
+make logs-llamacpp
+# docker logs -f democlaw-llamacpp
+# podman logs -f democlaw-llamacpp
 ```
 
 The server is fully ready when:
@@ -1986,7 +1984,7 @@ MAX_MODEL_LEN=16384
 GPU_MEMORY_UTILIZATION=0.85
 ```
 
-#### vLLM exits with `CUDA out of memory` during inference
+#### llama.cpp exits with `CUDA out of memory` during inference
 
 The model loaded but a long prompt exceeded available VRAM during generation.
 
@@ -2125,7 +2123,7 @@ sudo ss -tlnp | grep ':8000'
 sudo ss -tlnp | grep ':18789'
 
 # Or change the ports in .env
-VLLM_HOST_PORT=8001
+LLAMACPP_HOST_PORT=8001
 OPENCLAW_HOST_PORT=18790
 ```
 
@@ -2133,16 +2131,16 @@ OPENCLAW_HOST_PORT=18790
 
 ### 모델 다운로드 / 시작 오류 / Model download / startup errors
 
-#### vLLM takes a very long time to start (first run)
+#### llama.cpp takes a very long time to start (first run)
 
-On first launch, vLLM downloads ~5 GB of model weights from HuggingFace. This is expected and takes several minutes on a typical connection. Monitor progress:
+On first launch, the model file (~5.7 GB) is downloaded. This is expected and takes several minutes on a typical connection. Monitor progress:
 
 ```bash
-make logs-vllm
+make logs-llamacpp
 # or
-docker logs -f democlaw-vllm
+docker logs -f democlaw-llamacpp
 # or
-podman logs -f democlaw-vllm
+podman logs -f democlaw-llamacpp
 ```
 
 The server is ready when the log shows `INFO: Application startup complete.`
@@ -2178,16 +2176,16 @@ HF_CACHE_DIR=/data/hf-cache
 
 ### OpenClaw 오류 / OpenClaw errors
 
-#### OpenClaw says "waiting for vLLM" / times out
+#### OpenClaw says "waiting for llama.cpp" / times out
 
-OpenClaw polls the vLLM `/health` endpoint before starting its web server. If vLLM is still loading the model, OpenClaw will keep retrying until `OPENCLAW_HEALTH_TIMEOUT` (default: 120 s) expires.
+OpenClaw polls the llama.cpp `/health` endpoint before starting its web server. If llama.cpp is still loading the model, OpenClaw will keep retrying until `OPENCLAW_HEALTH_TIMEOUT` (default: 120 s) expires.
 
 ```bash
-# Check vLLM health — wait until this passes
-./scripts/healthcheck.sh --vllm-only
+# Check llama.cpp health — wait until this passes
+./scripts/healthcheck.sh --llamacpp-only
 
-# Or watch vLLM logs until "Application startup complete."
-make logs-vllm
+# Or watch llama.cpp logs until "Application startup complete."
+make logs-llamacpp
 
 # Increase the timeout if your machine is slow to load the model
 OPENCLAW_HEALTH_TIMEOUT=300 ./scripts/start-openclaw.sh
@@ -2195,17 +2193,17 @@ OPENCLAW_HEALTH_TIMEOUT=300 ./scripts/start-openclaw.sh
 
 #### OpenClaw dashboard loads but shows no model / "no provider configured"
 
-The `VLLM_BASE_URL` setting in OpenClaw's config is wrong or the vLLM container is unreachable.
+The `LLAMACPP_BASE_URL` setting in OpenClaw's config is wrong or the llama.cpp container is unreachable.
 
 ```bash
 # Check OpenClaw logs for connection errors
 make logs-openclaw
 
-# Verify the vLLM URL from inside the OpenClaw container
-docker exec democlaw-openclaw curl -sf http://vllm:8000/health && echo "vLLM reachable"
+# Verify the llama.cpp URL from inside the OpenClaw container
+docker exec democlaw-openclaw curl -sf http://llamacpp:8000/health && echo "llama.cpp reachable"
 
 # Default URL (container-to-container, via democlaw-net)
-VLLM_BASE_URL=http://vllm:8000/v1
+LLAMACPP_BASE_URL=http://llamacpp:8000/v1
 ```
 
 #### OpenClaw container exits immediately after starting
@@ -2217,7 +2215,7 @@ docker logs --tail 50 democlaw-openclaw
 # Common causes:
 # - Node.js version mismatch — rebuild the image: make build-openclaw
 # - Bad config.json syntax — check openclaw/config.json
-# - VLLM_BASE_URL unreachable at startup
+# - LLAMACPP_BASE_URL (llama.cpp) unreachable at startup
 ```
 
 ---
@@ -2237,7 +2235,7 @@ podman ps --filter "name=democlaw" --format "table {{.Names}}\t{{.Status}}\t{{.P
 #### Watch container health status in a loop
 
 ```bash
-watch -n 5 'docker inspect --format "{{.Name}}: {{.State.Health.Status}}" democlaw-vllm democlaw-openclaw'
+watch -n 5 'docker inspect --format "{{.Name}}: {{.State.Health.Status}}" democlaw-llamacpp democlaw-openclaw'
 ```
 
 #### Run the GPU preflight check standalone
@@ -2260,28 +2258,28 @@ make start    # rebuilds images and starts fresh
 ```
 democlaw/
 ├── scripts/
-│   ├── start.sh                 # Main orchestration script (vLLM + OpenClaw)
-│   ├── start-vllm.sh            # Launch vLLM container (GPU validation, model pull, health wait)
-│   ├── start-openclaw.sh        # Launch OpenClaw container (with health wait)
-│   ├── stop.sh                  # Stop and remove all containers
-│   ├── healthcheck.sh           # Verify both services are healthy
-│   ├── healthcheck_vllm.sh      # Healthcheck for the vLLM service only
-│   ├── healthcheck_openclaw.sh  # Healthcheck for the OpenClaw service only
-│   ├── validate-api.sh          # Validate vLLM OpenAI-compatible API endpoints
-│   ├── check-gpu.sh             # Standalone NVIDIA GPU/CUDA preflight validation
-│   ├── run_vllm.sh              # Raw vLLM container launch (no health wait)
+│   ├── start.sh                    # Main orchestration script (llama.cpp + OpenClaw)
+│   ├── start-llamacpp.sh           # Launch llama.cpp container (GPU validation, model pull, health wait)
+│   ├── start-openclaw.sh           # Launch OpenClaw container (with health wait)
+│   ├── stop.sh                     # Stop and remove all containers
+│   ├── healthcheck.sh              # Verify both services are healthy
+│   ├── healthcheck_llamacpp.sh     # Healthcheck for the llama.cpp service only
+│   ├── healthcheck_openclaw.sh     # Healthcheck for the OpenClaw service only
+│   ├── validate-api.sh             # Validate llama.cpp OpenAI-compatible API endpoints
+│   ├── check-gpu.sh                # Standalone NVIDIA GPU/CUDA preflight validation
+│   ├── run_llamacpp.sh             # Raw llama.cpp container launch (no health wait)
 │   └── lib/
-│       ├── runtime.sh           # Docker/Podman auto-detection library
-│       └── gpu.sh               # NVIDIA GPU/CUDA validation library
-├── vllm/
-│   ├── Dockerfile               # vLLM server image (based on vllm/vllm-openai)
-│   ├── entrypoint.sh            # Container entrypoint with model arguments
-│   └── healthcheck.sh           # In-container healthcheck
+│       ├── runtime.sh              # Docker/Podman auto-detection library
+│       └── gpu.sh                  # NVIDIA GPU/CUDA validation library
+├── llamacpp/
+│   ├── Dockerfile                  # llama.cpp server image (based on ghcr.io/ggerganov/llama.cpp)
+│   ├── entrypoint.sh               # Container entrypoint with model arguments
+│   └── healthcheck.sh              # In-container healthcheck
 ├── openclaw/
-│   ├── Dockerfile               # OpenClaw image (Ubuntu 24.04 + Node.js 20)
-│   ├── entrypoint.sh            # Runtime config + vLLM wait logic
-│   ├── healthcheck.sh           # In-container healthcheck
-│   ├── config.json              # LLM provider config template
+│   ├── Dockerfile                  # OpenClaw image (Ubuntu 24.04 + Node.js 20)
+│   ├── entrypoint.sh               # Runtime config + llama.cpp wait logic
+│   ├── healthcheck.sh              # In-container healthcheck
+│   ├── config.json                 # LLM provider config template
 │   └── .dockerignore
 ├── .github/
 │   └── workflows/
@@ -2468,33 +2466,31 @@ clawhub install simple-file-tree
 
 | Project | Description | Links |
 |---------|-------------|-------|
-| **vLLM** | High-throughput LLM inference engine with OpenAI-compatible API | [GitHub](https://github.com/vllm-project/vllm) · [Docs](https://docs.vllm.ai) · [Docker Hub](https://hub.docker.com/r/vllm/vllm-openai) |
-| **Qwen3-4B-AWQ** | Alibaba's Qwen 2.5 series 7B model, AWQ 4-bit quantised for 8 GB VRAM | [HuggingFace](https://huggingface.co/Qwen/Qwen3-4B-AWQ) · [Qwen GitHub](https://github.com/QwenLM/Qwen3) · [Model card](https://huggingface.co/Qwen/Qwen3-4B-AWQ) |
+| **llama.cpp** | High-performance LLM inference engine with OpenAI-compatible API, supporting GGUF format models | [GitHub](https://github.com/ggerganov/llama.cpp) · [GGUF models](https://huggingface.co/models?library=gguf) |
+| **Qwen3.5-9B-Q4_K_M** | Alibaba's Qwen 3.5 series 9B model, Q4_K_M GGUF quantised for consumer VRAM | [HuggingFace](https://huggingface.co/models?search=qwen3.5+gguf) · [Qwen GitHub](https://github.com/QwenLM/Qwen3) |
 | **OpenClaw** | Open-source AI assistant web dashboard | [GitHub](https://github.com/openclaw/openclaw) |
 | **NVIDIA Container Toolkit** | GPU passthrough for Docker and Podman | [GitHub](https://github.com/NVIDIA/nvidia-container-toolkit) · [Install guide](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) |
 | **NVIDIA CDI** | Container Device Interface spec for Podman GPU passthrough | [CDI spec](https://github.com/cncf-tags/container-device-interface) · [nvidia-ctk cdi docs](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/cdi-support.html) |
 
-### vLLM
+### llama.cpp
 
-[vLLM](https://github.com/vllm-project/vllm) is a fast, memory-efficient LLM serving library developed at UC Berkeley. It uses PagedAttention to achieve high throughput inference and exposes a fully OpenAI-compatible REST API, allowing any OpenAI SDK client to work with locally-hosted models without code changes. The official container image `vllm/vllm-openai` bundles the complete CUDA runtime, so no host-side CUDA Toolkit installation is required.
+[llama.cpp](https://github.com/ggerganov/llama.cpp) is a high-performance LLM inference engine written in C/C++ by Georgi Gerganov. It runs quantised models in GGUF format with minimal dependencies and exposes a fully OpenAI-compatible REST API, allowing any OpenAI SDK client to work with locally-hosted models without code changes. It supports CPU, CUDA, Metal, and other backends, making it suitable for a wide range of hardware configurations.
 
-- Documentation: <https://docs.vllm.ai>
-- GitHub: <https://github.com/vllm-project/vllm>
-- Docker Hub: <https://hub.docker.com/r/vllm/vllm-openai>
-- Supported models list: <https://docs.vllm.ai/en/latest/models/supported_models.html>
+- GitHub: <https://github.com/ggerganov/llama.cpp>
+- GGUF model hub: <https://huggingface.co/models?library=gguf>
+- Container image: <https://github.com/ggerganov/llama.cpp/pkgs/container/llama.cpp>
 
-### Qwen / Qwen3-4B-AWQ
+### Qwen / Qwen3.5-9B-Q4_K_M
 
-[Qwen](https://github.com/QwenLM/Qwen3) is Alibaba Cloud's open-source large language model family. The **Qwen3-4B-AWQ** variant is a 4-billion-parameter model quantised to 4-bit using the [AWQ (Activation-aware Weight Quantization)](https://arxiv.org/abs/2306.00978) method, reducing the on-GPU memory footprint from ~14 GB (fp16) to ~5 GB while preserving most of the model quality.
+[Qwen](https://github.com/QwenLM/Qwen3) is Alibaba Cloud's open-source large language model family. The **Qwen3.5-9B-Q4_K_M** variant is a 9-billion-parameter model quantised to 4-bit using the Q4_K_M GGUF quantisation method, reducing the memory footprint while preserving most of the model quality and enabling efficient inference with llama.cpp.
 
-- Model card: <https://huggingface.co/Qwen/Qwen3-4B-AWQ>
 - Qwen GitHub: <https://github.com/QwenLM/Qwen3>
 - Qwen Blog: <https://qwenlm.github.io>
-- AWQ paper: <https://arxiv.org/abs/2306.00978>
+- GGUF models on HuggingFace: <https://huggingface.co/models?library=gguf&search=qwen>
 
 ### OpenClaw
 
-[OpenClaw](https://github.com/openclaw/openclaw) is an open-source AI assistant web application. It provides a browser-based chat interface that connects to any OpenAI-compatible API endpoint, making it a natural fit for self-hosted vLLM backends.
+[OpenClaw](https://github.com/openclaw/openclaw) is an open-source AI assistant web application. It provides a browser-based chat interface that connects to any OpenAI-compatible API endpoint, making it a natural fit for self-hosted llama.cpp backends.
 
 - GitHub: <https://github.com/openclaw/openclaw>
 
@@ -2508,10 +2504,9 @@ The [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-container-toolki
 
 ### 추가 읽을거리 / Further reading
 
-- [OpenAI API Reference](https://platform.openai.com/docs/api-reference) — the API contract that vLLM's `/v1/` endpoints implement
-- [AWQ: Activation-aware Weight Quantization](https://arxiv.org/abs/2306.00978) — the quantisation technique used by `Qwen3-4B-AWQ`
-- [PagedAttention paper](https://arxiv.org/abs/2309.06180) — the memory-management technique behind vLLM's efficiency
-- [HuggingFace model hub](https://huggingface.co/models?pipeline_tag=text-generation&sort=downloads) — browse other AWQ-quantised models compatible with vLLM
+- [OpenAI API Reference](https://platform.openai.com/docs/api-reference) — the API contract that llama.cpp's `/v1/` endpoints implement
+- [GGUF format](https://github.com/ggerganov/ggml/blob/master/docs/gguf.md) — the quantisation format used by llama.cpp models
+- [HuggingFace GGUF model hub](https://huggingface.co/models?library=gguf&sort=downloads) — browse GGUF-quantised models compatible with llama.cpp
 
 ## Windows 빠른 시작 / Windows Quick Start
 

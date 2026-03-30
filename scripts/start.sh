@@ -98,7 +98,7 @@ log "NVIDIA GPU OK."
 log ""
 log "--- Phase 0: Cleanup ---"
 
-for cname in "${OPENCLAW_CONTAINER}" "${LLAMACPP_CONTAINER}" "democlaw-vllm"; do
+for cname in "${OPENCLAW_CONTAINER}" "${LLAMACPP_CONTAINER}"; do
     if "${RUNTIME}" container inspect "${cname}" >/dev/null 2>&1; then
         log "Removing old container '${cname}' ..."
         "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true
@@ -151,7 +151,7 @@ log "  Model dir  : ${MODEL_DIR}"
     --name "${LLAMACPP_CONTAINER}" \
     --network "${NETWORK}" \
     ${HOSTNAME_LLM} \
-    --network-alias vllm \
+    --network-alias llamacpp \
     ${GPU_FLAGS} \
     --restart unless-stopped \
     ${SHM_FLAGS} \
@@ -273,9 +273,9 @@ log "Starting OpenClaw container ..."
     --restart unless-stopped \
     -p "${OPENCLAW_PORT}:${OPENCLAW_PORT}" \
     -p 18791:18791 \
-    -e "VLLM_BASE_URL=http://vllm:8000/v1" \
-    -e "VLLM_API_KEY=EMPTY" \
-    -e "VLLM_MODEL_NAME=${MODEL_NAME}" \
+    -e "LLAMACPP_BASE_URL=http://llamacpp:8000/v1" \
+    -e "LLAMACPP_API_KEY=EMPTY" \
+    -e "LLAMACPP_MODEL_NAME=${MODEL_NAME}" \
     -e "OPENCLAW_PORT=${OPENCLAW_PORT}" \
     "${OPENCLAW_IMAGE}" || error "Failed to start OpenClaw container."
 
