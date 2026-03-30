@@ -120,7 +120,7 @@ log "--- Phase 1: Acquire images ---"
 _img_log()   { log "$@"; }
 _img_warn()  { log "WARNING: $*"; }
 _img_error() { error "$@"; }
-source "${SCRIPT_DIR}/lib/image.sh"
+source "${SCRIPT_DIR}/reference/image.sh"
 
 ensure_image "${LLAMACPP_IMAGE}" "${PROJECT_ROOT}/llamacpp"
 ensure_image "${OPENCLAW_IMAGE}" "${PROJECT_ROOT}/openclaw"

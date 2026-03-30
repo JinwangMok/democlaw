@@ -59,10 +59,10 @@ $MinSize = 5000000000  # ~5 GB minimum
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-function Log   { param([string]$m) Write-Host "[download-models] $m" }
-function Warn  { param([string]$m) Write-Warning "[download-models] $m" }
-function Ok    { param([string]$m) Write-Host "[download-models] OK: $m" -ForegroundColor Green }
-function Info  { param([string]$m) Write-Host "[download-models] $m" -ForegroundColor Cyan }
+function Log   { param([string]$m) Write-Host "[download-model] $m" }
+function Warn  { param([string]$m) Write-Warning "[download-model] $m" }
+function Ok    { param([string]$m) Write-Host "[download-model] OK: $m" -ForegroundColor Green }
+function Info  { param([string]$m) Write-Host "[download-model] $m" -ForegroundColor Cyan }
 
 # ---------------------------------------------------------------------------
 # Banner
