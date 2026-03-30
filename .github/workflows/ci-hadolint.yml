@@ -15,17 +15,19 @@ name: Dockerfile Lint (hadolint)
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "llamacpp/Dockerfile"
       - "openclaw/Dockerfile"
+      - "markitdown/Dockerfile"
       - ".hadolint.yaml"
       - ".github/workflows/ci-hadolint.yml"
   pull_request:
-    branches: [main]
+    branches: [master]
     paths:
       - "llamacpp/Dockerfile"
       - "openclaw/Dockerfile"
+      - "markitdown/Dockerfile"
       - ".hadolint.yaml"
       - ".github/workflows/ci-hadolint.yml"
   workflow_dispatch: {}
@@ -50,6 +52,8 @@ jobs:
             label: llama.cpp
           - dockerfile: openclaw/Dockerfile
             label: OpenClaw
+          - dockerfile: markitdown/Dockerfile
+            label: MarkItDown
 
     steps:
       # -----------------------------------------------------------------------

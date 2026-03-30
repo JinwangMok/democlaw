@@ -91,8 +91,10 @@ echo "[entrypoint]   Tool calls : ENABLED (--jinja)"
 # Build flash-attn flag
 # ---------------------------------------------------------------------------
 FLASH_ATTN_FLAG=""
-if [ "${_flash_attn}" = "1" ] || [ "${_flash_attn}" = "true" ]; then
-    FLASH_ATTN_FLAG="--flash-attn"
+if [ "${_flash_attn}" = "1" ] || [ "${_flash_attn}" = "true" ] || [ "${_flash_attn}" = "on" ]; then
+    FLASH_ATTN_FLAG="--flash-attn on"
+elif [ "${_flash_attn}" = "auto" ]; then
+    FLASH_ATTN_FLAG="--flash-attn auto"
 fi
 
 # ---------------------------------------------------------------------------

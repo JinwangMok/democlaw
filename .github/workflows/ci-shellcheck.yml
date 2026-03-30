@@ -23,12 +23,12 @@ name: ShellCheck
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     paths:
       - "**/*.sh"
       - ".github/workflows/ci-shellcheck.yml"
   pull_request:
-    branches: [main]
+    branches: [master]
     paths:
       - "**/*.sh"
       - ".github/workflows/ci-shellcheck.yml"

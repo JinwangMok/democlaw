@@ -153,9 +153,11 @@ if [ ! -f "${HOME}/.openclaw/openclaw.json" ]; then
         --non-interactive \
         --accept-risk \
         --mode local \
-        --auth-choice custom \
+        --auth-choice custom-api-key \
+        --custom-provider-id llamacpp \
         --custom-base-url "${LLAMACPP_BASE_URL}" \
         --custom-model-id "${LLAMACPP_MODEL_NAME}" \
+        --custom-api-key "${LLAMACPP_API_KEY}" \
         2>/dev/null || true
 fi
 
@@ -167,10 +169,10 @@ openclaw config set gateway.bind lan 2>/dev/null || true
 openclaw config set gateway.auth.mode token 2>/dev/null || true
 openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
 
-# Fix model settings (onboard defaults may be wrong)
-openclaw config set models.providers.llamacpp.apiKey EMPTY 2>/dev/null || true
-openclaw config set models.providers.llamacpp.models.0.maxTokens 2048 2>/dev/null || true
-openclaw config set models.providers.llamacpp.models.0.contextWindow 32000 2>/dev/null || true
+# Set default agent model to the local llama.cpp model.
+# The "llamacpp" provider was registered by onboard --custom-provider-id above.
+# Without this, OpenClaw defaults to anthropic/claude-opus-4-6.
+openclaw models set "llamacpp/${LLAMACPP_MODEL_NAME}" 2>/dev/null || true
 
 echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPENCLAW_PORT}) ..."
 
@@ -189,8 +191,16 @@ else
 fi
 GATEWAY_PID=$!
 
-# Wait for gateway to be ready
-sleep 8
+# Wait for gateway to be ready (poll instead of fixed sleep)
+gateway_wait=0
+while [ "${gateway_wait}" -lt 30 ]; do
+    if curl -sf "http://localhost:${OPENCLAW_PORT}/" >/dev/null 2>&1; then
+        echo "[openclaw-entrypoint] Gateway is responding on port ${OPENCLAW_PORT}."
+        break
+    fi
+    sleep 1
+    gateway_wait=$((gateway_wait + 1))
+done
 
 # ---------------------------------------------------------------------------
 # Auto-approve the FIRST device pairing request only (one-shot, not a loop)

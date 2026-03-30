@@ -44,12 +44,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /build
 
-# CUDA driver stubs are needed at link time (not present in devel containers).
-# The stubs dir ships libcuda.so but not the versioned libcuda.so.1 soname that
-# the linker resolves transitively through libggml-cuda.so — create the symlink.
+# CUDA driver stubs provide libcuda.so for compile-time linking, but the stub
+# doesn't define all VMM symbols (cuMemCreate, etc.). Allow the linker to leave
+# those unresolved — they will be satisfied at runtime by the real driver
+# injected via nvidia-container-toolkit.
 ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
-RUN ln -sf /usr/local/cuda/lib64/stubs/libcuda.so \
-           /usr/local/cuda/lib64/stubs/libcuda.so.1
 
 RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" \
         https://github.com/ggerganov/llama.cpp.git . \
@@ -57,6 +56,7 @@ RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" \
         -DGGML_CUDA=ON \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
+        -DCMAKE_EXE_LINKER_FLAGS="-Wl,--allow-shlib-undefined" \
     && cmake --build build --config Release -j"$(nproc)" --target llama-server
 
 # ===========================================================================
@@ -94,6 +94,7 @@ COPY --from=builder /build/build/bin/libggml.so    /usr/local/lib/
 COPY --from=builder /build/build/bin/libggml-base.so  /usr/local/lib/
 COPY --from=builder /build/build/bin/libggml-cuda.so  /usr/local/lib/
 COPY --from=builder /build/build/bin/libggml-cpu.so   /usr/local/lib/
+COPY --from=builder /build/build/bin/libmtmd.so       /usr/local/lib/
 RUN ldconfig
 
 # ---------------------------------------------------------------------------

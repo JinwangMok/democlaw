@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# start.sh -- Full E2E startup for the DemoClaw stack (llama.cpp + OpenClaw)
+# start.sh -- Full E2E startup for the DemoClaw stack (llama.cpp + MarkItDown + OpenClaw)
 #
 # This single script handles the entire lifecycle:
 #   1. Clean up old containers/network
@@ -22,13 +22,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ---------------------------------------------------------------------------
+# Load .env file if present (overrides defaults below)
+# ---------------------------------------------------------------------------
+ENV_FILE="${PROJECT_ROOT}/.env"
+if [ -f "${ENV_FILE}" ]; then
+    # shellcheck source=/dev/null
+    set -a; source "${ENV_FILE}"; set +a
+    log "Loaded config from ${ENV_FILE}"
+fi
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-LLAMACPP_IMAGE="${DEMOCLAW_LLAMACPP_IMAGE:-docker.io/jinwangmok/democlaw-llamacpp:v1.0.0}"
-OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-openclaw:v1.0.0}"
+LLAMACPP_IMAGE="${DEMOCLAW_LLAMACPP_IMAGE:-docker.io/jinwangmok/democlaw-llamacpp:v1.1.0}"
+OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-openclaw:v1.1.0}"
+MARKITDOWN_IMAGE="${DEMOCLAW_MARKITDOWN_IMAGE:-democlaw-markitdown:latest}"
 NETWORK="democlaw-net"
 LLAMACPP_CONTAINER="democlaw-llamacpp"
 OPENCLAW_CONTAINER="democlaw-openclaw"
+MARKITDOWN_CONTAINER="democlaw-markitdown"
 MODEL_NAME="Qwen3.5-9B-Q4_K_M"
 MODEL_REPO="unsloth/Qwen3.5-9B-GGUF"
 MODEL_FILE="Qwen3.5-9B-Q4_K_M.gguf"
@@ -43,6 +55,7 @@ CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
 # Ports
 LLAMACPP_PORT="8000"
 OPENCLAW_PORT="18789"
+MARKITDOWN_PORT="${MARKITDOWN_PORT:-3001}"
 
 # Timeouts (seconds)
 LLAMACPP_HEALTH_TIMEOUT=600   # longer: model may need to download on first run
@@ -98,7 +111,7 @@ log "NVIDIA GPU OK."
 log ""
 log "--- Phase 0: Cleanup ---"
 
-for cname in "${OPENCLAW_CONTAINER}" "${LLAMACPP_CONTAINER}"; do
+for cname in "${OPENCLAW_CONTAINER}" "${MARKITDOWN_CONTAINER}" "${LLAMACPP_CONTAINER}"; do
     if "${RUNTIME}" container inspect "${cname}" >/dev/null 2>&1; then
         log "Removing old container '${cname}' ..."
         "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true
@@ -124,6 +137,7 @@ source "${SCRIPT_DIR}/reference/image.sh"
 
 ensure_image "${LLAMACPP_IMAGE}" "${PROJECT_ROOT}/llamacpp"
 ensure_image "${OPENCLAW_IMAGE}" "${PROJECT_ROOT}/openclaw"
+ensure_image "${MARKITDOWN_IMAGE}" "${PROJECT_ROOT}/markitdown"
 
 log "Images ready."
 
@@ -258,13 +272,65 @@ if [ "${models_verified}" != "true" ]; then
 fi
 
 # ===========================================================================
-# Phase 3: Start OpenClaw
+# Phase 3: Start MarkItDown MCP sidecar
 # ===========================================================================
 log ""
-log "--- Phase 3: Start OpenClaw ---"
+log "--- Phase 3: Start MarkItDown MCP server ---"
+
+log "Starting MarkItDown container ..."
+log "  Port : ${MARKITDOWN_PORT}"
+
+"${RUNTIME}" run -d \
+    --name "${MARKITDOWN_CONTAINER}" \
+    --network "${NETWORK}" \
+    --network-alias markitdown \
+    --restart unless-stopped \
+    -p "${MARKITDOWN_PORT}:${MARKITDOWN_PORT}" \
+    -e "MARKITDOWN_PORT=${MARKITDOWN_PORT}" \
+    -e "MARKITDOWN_HOST=0.0.0.0" \
+    "${MARKITDOWN_IMAGE}" || log "WARNING: Failed to start MarkItDown container. Continuing without it."
+
+log "MarkItDown container started. Waiting for health ..."
+
+# Wait for MarkItDown MCP server to be ready
+markitdown_elapsed=0
+MARKITDOWN_HEALTH_TIMEOUT=60
+while [ "${markitdown_elapsed}" -lt "${MARKITDOWN_HEALTH_TIMEOUT}" ]; do
+    if curl -sf "http://localhost:${MARKITDOWN_PORT}/health" >/dev/null 2>&1; then
+        log "MarkItDown MCP server /health OK."
+        break
+    fi
+    sleep 2
+    markitdown_elapsed=$((markitdown_elapsed + 2))
+    if [ $((markitdown_elapsed % 10)) -eq 0 ]; then
+        log "  ... waiting for MarkItDown (${markitdown_elapsed}/${MARKITDOWN_HEALTH_TIMEOUT}s)"
+    fi
+done
+
+markitdown_healthy=true
+if [ "${markitdown_elapsed}" -ge "${MARKITDOWN_HEALTH_TIMEOUT}" ]; then
+    markitdown_healthy=false
+    log "WARNING: MarkItDown MCP server did not become healthy within ${MARKITDOWN_HEALTH_TIMEOUT}s."
+    log "  OpenClaw will start without MarkItDown. Check logs: ${RUNTIME} logs ${MARKITDOWN_CONTAINER}"
+fi
+
+# ===========================================================================
+# Phase 4: Start OpenClaw
+# ===========================================================================
+log ""
+log "--- Phase 4: Start OpenClaw ---"
 
 log "Starting OpenClaw container ..."
 
+# mcporter configuration — mount from host if it exists
+MCPORTER_MOUNT=""
+MCPORTER_CONFIG="${PROJECT_ROOT}/config/mcporter.json"
+if [ -f "${MCPORTER_CONFIG}" ]; then
+    MCPORTER_MOUNT="-v ${MCPORTER_CONFIG}:/app/config/mcporter.json:ro"
+    log "  mcporter config: ${MCPORTER_CONFIG} -> /app/config/mcporter.json"
+fi
+
+# shellcheck disable=SC2086
 "${RUNTIME}" run -d \
     --name "${OPENCLAW_CONTAINER}" \
     --network "${NETWORK}" \
@@ -273,6 +339,7 @@ log "Starting OpenClaw container ..."
     --restart unless-stopped \
     -p "${OPENCLAW_PORT}:${OPENCLAW_PORT}" \
     -p 18791:18791 \
+    ${MCPORTER_MOUNT} \
     -e "LLAMACPP_BASE_URL=http://llamacpp:8000/v1" \
     -e "LLAMACPP_API_KEY=EMPTY" \
     -e "LLAMACPP_MODEL_NAME=${MODEL_NAME}" \
@@ -314,7 +381,7 @@ if [ "${oc_http_code}" != "200" ]; then
 fi
 
 # ===========================================================================
-# Phase 4: Both health-checks passed — print dashboard URL
+# Phase 5: All health-checks passed — print dashboard URL
 # ===========================================================================
 
 # Resolve dashboard URL: try tokenized URL from openclaw binary, fall back to localhost
@@ -332,9 +399,14 @@ log "========================================================"
 log "  DemoClaw is running!"
 log "========================================================"
 log ""
-log "  Both health-checks passed:"
-log "    - llama.cpp /v1/models .. HTTP 200"
-log "    - OpenClaw dashboard ... HTTP 200"
+log "  Health-checks passed:"
+log "    - llama.cpp /v1/models ... HTTP 200"
+if [ "${markitdown_healthy}" = "true" ]; then
+    log "    - MarkItDown MCP ........ OK"
+else
+    log "    - MarkItDown MCP ........ WARN (unhealthy)"
+fi
+log "    - OpenClaw dashboard .... HTTP 200"
 log ""
 log "  Services:"
 log "    LLM API  : ${LLM_API_URL}"
