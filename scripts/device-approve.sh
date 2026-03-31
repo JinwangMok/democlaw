@@ -65,8 +65,12 @@ case "${1:-}" in
             exit 1
         fi
         echo "Approving pairing code ${3} for ${2} ..."
-        "${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw pairing approve "${2}" "${3}" 2>/dev/null \
-            && echo "Approved." || echo "Failed."
+        if "${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw pairing approve "${2}" "${3}"; then
+            echo "Approved."
+        else
+            echo "Failed." >&2
+            exit 1
+        fi
         ;;
     --list|-l)
         echo "Pending devices on ${OPENCLAW_CONTAINER}:"

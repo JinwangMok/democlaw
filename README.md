@@ -211,7 +211,9 @@ When you DM the Discord bot, it issues a pairing code. This code is managed by t
 scripts\device-approve.bat --pairing discord <CODE>
 ```
 
-또는 컨테이너에서 직접 실행:
+또는 컨테이너에서 직접 실행할 수도 있습니다:
+
+Or run directly inside the container:
 
 ```bash
 docker exec democlaw-openclaw openclaw pairing approve discord <CODE>
@@ -331,13 +333,17 @@ Save 후 자동 재시작.
 
 By default, OpenClaw settings, device pairings, and credentials are stored inside the container. Restarting the container resets all state.
 
-`OPENCLAW_DATA_DIR`을 설정하면 이 데이터를 호스트에 영속화할 수 있습니다:
+### Setup
+
+`OPENCLAW_DATA_DIR`을 설정하면 이 데이터를 호스트에 영속화할 수 있습니다.
+
+Set `OPENCLAW_DATA_DIR` to persist this data on the host.
 
 ```bash
-cp .env.example .env
+cp .env.example .env   # if not already done
 ```
 
-`.env` 파일에서:
+`.env` 파일에서 / In your `.env` file:
 
 ```bash
 OPENCLAW_DATA_DIR=/path/to/openclaw-data
@@ -348,14 +354,26 @@ Windows:
 OPENCLAW_DATA_DIR=C:\Users\YourName\.openclaw-data
 ```
 
-디렉토리가 없으면 자동 생성됩니다. 이 설정을 사용하면 컨테이너를 재시작해도 다음 항목이 유지됩니다:
+### How it works
+
+- `start.sh` / `start.bat`이 `OPENCLAW_DATA_DIR`을 감지하면 해당 디렉토리를 컨테이너의 `/home/openclaw/.openclaw`에 읽기/쓰기 모드로 마운트합니다.
+- 변수가 설정되지 않으면 마운트 없이 실행됩니다 (기본 동작, 모든 상태는 일시적).
+- 지정된 디렉토리가 존재하지 않으면 자동 생성됩니다.
+
+- When `OPENCLAW_DATA_DIR` is set, `start.sh` / `start.bat` mounts it to `/home/openclaw/.openclaw` in read-write mode.
+- When unset, no mount occurs and all state is ephemeral (default behavior).
+- If the directory does not exist, it is created automatically.
+
+컨테이너를 재시작해도 다음 항목이 유지됩니다:
+
+The following data is preserved across container restarts:
 
 | Data | Description |
 |------|-------------|
-| `devices/` | 디바이스/Discord 페어링 정보 |
-| `credentials/` | 인증 토큰 |
-| `openclaw.json` | MCP 서버, 에이전트 등 설정 |
-| `identity/` | 인스턴스 ID |
+| `devices/` | Device and Discord pairing info |
+| `credentials/` | Authentication tokens |
+| `openclaw.json` | Settings (MCP servers, agents, etc.) |
+| `identity/` | Instance identity |
 
 ## Workspace Volume Mount
 

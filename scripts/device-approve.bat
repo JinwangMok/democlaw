@@ -134,8 +134,13 @@ if "%~3"=="" (
     exit /b 1
 )
 echo Approving pairing code %~3 for %~2 ...
-%RUNTIME% exec %OPENCLAW_CONTAINER% openclaw pairing approve "%~2" "%~3" 2>nul
-if !errorlevel! equ 0 (echo Approved.) else (echo Failed.)
+%RUNTIME% exec %OPENCLAW_CONTAINER% openclaw pairing approve "%~2" "%~3"
+if !errorlevel! equ 0 (
+    echo Approved.
+) else (
+    echo Failed. >&2
+    exit /b 1
+)
 exit /b 0
 
 :do_help
