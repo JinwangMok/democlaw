@@ -113,6 +113,66 @@ curl http://localhost:8000/v1/models
 scripts\stop.bat
 ```
 
+## Use Cases
+
+스택을 시작한 후 (`./scripts/start.sh` 또는 `scripts\start.bat`), 브라우저에서 대시보드 URL을 열고 Chat에서 다음과 같이 활용할 수 있습니다.
+
+After starting the stack, open the dashboard URL in your browser and try these in the Chat:
+
+### 1. 날씨 확인 (Weather Check)
+
+출근 전 날씨를 확인하고 우산이 필요한지 물어봅니다.
+
+```
+서울 오늘 날씨 어때? 우산 가져가야 할까?
+```
+
+에이전트가 `web_search` 도구로 실시간 날씨를 검색하고, 비 예보 여부와 우산 조언을 한국어로 답변합니다.
+
+### 2. 뉴스 리서치 (News Research)
+
+업계 최신 동향을 빠르게 파악합니다.
+
+```
+2026년 3월 AI 업계 최신 뉴스 3개를 검색해서 요약해줘. 각 뉴스의 핵심을 한 줄로.
+```
+
+에이전트가 `web_search`로 최신 기사를 검색하고, 각 뉴스를 한 줄로 요약합니다.
+
+### 3. 코드 작성 (Code Generation)
+
+업무 자동화용 스크립트를 작성합니다.
+
+```
+Write a Python function that calculates compound interest.
+Parameters: principal, annual_rate, years, compounds_per_year.
+Include an example usage.
+```
+
+에이전트가 함수 코드와 사용 예시를 생성합니다.
+
+### Built-in Agent Tools
+
+OpenClaw 에이전트는 다음 도구를 기본 탑재하고 있습니다:
+
+| Tool | Description |
+|------|-------------|
+| `web_search` | 웹 검색 (날씨, 뉴스, 정보 조회) |
+| `web_fetch` | URL 내용 가져오기 (컨테이너 네트워크 환경에 따라 제한될 수 있음) |
+| `read` / `write` | 워크스페이스 파일 읽기/쓰기 |
+
+### Available Skills
+
+`openclaw skills list` 명령으로 사용 가능한 스킬을 확인할 수 있습니다. 기본 제공 스킬 중 별도 설정 없이 사용 가능한 것들:
+
+| Skill | Description |
+|-------|-------------|
+| `weather` | 날씨 및 기상 예보 (API 키 불필요) |
+| `healthcheck` | 시스템 보안 점검 |
+| `skill-creator` | 커스텀 스킬 생성/편집 |
+
+> **Note:** 대부분의 번들 스킬 (Slack, GitHub, Notion 등)은 별도 CLI 설치 및 인증이 필요합니다. `openclaw skills list`에서 "△ needs setup"으로 표시됩니다.
+
 ## Device Approval
 
 첫 번째 디바이스 페어링은 컨테이너 내부에서 자동 승인됩니다. 이후 추가 디바이스는 호스트에서 승인해야 합니다.
@@ -137,122 +197,52 @@ scripts\device-approve.bat --list
 scripts\device-approve.bat <device-id>
 ```
 
-## Adding MCP Sidecar Containers
+## MCP (Model Context Protocol)
 
-OpenClaw는 MCP (Model Context Protocol) 서버를 통해 외부 도구를 사용할 수 있습니다. MCP 서버는 독립적인 컨테이너로 실행하고, 같은 `democlaw-net` 네트워크에 연결하면 OpenClaw가 자동으로 인식합니다.
+### Current Limitation
 
-OpenClaw can use external tools via MCP servers. Run MCP servers as independent containers on the same `democlaw-net` network, and OpenClaw discovers them automatically.
+OpenClaw v2026.3.28은 **stdio transport MCP 서버만 지원**합니다. SSE 및 Streamable HTTP transport는 아직 지원되지 않습니다.
 
-### Example: MarkItDown MCP Server
+OpenClaw v2026.3.28 only supports **stdio transport** for MCP servers. SSE and Streamable HTTP are not yet supported.
 
-[MarkItDown](https://github.com/microsoft/markitdown)은 PDF, DOCX, PPTX, HTML 등을 Markdown으로 변환하는 MCP 서버입니다.
+이는 별도 컨테이너에서 네트워크(SSE)를 통해 MCP 서버를 연결하는 사이드카 패턴이 현재 작동하지 않음을 의미합니다. OpenClaw 로그에서 다음과 같은 메시지를 확인할 수 있습니다:
 
-#### Option A: Custom SSE image (recommended for DemoClaw)
-
-DemoClaw의 커스텀 이미지는 SSE transport를 지원하므로 컨테이너 간 네트워크 통신이 가능합니다.
-
-```bash
-# Build the image from the included markitdown/ directory
-docker build -t democlaw-markitdown:latest ./markitdown
-
-# Run on the same network as OpenClaw
-docker run -d \
-    --name markitdown \
-    --network democlaw-net \
-    --network-alias markitdown \
-    --restart unless-stopped \
-    -p 3001:3001 \
-    -e "MARKITDOWN_PORT=3001" \
-    -e "MARKITDOWN_HOST=0.0.0.0" \
-    democlaw-markitdown:latest
+```
+[bundle-mcp] skipped server "markitdown" because only stdio MCP servers are supported right now.
 ```
 
-```powershell
-# Windows
-docker build -t democlaw-markitdown:latest .\markitdown
-docker run -d --name markitdown --network democlaw-net --network-alias markitdown --restart unless-stopped -p 3001:3001 -e "MARKITDOWN_PORT=3001" -e "MARKITDOWN_HOST=0.0.0.0" democlaw-markitdown:latest
-```
+### What Works: stdio MCP
 
-Health check:
-```bash
-# Linux / Git Bash
-curl http://localhost:3001/health
-
-# Windows PowerShell (curl.exe, not the Invoke-WebRequest alias)
-curl.exe http://localhost:3001/health
-
-# Expected: {"status": "ok", "service": "markitdown-mcp"}
-```
-
-#### Option B: Official Docker Hub image
-
-Docker Hub의 공식 MCP 카탈로그에 `mcp/markitdown` 이미지가 있습니다. 단, 이 이미지는 **STDIO transport**만 지원하므로 컨테이너 간 네트워크 통신이 아닌 Claude Desktop 등의 STDIO 기반 MCP 클라이언트에 적합합니다.
-
-```bash
-# STDIO transport — for use with Claude Desktop or other STDIO-based MCP clients
-docker run -i --rm mcp/markitdown
-```
-
-> **Note:** DemoClaw의 OpenClaw는 SSE transport로 MCP 서버에 접근하므로, 네트워크 기반 사이드카 용도에는 Option A를 사용하세요.
-
-### Step 1: Run the MCP server container
-
-MCP 서버 컨테이너를 `democlaw-net` 네트워크에 연결하여 실행합니다. `--network-alias`는 OpenClaw가 컨테이너를 찾는 데 사용하는 호스트명입니다.
-
-```bash
-docker run -d \
-    --name "democlaw-my-tool" \
-    --network democlaw-net \
-    --network-alias my-tool \
-    --restart unless-stopped \
-    -p 4000:4000 \
-    myorg/my-mcp-server:latest
-```
-
-### Step 2: Register in `config/mcporter.json` (recommended)
-
-`config/mcporter.json`에 MCP 서버를 등록합니다. `url`에는 컨테이너 네트워크 별칭을 사용합니다 (`localhost`가 아님).
+stdio MCP는 OpenClaw 컨테이너 **내부에서** 프로세스로 실행되는 MCP 서버입니다. `config/mcporter.json`에 다음 형식으로 등록합니다:
 
 ```json
 {
   "servers": {
-    "markitdown": {
-      "transport": "sse",
-      "url": "http://markitdown:3001/sse",
-      "description": "MarkItDown document converter"
+    "my-tool": {
+      "command": "uvx",
+      "args": ["my-mcp-package"]
     }
   }
 }
 ```
 
-등록 후 OpenClaw 컨테이너만 재시작합니다. llama.cpp와 MCP sidecar는 영향 없습니다.
+> **Note:** 이를 위해서는 해당 MCP 서버 패키지가 OpenClaw 컨테이너 안에 설치되어 있어야 합니다. 현재 DemoClaw의 OpenClaw 이미지에는 추가 MCP 서버가 번들되어 있지 않습니다.
 
-```bash
-docker restart democlaw-openclaw
-```
+### What Does NOT Work: SSE Sidecar
 
-> **Note:** 재시작 후 브라우저에서 다시 Connect해야 합니다. 토큰은 동일하게 유지됩니다.
+`markitdown/` 디렉토리에 SSE transport를 지원하는 MCP 서버 예제가 포함되어 있으나, OpenClaw가 SSE를 지원하지 않아 현재는 사용할 수 없습니다.
 
-### Step 3: Alternative — Register via OpenClaw Web UI
+The `markitdown/` directory contains a working SSE MCP server, but OpenClaw cannot connect to it because only stdio transport is supported. This server is preserved as a reference implementation for when OpenClaw adds SSE support.
 
-웹 UI에서도 MCP 서버를 등록할 수 있습니다. 단, **Save 시 게이트웨이가 재시작**되므로 브라우저 연결이 끊기고 다시 Connect해야 합니다.
+### Web UI에서 MCP 설정 확인
 
-1. 브라우저에서 OpenClaw 대시보드를 엽니다 (`http://localhost:18789` 또는 start 출력의 토큰 URL).
-2. 좌측 사이드바에서 **Settings** > **Infrastructure** 를 클릭합니다.
-3. 상단 탭 목록에서 **Mcp** 탭을 클릭합니다 (오른쪽 끝에 있으므로 스크롤 필요).
-4. **MCP Servers** 섹션의 **+ Add Entry** 버튼을 클릭합니다.
-5. 다음 정보를 입력합니다:
-   - **Name** (엔트리 이름 필드): `markitdown`
-   - **Url**: `http://markitdown:3001/sse` (컨테이너 네트워크 별칭 사용)
-6. **Save** 버튼을 클릭합니다.
-7. 게이트웨이가 재시작되면서 연결이 끊깁니다. 약 20초 후 토큰 URL (start 출력에 표시된 URL)로 다시 접속합니다.
+등록된 MCP 서버는 웹 UI에서 확인할 수 있습니다:
 
-### Step 4: Verify
+1. **Settings** > **Infrastructure** > **Mcp** 탭 (오른쪽 끝)
+2. **MCP Servers** 섹션에서 등록된 서버 확인
+3. **+ Add Entry**로 새 서버 추가 가능 (stdio `command` 필드 필요)
 
-```bash
-# Check the MCP server health (use curl.exe on Windows PowerShell)
-curl http://localhost:3001/health
-```
+> **Note:** 웹 UI에서 Save하면 게이트웨이가 재시작됩니다. 약 20초 후 토큰 URL로 다시 접속하세요.
 
 ## Workspace Volume Mount
 
