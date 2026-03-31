@@ -360,7 +360,7 @@ fi
 
 # Resolve dashboard URL: try tokenized URL from openclaw binary, fall back to localhost
 DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>/dev/null \
-    | grep -oP 'https?://[^\s]+' | head -1 | sed 's/127\.0\.0\.1/localhost/' || true)
+    | grep -oE 'https?://[^ ]+' | head -1 | sed 's/127\.0\.0\.1/localhost/' || true)
 
 if [ -z "${DASHBOARD_URL}" ]; then
     DASHBOARD_URL="http://localhost:${OPENCLAW_PORT}"
