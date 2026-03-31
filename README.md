@@ -209,24 +209,9 @@ docker run -d \
     myorg/my-mcp-server:latest
 ```
 
-### Step 2: Register via OpenClaw Web UI (recommended)
+### Step 2: Register in `config/mcporter.json` (recommended)
 
-웹 UI에서 등록하면 재시작 없이 즉시 적용됩니다.
-
-Register MCP servers directly through the OpenClaw web dashboard — no restart needed:
-
-1. 브라우저에서 OpenClaw 대시보드를 엽니다 (`http://localhost:18789` 또는 start 출력의 토큰 URL).
-2. 좌측 사이드바에서 **Settings** > **Infrastructure** 를 클릭합니다.
-3. 상단 탭 목록에서 **Mcp** 탭을 클릭합니다 (오른쪽 끝에 있으므로 스크롤 필요).
-4. **MCP Servers** 섹션의 **+ Add Entry** 버튼을 클릭합니다.
-5. 다음 정보를 입력합니다:
-   - **Name** (엔트리 이름 필드): `markitdown`
-   - **Url**: `http://markitdown:3001/sse` (컨테이너 네트워크 별칭 사용)
-6. **Save** 버튼을 클릭하면 즉시 적용됩니다 (재시작 불필요).
-
-### Step 3: Alternative — Register via `config/mcporter.json`
-
-웹 UI 대신 `config/mcporter.json` 파일을 편집하여 등록할 수도 있습니다. `url`에는 컨테이너 네트워크 별칭을 사용합니다 (`localhost`가 아님).
+`config/mcporter.json`에 MCP 서버를 등록합니다. `url`에는 컨테이너 네트워크 별칭을 사용합니다 (`localhost`가 아님).
 
 ```json
 {
@@ -235,24 +220,32 @@ Register MCP servers directly through the OpenClaw web dashboard — no restart 
       "transport": "sse",
       "url": "http://markitdown:3001/sse",
       "description": "MarkItDown document converter"
-    },
-    "my-tool": {
-      "transport": "sse",
-      "url": "http://my-tool:4000/sse",
-      "description": "Description of your MCP server"
     }
   }
 }
 ```
 
-mcporter.json을 수정한 후 OpenClaw 컨테이너만 재시작하면 새 MCP 서버를 인식합니다. llama.cpp는 그대로 유지됩니다.
+등록 후 OpenClaw 컨테이너만 재시작합니다. llama.cpp와 MCP sidecar는 영향 없습니다.
 
 ```bash
-# OpenClaw 컨테이너만 재시작 (llama.cpp, MCP sidecar는 영향 없음)
 docker restart democlaw-openclaw
 ```
 
-> **Tip:** `mcporter.json`은 컨테이너 시작 시 초기 등록에만 사용됩니다. 웹 UI에서 등록한 MCP 서버는 OpenClaw의 내부 설정에 저장됩니다.
+> **Note:** 재시작 후 브라우저에서 다시 Connect해야 합니다. 토큰은 동일하게 유지됩니다.
+
+### Step 3: Alternative — Register via OpenClaw Web UI
+
+웹 UI에서도 MCP 서버를 등록할 수 있습니다. 단, **Save 시 게이트웨이가 재시작**되므로 브라우저 연결이 끊기고 다시 Connect해야 합니다.
+
+1. 브라우저에서 OpenClaw 대시보드를 엽니다 (`http://localhost:18789` 또는 start 출력의 토큰 URL).
+2. 좌측 사이드바에서 **Settings** > **Infrastructure** 를 클릭합니다.
+3. 상단 탭 목록에서 **Mcp** 탭을 클릭합니다 (오른쪽 끝에 있으므로 스크롤 필요).
+4. **MCP Servers** 섹션의 **+ Add Entry** 버튼을 클릭합니다.
+5. 다음 정보를 입력합니다:
+   - **Name** (엔트리 이름 필드): `markitdown`
+   - **Url**: `http://markitdown:3001/sse` (컨테이너 네트워크 별칭 사용)
+6. **Save** 버튼을 클릭합니다.
+7. 게이트웨이가 재시작됩니다. 잠시 후 페이지를 새로고침하고 **Connect** 버튼을 다시 클릭합니다.
 
 ### Step 4: Verify
 

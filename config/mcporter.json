@@ -1,3 +1,9 @@
 {
-  "servers": {}
+  "servers": {
+    "markitdown": {
+      "transport": "sse",
+      "url": "http://markitdown:3001/sse",
+      "description": "MarkItDown document converter"
+    }
+  }
 }
