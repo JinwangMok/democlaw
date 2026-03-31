@@ -325,6 +325,38 @@ Save 후 자동 재시작.
 
 > **Note:** 웹 UI에서 Save하면 게이트웨이가 재시작됩니다. 약 20초 후 토큰 URL로 다시 접속하세요.
 
+## Data Persistence
+
+기본적으로 OpenClaw의 설정, 디바이스 페어링, 인증 정보는 컨테이너 내부에만 저장됩니다. 컨테이너를 재시작하면 모든 상태가 초기화됩니다.
+
+By default, OpenClaw settings, device pairings, and credentials are stored inside the container. Restarting the container resets all state.
+
+`OPENCLAW_DATA_DIR`을 설정하면 이 데이터를 호스트에 영속화할 수 있습니다:
+
+```bash
+cp .env.example .env
+```
+
+`.env` 파일에서:
+
+```bash
+OPENCLAW_DATA_DIR=/path/to/openclaw-data
+```
+
+Windows:
+```
+OPENCLAW_DATA_DIR=C:\Users\YourName\.openclaw-data
+```
+
+디렉토리가 없으면 자동 생성됩니다. 이 설정을 사용하면 컨테이너를 재시작해도 다음 항목이 유지됩니다:
+
+| Data | Description |
+|------|-------------|
+| `devices/` | 디바이스/Discord 페어링 정보 |
+| `credentials/` | 인증 토큰 |
+| `openclaw.json` | MCP 서버, 에이전트 등 설정 |
+| `identity/` | 인스턴스 ID |
+
 ## Workspace Volume Mount
 
 OpenClaw 컨테이너의 워크스페이스를 호스트 디렉토리와 연결하려면 `.env`에 `OPENCLAW_WORKSPACE_DIR`을 설정합니다.
@@ -374,6 +406,7 @@ Key settings:
 | `LLAMACPP_PORT` | `8000` | llama.cpp API port |
 | `OPENCLAW_PORT` | `18789` | OpenClaw dashboard port |
 | `MODEL_DIR` | `~/.cache/democlaw/models` | Host model cache directory |
+| `OPENCLAW_DATA_DIR` | *(unset)* | Host directory to persist OpenClaw settings/pairings |
 | `OPENCLAW_WORKSPACE_DIR` | *(unset)* | Host directory to mount into OpenClaw |
 
 See `.env.example` for the full list.

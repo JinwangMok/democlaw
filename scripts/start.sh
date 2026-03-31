@@ -292,6 +292,17 @@ if [ -f "${MCPORTER_CONFIG}" ]; then
     log "  mcporter config: ${MCPORTER_CONFIG} -> /app/config/mcporter.json"
 fi
 
+# Data persistence mount — persist OpenClaw settings, pairings, credentials
+DATA_MOUNT=""
+if [ -n "${OPENCLAW_DATA_DIR:-}" ]; then
+    if [ -d "${OPENCLAW_DATA_DIR}" ] || mkdir -p "${OPENCLAW_DATA_DIR}" 2>/dev/null; then
+        DATA_MOUNT="-v ${OPENCLAW_DATA_DIR}:/home/openclaw/.openclaw:rw"
+        log "  data mount: ${OPENCLAW_DATA_DIR} -> /home/openclaw/.openclaw"
+    else
+        log "WARNING: OPENCLAW_DATA_DIR='${OPENCLAW_DATA_DIR}' could not be created. Skipping mount."
+    fi
+fi
+
 # Workspace volume mount — bind host directory into OpenClaw container
 WORKSPACE_MOUNT=""
 if [ -n "${OPENCLAW_WORKSPACE_DIR:-}" ]; then
@@ -313,6 +324,7 @@ fi
     -p "${OPENCLAW_PORT}:${OPENCLAW_PORT}" \
     -p 18791:18791 \
     ${MCPORTER_MOUNT} \
+    ${DATA_MOUNT} \
     ${WORKSPACE_MOUNT} \
     -e "LLAMACPP_BASE_URL=http://llamacpp:8000/v1" \
     -e "LLAMACPP_API_KEY=EMPTY" \

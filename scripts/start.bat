@@ -287,6 +287,18 @@ if exist "!MCPORTER_CONFIG!" (
     echo [start]   mcporter config: !MCPORTER_CONFIG!
 )
 
+:: Data persistence mount — persist OpenClaw settings, pairings, credentials
+set "DATA_MOUNT="
+if defined OPENCLAW_DATA_DIR (
+    if not exist "!OPENCLAW_DATA_DIR!" mkdir "!OPENCLAW_DATA_DIR!" 2>nul
+    if exist "!OPENCLAW_DATA_DIR!" (
+        set "DATA_MOUNT=-v !OPENCLAW_DATA_DIR!:/home/openclaw/.openclaw:rw"
+        echo [start]   data mount: !OPENCLAW_DATA_DIR!
+    ) else (
+        echo [start] WARNING: OPENCLAW_DATA_DIR could not be created. Skipping mount.
+    )
+)
+
 :: Workspace volume mount — bind host directory into OpenClaw container
 set "WORKSPACE_MOUNT="
 if defined OPENCLAW_WORKSPACE_DIR (
@@ -306,6 +318,7 @@ if defined OPENCLAW_WORKSPACE_DIR (
     -p %OPENCLAW_PORT%:%OPENCLAW_PORT% ^
     -p 18791:18791 ^
     %MCPORTER_MOUNT% ^
+    %DATA_MOUNT% ^
     %WORKSPACE_MOUNT% ^
     -e "LLAMACPP_BASE_URL=http://llamacpp:8000/v1" ^
     -e "LLAMACPP_API_KEY=EMPTY" ^
