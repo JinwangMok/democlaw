@@ -234,6 +234,29 @@ stdio MCP는 OpenClaw 컨테이너 **내부에서** 프로세스로 실행되는
 
 The `markitdown/` directory contains a working SSE MCP server, but OpenClaw cannot connect to it because only stdio transport is supported. This server is preserved as a reference implementation for when OpenClaw adds SSE support.
 
+### Workaround: supergateway (SSE→stdio bridge)
+
+별도 컨테이너의 SSE MCP 서버를 OpenClaw에 연결하려면 [supergateway](https://github.com/supercorp-ai/supergateway)를 stdio 래퍼로 사용할 수 있습니다. supergateway는 원격 SSE 서버에 연결하고 이를 로컬 stdio 프로세스로 노출합니다.
+
+```
+OpenClaw (stdio) → supergateway → HTTP/SSE → markitdown container
+```
+
+이를 위해서는 OpenClaw Dockerfile에 `npm install -g supergateway`를 추가하고, mcporter.json에 다음과 같이 설정합니다:
+
+```json
+{
+  "servers": {
+    "markitdown": {
+      "command": "npx",
+      "args": ["-y", "supergateway", "--sse", "http://markitdown:3001/sse"]
+    }
+  }
+}
+```
+
+> **Note:** 이 방법은 OpenClaw Dockerfile 수정이 필요하며, DemoClaw 기본 이미지에는 포함되어 있지 않습니다.
+
 ### Web UI에서 MCP 설정 확인
 
 등록된 MCP 서버는 웹 UI에서 확인할 수 있습니다:
