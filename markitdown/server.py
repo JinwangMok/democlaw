@@ -21,7 +21,6 @@ from starlette.routing import Mount, Route
 
 mcp = FastMCP(
     name="markitdown",
-    version="1.0.0",
 )
 
 _md = MarkItDown()

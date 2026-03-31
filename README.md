@@ -96,11 +96,11 @@ scripts\start.bat
 # GPU check
 nvidia-smi
 
-# LLM API
+# LLM API (use curl.exe on Windows PowerShell)
 curl http://localhost:8000/v1/models
 
-# OpenClaw dashboard
-open http://localhost:18789   # or the tokenized URL from start output
+# OpenClaw dashboard — open in browser
+# http://localhost:18789 (or the tokenized URL from start output)
 ```
 
 ### Stop
@@ -175,8 +175,13 @@ docker run -d --name markitdown --network democlaw-net --network-alias markitdow
 
 Health check:
 ```bash
+# Linux / Git Bash
 curl http://localhost:3001/health
-# {"status": "ok", "service": "markitdown-mcp"}
+
+# Windows PowerShell (curl.exe, not the Invoke-WebRequest alias)
+curl.exe http://localhost:3001/health
+
+# Expected: {"status": "ok", "service": "markitdown-mcp"}
 ```
 
 #### Option B: Official Docker Hub image
@@ -255,11 +260,8 @@ Register MCP servers directly through the OpenClaw web dashboard — no restart 
 ### Step 5: Verify
 
 ```bash
-# Check the MCP server health
+# Check the MCP server health (use curl.exe on Windows PowerShell)
 curl http://localhost:3001/health
-
-# Verify OpenClaw discovered the tools — check the dashboard
-# The AI agent should now have access to the MCP server's tools
 ```
 
 ## Workspace Volume Mount
