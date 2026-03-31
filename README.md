@@ -358,21 +358,6 @@ Key settings:
 
 See `.env.example` for the full list.
 
-## Make Targets
-
-```
-make start       Start full stack
-make stop        Stop all containers
-make restart     Restart full stack
-make build       Build container images (llama.cpp + OpenClaw)
-make status      Show container states
-make logs        Tail logs (SERVICE=llamacpp|openclaw)
-make shell       Exec into container (SERVICE=llamacpp|openclaw)
-make clean       Remove containers, images, and volumes
-make env-check   Validate GPU and runtime setup
-make help        Show all targets
-```
-
 ## Project Structure
 
 ```
