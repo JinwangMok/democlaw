@@ -197,6 +197,26 @@ scripts\device-approve.bat --list
 scripts\device-approve.bat <device-id>
 ```
 
+### Discord Pairing
+
+Discord 봇에 DM을 보내면 페어링 코드가 발급됩니다. 이 코드는 `openclaw devices list`가 아닌 `openclaw pairing` 시스템으로 관리되므로, 별도 명령으로 승인해야 합니다.
+
+When you DM the Discord bot, it issues a pairing code. This code is managed by the `openclaw pairing` system (separate from `openclaw devices`), so use the `--pairing` flag to approve it.
+
+```bash
+# Linux
+./scripts/device-approve.sh --pairing discord <CODE>
+
+# Windows
+scripts\device-approve.bat --pairing discord <CODE>
+```
+
+또는 컨테이너에서 직접 실행:
+
+```bash
+docker exec democlaw-openclaw openclaw pairing approve discord <CODE>
+```
+
 ## MCP (Model Context Protocol) Sidecar
 
 OpenClaw는 MCP 서버를 통해 외부 도구를 사용할 수 있습니다. DemoClaw는 [supergateway](https://github.com/supercorp-ai/supergateway)를 사용하여 별도 컨테이너의 SSE MCP 서버를 OpenClaw에 연결합니다.

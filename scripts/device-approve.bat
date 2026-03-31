@@ -7,9 +7,10 @@ setlocal enabledelayedexpansion
 :: and lets you approve them from the host.
 ::
 :: Usage:
-::   scripts\device-approve.bat            Interactive: list + select
-::   scripts\device-approve.bat --list     List pending devices only
-::   scripts\device-approve.bat <id>       Approve a specific device by ID
+::   scripts\device-approve.bat                            Interactive: list + select
+::   scripts\device-approve.bat --list                     List pending devices only
+::   scripts\device-approve.bat <id>                       Approve a specific device by ID
+::   scripts\device-approve.bat --pairing <platform> <code>  Approve a pairing code (e.g. discord)
 :: =============================================================================
 
 if not defined OPENCLAW_CONTAINER set "OPENCLAW_CONTAINER=democlaw-openclaw"
@@ -51,6 +52,8 @@ if !errorlevel! neq 0 (
 :: ---------------------------------------------------------------------------
 :: Parse arguments
 :: ---------------------------------------------------------------------------
+if "%~1"=="--pairing" goto :do_pairing
+if "%~1"=="-p" goto :do_pairing
 if "%~1"=="--list" goto :do_list
 if "%~1"=="-l" goto :do_list
 if "%~1"=="--help" goto :do_help
@@ -119,13 +122,30 @@ echo.
 %RUNTIME% exec %OPENCLAW_CONTAINER% openclaw devices list 2>nul
 exit /b 0
 
+:do_pairing
+if "%~2"=="" (
+    echo Usage: %~nx0 --pairing ^<platform^> ^<code^> >&2
+    echo   e.g.: %~nx0 --pairing discord 5GVUDXE4 >&2
+    exit /b 1
+)
+if "%~3"=="" (
+    echo Usage: %~nx0 --pairing ^<platform^> ^<code^> >&2
+    echo   e.g.: %~nx0 --pairing discord 5GVUDXE4 >&2
+    exit /b 1
+)
+echo Approving pairing code %~3 for %~2 ...
+%RUNTIME% exec %OPENCLAW_CONTAINER% openclaw pairing approve "%~2" "%~3" 2>nul
+if !errorlevel! equ 0 (echo Approved.) else (echo Failed.)
+exit /b 0
+
 :do_help
-echo Usage: %~nx0 [--list ^| --help ^| ^<device-id^>]
+echo Usage: %~nx0 [--list ^| --pairing ^<platform^> ^<code^> ^| --help ^| ^<device-id^>]
 echo.
-echo   (no args)     Interactive: list pending devices and select one to approve
-echo   --list, -l    List pending devices only
-echo   ^<device-id^>   Approve a specific device by ID
-echo   --help, -h    Show this help
+echo   (no args)                          Interactive: list pending devices and select one to approve
+echo   --list, -l                         List pending devices only
+echo   --pairing, -p ^<platform^> ^<code^>   Approve a pairing code (e.g. discord)
+echo   ^<device-id^>                        Approve a specific device by ID
+echo   --help, -h                         Show this help
 exit /b 0
 
 :do_approve_direct

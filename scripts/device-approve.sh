@@ -6,9 +6,10 @@
 # and lets you approve them interactively from the host.
 #
 # Usage:
-#   ./scripts/device-approve.sh          # Interactive: list + select
-#   ./scripts/device-approve.sh --list   # List pending devices only
-#   ./scripts/device-approve.sh <id>     # Approve a specific device by ID
+#   ./scripts/device-approve.sh                          # Interactive: list + select
+#   ./scripts/device-approve.sh --list                   # List pending devices only
+#   ./scripts/device-approve.sh <id>                     # Approve a specific device by ID
+#   ./scripts/device-approve.sh --pairing <platform> <code>  # Approve a pairing code (e.g. discord)
 # =============================================================================
 set -euo pipefail
 
@@ -57,18 +58,29 @@ approve_device() {
 # Main
 # ---------------------------------------------------------------------------
 case "${1:-}" in
+    --pairing|-p)
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo "Usage: $0 --pairing <platform> <code>" >&2
+            echo "  e.g.: $0 --pairing discord 5GVUDXE4" >&2
+            exit 1
+        fi
+        echo "Approving pairing code ${3} for ${2} ..."
+        "${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw pairing approve "${2}" "${3}" 2>/dev/null \
+            && echo "Approved." || echo "Failed."
+        ;;
     --list|-l)
         echo "Pending devices on ${OPENCLAW_CONTAINER}:"
         echo ""
         list_pending
         ;;
     --help|-h)
-        echo "Usage: $0 [--list | --help | <device-id>]"
+        echo "Usage: $0 [--list | --pairing <platform> <code> | --help | <device-id>]"
         echo ""
-        echo "  (no args)     Interactive: list pending devices and select one to approve"
-        echo "  --list, -l    List pending devices only"
-        echo "  <device-id>   Approve a specific device by ID"
-        echo "  --help, -h    Show this help"
+        echo "  (no args)                     Interactive: list pending devices and select one to approve"
+        echo "  --list, -l                    List pending devices only"
+        echo "  --pairing, -p <platform> <code>  Approve a pairing code (e.g. discord)"
+        echo "  <device-id>                   Approve a specific device by ID"
+        echo "  --help, -h                    Show this help"
         ;;
     "")
         # Interactive mode
