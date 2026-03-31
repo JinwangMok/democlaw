@@ -36,7 +36,7 @@ fi
 # ---------------------------------------------------------------------------
 LLAMACPP_IMAGE="${DEMOCLAW_LLAMACPP_IMAGE:-docker.io/jinwangmok/democlaw-llamacpp:v1.1.0}"
 OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-openclaw:v1.1.0}"
-MARKITDOWN_IMAGE="${DEMOCLAW_MARKITDOWN_IMAGE:-democlaw-markitdown:latest}"
+MARKITDOWN_IMAGE="${DEMOCLAW_MARKITDOWN_IMAGE:-docker.io/jinwangmok/democlaw-markitdown:v1.1.0}"
 NETWORK="democlaw-net"
 LLAMACPP_CONTAINER="democlaw-llamacpp"
 OPENCLAW_CONTAINER="democlaw-openclaw"
@@ -82,7 +82,16 @@ GPU_FLAGS="--gpus all"
 HOSTNAME_LLM="--hostname llamacpp"
 HOSTNAME_OPENCLAW="--hostname openclaw"
 SHM_FLAGS="--shm-size 1g"
+
+# Detect if the runtime is actually podman (covers podman-docker aliases)
+_is_podman=false
 if [ "${RUNTIME}" = "podman" ]; then
+    _is_podman=true
+elif "${RUNTIME}" --version 2>/dev/null | grep -qi podman; then
+    _is_podman=true
+fi
+
+if [ "${_is_podman}" = "true" ]; then
     GPU_FLAGS="--device nvidia.com/gpu=all"
     # Podman rootful inherits host UTS/IPC namespaces; --hostname and --shm-size are invalid
     HOSTNAME_LLM=""

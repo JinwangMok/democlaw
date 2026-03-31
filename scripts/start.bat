@@ -31,7 +31,7 @@ if defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=%DEMOCLAW_LLAMACPP_IMAGE%
 if not defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=docker.io/jinwangmok/democlaw-openclaw:v1.1.0"
 if defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=%DEMOCLAW_OPENCLAW_IMAGE%"
 
-if not defined DEMOCLAW_MARKITDOWN_IMAGE set "MARKITDOWN_IMAGE=democlaw-markitdown:latest"
+if not defined DEMOCLAW_MARKITDOWN_IMAGE set "MARKITDOWN_IMAGE=docker.io/jinwangmok/democlaw-markitdown:v1.1.0"
 if defined DEMOCLAW_MARKITDOWN_IMAGE set "MARKITDOWN_IMAGE=%DEMOCLAW_MARKITDOWN_IMAGE%"
 
 set "NETWORK=democlaw-net"
@@ -92,7 +92,15 @@ if not defined RUNTIME (
 
 set "GPU_FLAGS=--gpus all"
 set "SHM_FLAGS=--shm-size 1g"
-if "%RUNTIME%"=="podman" (
+
+:: Detect if the runtime is actually podman (covers podman-docker aliases)
+set "IS_PODMAN=false"
+if "%RUNTIME%"=="podman" set "IS_PODMAN=true"
+if "!IS_PODMAN!"=="false" (
+    %RUNTIME% --version 2>nul | findstr /i "podman" >nul 2>&1
+    if !errorlevel! equ 0 set "IS_PODMAN=true"
+)
+if "!IS_PODMAN!"=="true" (
     set "GPU_FLAGS=--device nvidia.com/gpu=all"
     set "SHM_FLAGS="
 )
