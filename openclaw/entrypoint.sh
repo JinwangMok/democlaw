@@ -208,7 +208,7 @@ done
 # ---------------------------------------------------------------------------
 echo "[openclaw-entrypoint] Waiting to auto-approve first device pairing ..."
 APPROVED=false
-for attempt in $(seq 1 60); do
+for _attempt in $(seq 1 60); do
     if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then break; fi
     pending=$(openclaw devices list 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
     if [ -n "$pending" ]; then

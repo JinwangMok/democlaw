@@ -30,8 +30,10 @@ severity=warning
 # ---------------------------------------------------------------------------
 # Optional: exclude specific checks project-wide
 #
+# SC1090 — "ShellCheck can't follow non-constant source" (dynamic source
+#           paths resolved at runtime; e.g. source "${ENV_FILE}").
 # SC1091 — "Not following: <file> was not specified as input" (sourced files
 #           resolved at runtime from $SCRIPT_DIR; acceptable in orchestration
 #           scripts where the path is guaranteed to exist at runtime).
 # ---------------------------------------------------------------------------
-# disable=SC1091
+disable=SC1090,SC1091
