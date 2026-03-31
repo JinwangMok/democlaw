@@ -111,8 +111,10 @@ ENV MODEL_PATH="/models/Qwen3.5-9B-Q4_K_M.gguf" \
     N_GPU_LAYERS="99" \
     FLASH_ATTN="1" \
     CACHE_TYPE_K="q8_0" \
-    CACHE_TYPE_V="q8_0" \
-    LLAMA_API_KEY=""
+    CACHE_TYPE_V="q8_0"
+# LLAMA_API_KEY is intentionally NOT set here to avoid the
+# SecretsUsedInArgOrEnv lint warning. The entrypoint falls back
+# to no-auth mode when the variable is unset (${LLAMA_API_KEY:-}).
 
 # Model weights cache directory
 RUN mkdir -p /models
