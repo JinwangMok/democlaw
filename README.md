@@ -209,9 +209,25 @@ docker run -d \
     myorg/my-mcp-server:latest
 ```
 
-### Step 2: Register in `config/mcporter.json`
+### Step 2: Register via OpenClaw Web UI (recommended)
 
-`config/mcporter.json`에 MCP 서버를 등록합니다. `url`에는 컨테이너 네트워크 별칭을 사용합니다 (`localhost`가 아님).
+웹 UI에서 등록하면 재시작 없이 즉시 적용됩니다.
+
+Register MCP servers directly through the OpenClaw web dashboard — no restart needed:
+
+1. 브라우저에서 OpenClaw 대시보드를 엽니다 (`http://localhost:18789` 또는 start 출력의 토큰 URL).
+2. 좌측 사이드바에서 **Settings** (설정)을 클릭합니다.
+3. **MCP Servers** 섹션으로 이동합니다.
+4. **Add Server** 버튼을 클릭합니다.
+5. 다음 정보를 입력합니다:
+   - **Name**: `markitdown` (또는 원하는 이름)
+   - **Transport**: `SSE`
+   - **URL**: `http://markitdown:3001/sse` (컨테이너 네트워크 별칭 사용)
+6. **Save**를 클릭하면 즉시 적용됩니다 (재시작 불필요).
+
+### Step 3: Alternative — Register via `config/mcporter.json`
+
+웹 UI 대신 `config/mcporter.json` 파일을 편집하여 등록할 수도 있습니다. `url`에는 컨테이너 네트워크 별칭을 사용합니다 (`localhost`가 아님).
 
 ```json
 {
@@ -230,8 +246,6 @@ docker run -d \
 }
 ```
 
-### Step 3: Restart OpenClaw container
-
 mcporter.json을 수정한 후 OpenClaw 컨테이너만 재시작하면 새 MCP 서버를 인식합니다. llama.cpp는 그대로 유지됩니다.
 
 ```bash
@@ -239,25 +253,9 @@ mcporter.json을 수정한 후 OpenClaw 컨테이너만 재시작하면 새 MCP 
 docker restart democlaw-openclaw
 ```
 
-### Step 4: Register via OpenClaw Web UI (recommended)
+> **Tip:** `mcporter.json`은 컨테이너 시작 시 초기 등록에만 사용됩니다. 웹 UI에서 등록한 MCP 서버는 OpenClaw의 내부 설정에 저장됩니다.
 
-웹 UI에서 등록하면 재시작 없이 즉시 적용됩니다. mcporter.json 편집보다 이 방법을 권장합니다.
-
-Register MCP servers directly through the OpenClaw web dashboard — no restart needed:
-
-1. 브라우저에서 OpenClaw 대시보드를 엽니다 (`http://localhost:18789` 또는 start 출력의 토큰 URL).
-2. 좌측 사이드바에서 **Settings** (설정)을 클릭합니다.
-3. **MCP Servers** 섹션으로 이동합니다.
-4. **Add Server** 버튼을 클릭합니다.
-5. 다음 정보를 입력합니다:
-   - **Name**: `markitdown` (또는 원하는 이름)
-   - **Transport**: `SSE`
-   - **URL**: `http://markitdown:3001/sse` (컨테이너 네트워크 별칭 사용)
-6. **Save**를 클릭하면 즉시 적용됩니다 (재시작 불필요).
-
-> **Tip:** 웹 UI에서 등록한 MCP 서버는 OpenClaw의 내부 설정에 저장됩니다. `mcporter.json`은 컨테이너 시작 시 초기 등록에만 사용됩니다.
-
-### Step 5: Verify
+### Step 4: Verify
 
 ```bash
 # Check the MCP server health (use curl.exe on Windows PowerShell)
