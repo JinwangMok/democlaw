@@ -245,7 +245,7 @@ docker restart democlaw-openclaw
    - **Name** (엔트리 이름 필드): `markitdown`
    - **Url**: `http://markitdown:3001/sse` (컨테이너 네트워크 별칭 사용)
 6. **Save** 버튼을 클릭합니다.
-7. 게이트웨이가 재시작됩니다. 잠시 후 페이지를 새로고침하고 **Connect** 버튼을 다시 클릭합니다.
+7. 게이트웨이가 재시작되면서 연결이 끊깁니다. 약 20초 후 토큰 URL (start 출력에 표시된 URL)로 다시 접속합니다.
 
 ### Step 4: Verify
 
