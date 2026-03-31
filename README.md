@@ -216,14 +216,13 @@ docker run -d \
 Register MCP servers directly through the OpenClaw web dashboard — no restart needed:
 
 1. 브라우저에서 OpenClaw 대시보드를 엽니다 (`http://localhost:18789` 또는 start 출력의 토큰 URL).
-2. 좌측 사이드바에서 **Settings** (설정)을 클릭합니다.
-3. **MCP Servers** 섹션으로 이동합니다.
-4. **Add Server** 버튼을 클릭합니다.
+2. 좌측 사이드바에서 **Settings** > **Infrastructure** 를 클릭합니다.
+3. 상단 탭 목록에서 **Mcp** 탭을 클릭합니다 (오른쪽 끝에 있으므로 스크롤 필요).
+4. **MCP Servers** 섹션의 **+ Add Entry** 버튼을 클릭합니다.
 5. 다음 정보를 입력합니다:
-   - **Name**: `markitdown` (또는 원하는 이름)
-   - **Transport**: `SSE`
-   - **URL**: `http://markitdown:3001/sse` (컨테이너 네트워크 별칭 사용)
-6. **Save**를 클릭하면 즉시 적용됩니다 (재시작 불필요).
+   - **Name** (엔트리 이름 필드): `markitdown`
+   - **Url**: `http://markitdown:3001/sse` (컨테이너 네트워크 별칭 사용)
+6. **Save** 버튼을 클릭하면 즉시 적용됩니다 (재시작 불필요).
 
 ### Step 3: Alternative — Register via `config/mcporter.json`
 
