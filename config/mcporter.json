@@ -1,3 +1,8 @@
 {
-  "servers": {}
+  "servers": {
+    "markitdown": {
+      "command": "supergateway",
+      "args": ["--sse", "http://markitdown:3001/sse"]
+    }
+  }
 }

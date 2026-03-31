@@ -72,7 +72,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---------------------------------------------------------------------------
 # Install OpenClaw globally via npm (version controlled by OPENCLAW_NPM_VERSION ARG)
 # ---------------------------------------------------------------------------
-RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" \
+RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" supergateway \
     && npm cache clean --force
 
 # ---------------------------------------------------------------------------

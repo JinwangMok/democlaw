@@ -197,65 +197,112 @@ scripts\device-approve.bat --list
 scripts\device-approve.bat <device-id>
 ```
 
-## MCP (Model Context Protocol)
+## MCP (Model Context Protocol) Sidecar
 
-### Current Limitation
-
-OpenClaw v2026.3.28은 **stdio transport MCP 서버만 지원**합니다. SSE 및 Streamable HTTP transport는 아직 지원되지 않습니다.
-
-OpenClaw v2026.3.28 only supports **stdio transport** for MCP servers. SSE and Streamable HTTP are not yet supported.
-
-이는 별도 컨테이너에서 네트워크(SSE)를 통해 MCP 서버를 연결하는 사이드카 패턴이 현재 작동하지 않음을 의미합니다. OpenClaw 로그에서 다음과 같은 메시지를 확인할 수 있습니다:
+OpenClaw는 MCP 서버를 통해 외부 도구를 사용할 수 있습니다. DemoClaw는 [supergateway](https://github.com/supercorp-ai/supergateway)를 사용하여 별도 컨테이너의 SSE MCP 서버를 OpenClaw에 연결합니다.
 
 ```
-[bundle-mcp] skipped server "markitdown" because only stdio MCP servers are supported right now.
+OpenClaw (stdio) → supergateway (SSE→stdio bridge) → MCP sidecar container (SSE)
 ```
 
-### What Works: stdio MCP
+### 기본 제공: MarkItDown MCP
 
-stdio MCP는 OpenClaw 컨테이너 **내부에서** 프로세스로 실행되는 MCP 서버입니다. `config/mcporter.json`에 다음 형식으로 등록합니다:
+DemoClaw에는 [MarkItDown](https://github.com/microsoft/markitdown) MCP 서버 연동이 포함되어 있습니다. 공식 Docker Hub 이미지 `mcp/markitdown`을 사이드카로 실행하면 에이전트가 `convert_to_markdown` 도구를 사용할 수 있습니다.
 
-```json
-{
-  "servers": {
-    "my-tool": {
-      "command": "uvx",
-      "args": ["my-mcp-package"]
-    }
-  }
-}
+#### Step 1: MarkItDown 컨테이너 실행
+
+```bash
+# Linux
+docker run -d \
+    --name markitdown \
+    --network democlaw-net \
+    --network-alias markitdown \
+    --restart unless-stopped \
+    -p 3001:3001 \
+    mcp/markitdown --http --host 0.0.0.0 --port 3001
 ```
 
-> **Note:** 이를 위해서는 해당 MCP 서버 패키지가 OpenClaw 컨테이너 안에 설치되어 있어야 합니다. 현재 DemoClaw의 OpenClaw 이미지에는 추가 MCP 서버가 번들되어 있지 않습니다.
-
-### What Does NOT Work: SSE Sidecar
-
-`markitdown/` 디렉토리에 SSE transport를 지원하는 MCP 서버 예제가 포함되어 있으나, OpenClaw가 SSE를 지원하지 않아 현재는 사용할 수 없습니다.
-
-The `markitdown/` directory contains a working SSE MCP server, but OpenClaw cannot connect to it because only stdio transport is supported. This server is preserved as a reference implementation for when OpenClaw adds SSE support.
-
-### Workaround: supergateway (SSE→stdio bridge)
-
-별도 컨테이너의 SSE MCP 서버를 OpenClaw에 연결하려면 [supergateway](https://github.com/supercorp-ai/supergateway)를 stdio 래퍼로 사용할 수 있습니다. supergateway는 원격 SSE 서버에 연결하고 이를 로컬 stdio 프로세스로 노출합니다.
-
-```
-OpenClaw (stdio) → supergateway → HTTP/SSE → markitdown container
+```powershell
+# Windows
+docker run -d --name markitdown --network democlaw-net --network-alias markitdown --restart unless-stopped -p 3001:3001 mcp/markitdown --http --host 0.0.0.0 --port 3001
 ```
 
-이를 위해서는 OpenClaw Dockerfile에 `npm install -g supergateway`를 추가하고, mcporter.json에 다음과 같이 설정합니다:
+#### Step 2: OpenClaw 재시작
+
+```bash
+docker restart democlaw-openclaw
+```
+
+> 재시작 후 약 20초 후 토큰 URL로 다시 접속합니다.
+
+#### Step 3: Chat에서 사용
+
+```
+Call convert_to_markdown with uri http://info.cern.ch
+```
+
+에이전트가 `convert_to_markdown` MCP 도구를 호출하여 웹 페이지를 마크다운으로 변환합니다.
+
+> **Note:** HTTPS URL은 컨테이너 환경에 따라 SSL 인증서 오류가 발생할 수 있습니다. HTTP URL을 사용하거나 `file:` URI로 로컬 파일을 변환하세요.
+
+### 추가 MCP 서버 연결하기
+
+다른 SSE MCP 서버도 같은 패턴으로 연결할 수 있습니다.
+
+#### Step 1: MCP 서버 컨테이너를 democlaw-net에 실행
+
+```bash
+docker run -d \
+    --name my-mcp-server \
+    --network democlaw-net \
+    --network-alias my-mcp \
+    -p 4000:4000 \
+    my-org/my-mcp-image --http --host 0.0.0.0 --port 4000
+```
+
+#### Step 2: `config/mcporter.json`에 등록
 
 ```json
 {
   "servers": {
     "markitdown": {
-      "command": "npx",
-      "args": ["-y", "supergateway", "--sse", "http://markitdown:3001/sse"]
+      "command": "supergateway",
+      "args": ["--sse", "http://markitdown:3001/sse"]
+    },
+    "my-mcp": {
+      "command": "supergateway",
+      "args": ["--sse", "http://my-mcp:4000/sse"]
     }
   }
 }
 ```
 
-> **Note:** 이 방법은 OpenClaw Dockerfile 수정이 필요하며, DemoClaw 기본 이미지에는 포함되어 있지 않습니다.
+#### Step 3: OpenClaw 재시작
+
+```bash
+docker restart democlaw-openclaw
+```
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    democlaw-net                       │
+│                                                     │
+│  ┌───────────────────────────────┐                  │
+│  │ OpenClaw container            │                  │
+│  │                               │                  │
+│  │  openclaw-gateway             │                  │
+│  │    └─ supergateway (stdio)  ──┼──► markitdown    │
+│  │    └─ supergateway (stdio)  ──┼──► my-mcp        │
+│  └───────────────────────────────┘                  │
+│                                                     │
+│  ┌────────────┐  ┌────────────┐                     │
+│  │ markitdown │  │  my-mcp    │                     │
+│  │ SSE :3001  │  │  SSE :4000 │                     │
+│  └────────────┘  └────────────┘                     │
+└─────────────────────────────────────────────────────┘
+```
 
 ### Web UI에서 MCP 설정 확인
 
@@ -263,7 +310,6 @@ OpenClaw (stdio) → supergateway → HTTP/SSE → markitdown container
 
 1. **Settings** > **Infrastructure** > **Mcp** 탭 (오른쪽 끝)
 2. **MCP Servers** 섹션에서 등록된 서버 확인
-3. **+ Add Entry**로 새 서버 추가 가능 (stdio `command` 필드 필요)
 
 > **Note:** 웹 UI에서 Save하면 게이트웨이가 재시작됩니다. 약 20초 후 토큰 URL로 다시 접속하세요.
 
