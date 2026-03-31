@@ -225,21 +225,20 @@ docker run -d \
 }
 ```
 
-### Step 3: Restart OpenClaw
+### Step 3: Restart OpenClaw container
 
-mcporter.json을 수정한 후 OpenClaw를 재시작하면 새 MCP 서버를 인식합니다.
+mcporter.json을 수정한 후 OpenClaw 컨테이너만 재시작하면 새 MCP 서버를 인식합니다. llama.cpp는 그대로 유지됩니다.
 
 ```bash
-# Stop and restart the stack (MCP sidecar containers are not affected)
-./scripts/stop.sh
-./scripts/start.sh
+# OpenClaw 컨테이너만 재시작 (llama.cpp, MCP sidecar는 영향 없음)
+docker restart democlaw-openclaw
 ```
 
-### Step 4: Register via OpenClaw Web UI
+### Step 4: Register via OpenClaw Web UI (recommended)
 
-mcporter.json 외에 OpenClaw 웹 UI에서도 MCP 서버를 등록할 수 있습니다.
+웹 UI에서 등록하면 재시작 없이 즉시 적용됩니다. mcporter.json 편집보다 이 방법을 권장합니다.
 
-You can also register MCP servers directly through the OpenClaw web dashboard:
+Register MCP servers directly through the OpenClaw web dashboard — no restart needed:
 
 1. 브라우저에서 OpenClaw 대시보드를 엽니다 (`http://localhost:18789` 또는 start 출력의 토큰 URL).
 2. 좌측 사이드바에서 **Settings** (설정)을 클릭합니다.
