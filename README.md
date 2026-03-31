@@ -205,9 +205,9 @@ OpenClaw는 MCP 서버를 통해 외부 도구를 사용할 수 있습니다. De
 OpenClaw (stdio) → supergateway (SSE→stdio bridge) → MCP sidecar container (SSE)
 ```
 
-### 기본 제공: MarkItDown MCP
+### Example: MarkItDown MCP
 
-DemoClaw에는 [MarkItDown](https://github.com/microsoft/markitdown) MCP 서버 연동이 포함되어 있습니다. 공식 Docker Hub 이미지 `mcp/markitdown`을 사이드카로 실행하면 에이전트가 `convert_to_markdown` 도구를 사용할 수 있습니다.
+[MarkItDown](https://github.com/microsoft/markitdown)은 PDF, DOCX, HTML 등을 Markdown으로 변환하는 MCP 서버입니다. 공식 Docker Hub 이미지 `mcp/markitdown`을 사용합니다.
 
 #### Step 1: MarkItDown 컨테이너 실행
 
@@ -227,15 +227,21 @@ docker run -d \
 docker run -d --name markitdown --network democlaw-net --network-alias markitdown --restart unless-stopped -p 3001:3001 mcp/markitdown --http --host 0.0.0.0 --port 3001
 ```
 
-#### Step 2: OpenClaw 재시작
+#### Step 2: 웹 UI에서 MCP 서버 등록
 
-```bash
-docker restart democlaw-openclaw
-```
-
-> 재시작 후 약 20초 후 토큰 URL로 다시 접속합니다.
+1. 브라우저에서 OpenClaw 대시보드를 엽니다.
+2. **Settings** > **Infrastructure** > **Mcp** 탭 (오른쪽 끝으로 스크롤).
+3. **MCP Servers** > **+ Add Entry** 클릭.
+4. 다음 정보를 입력합니다:
+   - **Name**: `markitdown`
+   - **Command**: `supergateway`
+   - **Args**: `--sse` 와 `http://markitdown:3001/sse` (각각 별도 항목으로 + Add)
+5. **Save** 클릭 → 게이트웨이가 자동 재시작됩니다.
+6. 약 20초 후 토큰 URL로 다시 접속합니다.
 
 #### Step 3: Chat에서 사용
+
+새 세션에서 다음과 같이 사용합니다:
 
 ```
 Call convert_to_markdown with uri http://info.cern.ch
@@ -243,7 +249,7 @@ Call convert_to_markdown with uri http://info.cern.ch
 
 에이전트가 `convert_to_markdown` MCP 도구를 호출하여 웹 페이지를 마크다운으로 변환합니다.
 
-> **Note:** HTTPS URL은 컨테이너 환경에 따라 SSL 인증서 오류가 발생할 수 있습니다. HTTP URL을 사용하거나 `file:` URI로 로컬 파일을 변환하세요.
+> **Note:** HTTPS URL은 컨테이너 환경에 따라 SSL 인증서 오류가 발생할 수 있습니다. HTTP URL을 사용하세요.
 
 ### 추가 MCP 서버 연결하기
 
@@ -260,28 +266,14 @@ docker run -d \
     my-org/my-mcp-image --http --host 0.0.0.0 --port 4000
 ```
 
-#### Step 2: `config/mcporter.json`에 등록
+#### Step 2: 웹 UI에서 등록
 
-```json
-{
-  "servers": {
-    "markitdown": {
-      "command": "supergateway",
-      "args": ["--sse", "http://markitdown:3001/sse"]
-    },
-    "my-mcp": {
-      "command": "supergateway",
-      "args": ["--sse", "http://my-mcp:4000/sse"]
-    }
-  }
-}
-```
+Infrastructure > Mcp > + Add Entry:
+- **Name**: `my-mcp`
+- **Command**: `supergateway`
+- **Args**: `--sse` + `http://my-mcp:4000/sse`
 
-#### Step 3: OpenClaw 재시작
-
-```bash
-docker restart democlaw-openclaw
-```
+Save 후 자동 재시작.
 
 ### Architecture
 
