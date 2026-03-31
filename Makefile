@@ -1,7 +1,7 @@
 # =============================================================================
 # DemoClaw — Makefile
 #
-# Container lifecycle targets for the llama.cpp + OpenClaw + MarkItDown stack.
+# Container lifecycle targets for the llama.cpp + OpenClaw stack.
 # All targets invoke the shell scripts in scripts/ which auto-detect
 # the container runtime (docker or podman).
 #
@@ -31,10 +31,8 @@ CONTAINER_RUNTIME ?= $(shell \
 # Container and image names
 LLAMACPP_CONTAINER_NAME ?= democlaw-llamacpp
 OPENCLAW_CONTAINER_NAME ?= democlaw-openclaw
-MARKITDOWN_CONTAINER_NAME ?= democlaw-markitdown
 LLAMACPP_IMAGE_TAG      ?= democlaw/llamacpp:latest
 OPENCLAW_IMAGE_TAG      ?= democlaw/openclaw:latest
-MARKITDOWN_IMAGE_TAG    ?= democlaw-markitdown:latest
 DEMOCLAW_NETWORK        ?= democlaw-net
 
 # ---------------------------------------------------------------------------
@@ -66,7 +64,6 @@ OPENCLAW_NPM_VERSION ?= latest
 MODEL_NAME             ?= Qwen3.5-9B-Q4_K_M
 LLAMACPP_PORT          ?= 8000
 OPENCLAW_PORT          ?= 18789
-MARKITDOWN_PORT        ?= 3001
 LLAMACPP_BASE_URL      ?= http://llamacpp:8000/v1
 LLAMACPP_API_KEY       ?= EMPTY
 LLAMACPP_MODEL_NAME    ?= Qwen3.5-9B-Q4_K_M
@@ -103,7 +100,7 @@ export _runtime_missing_msg
        status logs help \
        ps follow follow-llamacpp follow-openclaw \
        shell shell-llamacpp shell-openclaw \
-       build-llamacpp build-openclaw build-markitdown \
+       build-llamacpp build-openclaw \
        logs-llamacpp logs-openclaw \
        build-info env-check _require-runtime
 
@@ -117,8 +114,8 @@ _require-runtime:
 ##@ Lifecycle
 # =============================================================================
 
-## build: Build all container images (llama.cpp + OpenClaw + MarkItDown)
-build: _require-runtime build-llamacpp build-openclaw build-markitdown
+## build: Build all container images (llama.cpp + OpenClaw)
+build: _require-runtime build-llamacpp build-openclaw
 
 ## start: Start the full DemoClaw stack (with health checks)
 start: _require-runtime
@@ -137,7 +134,6 @@ clean: _require-runtime
 	@echo "[clean] Removing container images ..."
 	@$(CONTAINER_RUNTIME) rmi -f $(LLAMACPP_IMAGE_TAG) 2>/dev/null || true
 	@$(CONTAINER_RUNTIME) rmi -f $(OPENCLAW_IMAGE_TAG) 2>/dev/null || true
-	@$(CONTAINER_RUNTIME) rmi -f $(MARKITDOWN_IMAGE_TAG) 2>/dev/null || true
 	@echo "[clean] Pruning dangling volumes ..."
 	@$(CONTAINER_RUNTIME) volume prune -f 2>/dev/null || true
 	@echo "[clean] Done. Model cache at $(MODEL_DIR) is preserved."
@@ -148,7 +144,6 @@ prune: _require-runtime
 	@echo "[prune] Removing DemoClaw container images ..."
 	@$(CONTAINER_RUNTIME) rmi -f $(LLAMACPP_IMAGE_TAG) 2>/dev/null || true
 	@$(CONTAINER_RUNTIME) rmi -f $(OPENCLAW_IMAGE_TAG) 2>/dev/null || true
-	@$(CONTAINER_RUNTIME) rmi -f $(MARKITDOWN_IMAGE_TAG) 2>/dev/null || true
 	@$(CONTAINER_RUNTIME) image prune -f 2>/dev/null || true
 	@$(CONTAINER_RUNTIME) volume prune -f 2>/dev/null || true
 	@$(CONTAINER_RUNTIME) builder prune -f 2>/dev/null || true
@@ -183,16 +178,6 @@ build-openclaw: _require-runtime
 		-t $(OPENCLAW_IMAGE_TAG) \
 		"$(PROJECT_ROOT)openclaw"
 
-## build-markitdown: Build the MarkItDown MCP server image
-build-markitdown: _require-runtime
-	@echo "[build] Building MarkItDown image '$(MARKITDOWN_IMAGE_TAG)' ..."
-	@$(CONTAINER_RUNTIME) build $(_BUILD_NOCACHE_FLAG) \
-		--build-arg VERSION=$(VERSION) \
-		--build-arg BUILD_DATE=$(BUILD_DATE) \
-		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
-		-t $(MARKITDOWN_IMAGE_TAG) \
-		"$(PROJECT_ROOT)markitdown"
-
 ## build-info: Show build configuration
 build-info:
 	@echo ""
@@ -204,7 +189,6 @@ build-info:
 	@echo ""
 	@echo "  llama.cpp   : $(LLAMACPP_IMAGE_TAG)"
 	@echo "  OpenClaw    : $(OPENCLAW_IMAGE_TAG)"
-	@echo "  MarkItDown  : $(MARKITDOWN_IMAGE_TAG)"
 	@echo "  Model       : $(MODEL_NAME)"
 	@echo ""
 
@@ -219,26 +203,21 @@ status:
 	@$(CONTAINER_RUNTIME) ps -a \
 		--filter "name=$(LLAMACPP_CONTAINER_NAME)" \
 		--filter "name=$(OPENCLAW_CONTAINER_NAME)" \
-		--filter "name=$(MARKITDOWN_CONTAINER_NAME)" \
 		--format "table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}" 2>/dev/null \
 	|| echo "(no containers found)"
 
-## logs: Tail last 50 lines from containers; use SERVICE=llamacpp|openclaw|markitdown
+## logs: Tail last 50 lines from containers; use SERVICE=llamacpp|openclaw
 logs:
 	@case "$(SERVICE)" in \
 		llamacpp) $(CONTAINER_RUNTIME) logs --tail 50 $(LLAMACPP_CONTAINER_NAME) 2>/dev/null || echo "(not found)";; \
 		openclaw) $(CONTAINER_RUNTIME) logs --tail 50 $(OPENCLAW_CONTAINER_NAME) 2>/dev/null || echo "(not found)";; \
-		markitdown) $(CONTAINER_RUNTIME) logs --tail 50 $(MARKITDOWN_CONTAINER_NAME) 2>/dev/null || echo "(not found)";; \
 		"") \
 			echo "=== llama.cpp ==="; \
 			$(CONTAINER_RUNTIME) logs --tail 50 $(LLAMACPP_CONTAINER_NAME) 2>/dev/null || echo "(not found)"; \
 			echo ""; \
-			echo "=== MarkItDown ==="; \
-			$(CONTAINER_RUNTIME) logs --tail 50 $(MARKITDOWN_CONTAINER_NAME) 2>/dev/null || echo "(not found)"; \
-			echo ""; \
 			echo "=== OpenClaw ==="; \
 			$(CONTAINER_RUNTIME) logs --tail 50 $(OPENCLAW_CONTAINER_NAME) 2>/dev/null || echo "(not found)";; \
-		*) echo "[logs] Unknown SERVICE='$(SERVICE)'. Use: llamacpp, openclaw, markitdown" >&2; exit 1;; \
+		*) echo "[logs] Unknown SERVICE='$(SERVICE)'. Use: llamacpp, openclaw" >&2; exit 1;; \
 	esac
 
 ## logs-llamacpp: Show last 50 lines of llama.cpp logs
@@ -254,14 +233,12 @@ ps:
 	@$(CONTAINER_RUNTIME) ps -a \
 		--filter "name=$(LLAMACPP_CONTAINER_NAME)" \
 		--filter "name=$(OPENCLAW_CONTAINER_NAME)" \
-		--filter "name=$(MARKITDOWN_CONTAINER_NAME)" \
 		--format "table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}" 2>/dev/null \
 	|| echo "(no containers found)"
 
 ## follow: Follow live logs from all containers (Ctrl+C to stop)
 follow:
 	@$(CONTAINER_RUNTIME) logs -f --tail 10 $(LLAMACPP_CONTAINER_NAME) 2>/dev/null &\
-	$(CONTAINER_RUNTIME) logs -f --tail 10 $(MARKITDOWN_CONTAINER_NAME) 2>/dev/null &\
 	$(CONTAINER_RUNTIME) logs -f --tail 10 $(OPENCLAW_CONTAINER_NAME) 2>/dev/null &\
 	wait
 
@@ -277,17 +254,16 @@ follow-openclaw:
 ##@ Debugging
 # =============================================================================
 
-## shell: Exec into a container; use SERVICE=llamacpp|openclaw|markitdown
+## shell: Exec into a container; use SERVICE=llamacpp|openclaw
 shell: _require-runtime
 	@_svc="$(or $(SERVICE),$(CONTAINER))"; \
 	if [ -z "$$_svc" ]; then \
-		echo "Usage: make shell SERVICE=llamacpp|openclaw|markitdown" >&2; \
+		echo "Usage: make shell SERVICE=llamacpp|openclaw" >&2; \
 		exit 1; \
 	fi; \
 	case "$$_svc" in \
 		llamacpp)   _cname="$(LLAMACPP_CONTAINER_NAME)";; \
 		openclaw)   _cname="$(OPENCLAW_CONTAINER_NAME)";; \
-		markitdown) _cname="$(MARKITDOWN_CONTAINER_NAME)";; \
 		*)          _cname="$$_svc";; \
 	esac; \
 	$(CONTAINER_RUNTIME) exec -it "$$_cname" /bin/bash \

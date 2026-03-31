@@ -1,13 +1,3 @@
 {
-  "servers": {
-    "markitdown": {
-      "transport": "sse",
-      "url": "http://markitdown:3001/sse",
-      "description": "MarkItDown document converter — converts PDF, DOCX, PPTX, HTML, and more to Markdown",
-      "tools": [
-        "convert",
-        "convert_text"
-      ]
-    }
-  }
+  "servers": {}
 }

@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
 :: =============================================================================
-:: start.bat -- Full E2E startup for the DemoClaw stack (llama.cpp + MarkItDown + OpenClaw)
+:: start.bat -- Full E2E startup for the DemoClaw stack (llama.cpp + OpenClaw)
 ::
 :: Windows 11 PowerShell/cmd port of start.sh.
 :: Handles: cleanup -> pull/build images -> network -> llama.cpp -> OpenClaw
@@ -31,13 +31,9 @@ if defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=%DEMOCLAW_LLAMACPP_IMAGE%
 if not defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=docker.io/jinwangmok/democlaw-openclaw:v1.1.0"
 if defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=%DEMOCLAW_OPENCLAW_IMAGE%"
 
-if not defined DEMOCLAW_MARKITDOWN_IMAGE set "MARKITDOWN_IMAGE=docker.io/jinwangmok/democlaw-markitdown:v1.1.0"
-if defined DEMOCLAW_MARKITDOWN_IMAGE set "MARKITDOWN_IMAGE=%DEMOCLAW_MARKITDOWN_IMAGE%"
-
 set "NETWORK=democlaw-net"
 set "LLAMACPP_CONTAINER=democlaw-llamacpp"
 set "OPENCLAW_CONTAINER=democlaw-openclaw"
-set "MARKITDOWN_CONTAINER=democlaw-markitdown"
 set "MODEL_NAME=Qwen3.5-9B-Q4_K_M"
 set "MODEL_REPO=unsloth/Qwen3.5-9B-GGUF"
 set "MODEL_FILE=Qwen3.5-9B-Q4_K_M.gguf"
@@ -52,7 +48,6 @@ if not defined CACHE_TYPE_V set "CACHE_TYPE_V=q8_0"
 :: Ports
 set "LLAMACPP_PORT=8000"
 set "OPENCLAW_PORT=18789"
-if not defined MARKITDOWN_PORT set "MARKITDOWN_PORT=3001"
 
 :: Timeouts (seconds)
 set "LLAMACPP_HEALTH_TIMEOUT=600"
@@ -134,7 +129,7 @@ echo [start] NVIDIA GPU OK.
 echo.
 echo [start] --- Phase 0: Cleanup ---
 
-for %%c in (%OPENCLAW_CONTAINER% %MARKITDOWN_CONTAINER% %LLAMACPP_CONTAINER%) do (
+for %%c in (%OPENCLAW_CONTAINER% %LLAMACPP_CONTAINER%) do (
     %RUNTIME% container inspect "%%c" >nul 2>&1
     if !errorlevel! equ 0 (
         echo [start] Removing old container '%%c' ...
@@ -158,9 +153,6 @@ call :ensure_image "%LLAMACPP_IMAGE%" "%PROJECT_ROOT%\llamacpp"
 if !errorlevel! neq 0 exit /b 1
 
 call :ensure_image "%OPENCLAW_IMAGE%" "%PROJECT_ROOT%\openclaw"
-if !errorlevel! neq 0 exit /b 1
-
-call :ensure_image "%MARKITDOWN_IMAGE%" "%PROJECT_ROOT%\markitdown"
 if !errorlevel! neq 0 exit /b 1
 
 echo [start] Images ready.
@@ -263,13 +255,13 @@ set "MODELS_TIMEOUT=60"
 if %MODELS_ELAPSED% geq %MODELS_TIMEOUT% (
     echo [start] WARNING: /v1/models did not confirm model within %MODELS_TIMEOUT%s.
     echo [start]   Check: curl http://localhost:%LLAMACPP_PORT%/v1/models
-    goto start_markitdown
+    goto start_openclaw_container
 )
 
 curl -sf "http://localhost:%LLAMACPP_PORT%/v1/models" >nul 2>&1
 if !errorlevel! equ 0 (
     echo [start] llama.cpp /v1/models OK.
-    goto start_markitdown
+    goto start_openclaw_container
 )
 
 timeout /t 5 /nobreak >nul
@@ -279,60 +271,11 @@ if !MOD15! equ 0 echo [start]   ... waiting for /v1/models ^(!MODELS_ELAPSED!/%M
 goto models_loop
 
 :: ===========================================================================
-:: Phase 3: Start MarkItDown MCP sidecar
-:: ===========================================================================
-:start_markitdown
-echo.
-echo [start] --- Phase 3: Start MarkItDown MCP server ---
-
-echo [start] Starting MarkItDown container ...
-echo [start]   Port : %MARKITDOWN_PORT%
-
-%RUNTIME% run -d ^
-    --name %MARKITDOWN_CONTAINER% ^
-    --network %NETWORK% ^
-    --network-alias markitdown ^
-    --restart unless-stopped ^
-    -p %MARKITDOWN_PORT%:%MARKITDOWN_PORT% ^
-    -e "MARKITDOWN_PORT=%MARKITDOWN_PORT%" ^
-    -e "MARKITDOWN_HOST=0.0.0.0" ^
-    %MARKITDOWN_IMAGE%
-
-if !errorlevel! neq 0 (
-    echo [start] WARNING: Failed to start MarkItDown container. Continuing without it.
-)
-
-echo [start] MarkItDown container started. Waiting for health ...
-
-set "MARKITDOWN_HEALTHY=true"
-set "MARKITDOWN_ELAPSED=0"
-set "MARKITDOWN_HEALTH_TIMEOUT=60"
-
-:markitdown_health_loop
-if %MARKITDOWN_ELAPSED% geq %MARKITDOWN_HEALTH_TIMEOUT% (
-    set "MARKITDOWN_HEALTHY=false"
-    echo [start] WARNING: MarkItDown MCP server did not become healthy within %MARKITDOWN_HEALTH_TIMEOUT%s.
-    goto start_openclaw_container
-)
-
-curl -sf "http://localhost:%MARKITDOWN_PORT%/health" >nul 2>&1
-if !errorlevel! equ 0 (
-    echo [start] MarkItDown MCP server /health OK.
-    goto start_openclaw_container
-)
-
-timeout /t 2 /nobreak >nul
-set /a "MARKITDOWN_ELAPSED+=2"
-set /a "MKMOD10=MARKITDOWN_ELAPSED %% 10"
-if !MKMOD10! equ 0 echo [start]   ... waiting for MarkItDown ^(!MARKITDOWN_ELAPSED!/%MARKITDOWN_HEALTH_TIMEOUT%s^)
-goto markitdown_health_loop
-
-:: ===========================================================================
-:: Phase 4: Start OpenClaw
+:: Phase 3: Start OpenClaw
 :: ===========================================================================
 :start_openclaw_container
 echo.
-echo [start] --- Phase 4: Start OpenClaw ---
+echo [start] --- Phase 3: Start OpenClaw ---
 
 echo [start] Starting OpenClaw container ...
 
@@ -344,6 +287,17 @@ if exist "!MCPORTER_CONFIG!" (
     echo [start]   mcporter config: !MCPORTER_CONFIG!
 )
 
+:: Workspace volume mount — bind host directory into OpenClaw container
+set "WORKSPACE_MOUNT="
+if defined OPENCLAW_WORKSPACE_DIR (
+    if exist "!OPENCLAW_WORKSPACE_DIR!" (
+        set "WORKSPACE_MOUNT=-v !OPENCLAW_WORKSPACE_DIR!:/app/workspace:rw"
+        echo [start]   workspace mount: !OPENCLAW_WORKSPACE_DIR!
+    ) else (
+        echo [start] WARNING: OPENCLAW_WORKSPACE_DIR does not exist. Skipping mount.
+    )
+)
+
 %RUNTIME% run -d ^
     --name %OPENCLAW_CONTAINER% ^
     --network %NETWORK% ^
@@ -352,6 +306,7 @@ if exist "!MCPORTER_CONFIG!" (
     -p %OPENCLAW_PORT%:%OPENCLAW_PORT% ^
     -p 18791:18791 ^
     %MCPORTER_MOUNT% ^
+    %WORKSPACE_MOUNT% ^
     -e "LLAMACPP_BASE_URL=http://llamacpp:8000/v1" ^
     -e "LLAMACPP_API_KEY=EMPTY" ^
     -e "LLAMACPP_MODEL_NAME=%MODEL_NAME%" ^
@@ -419,11 +374,6 @@ echo [start] ========================================================
 echo.
 echo [start]   Health-checks passed:
 echo [start]     - llama.cpp /v1/models ... HTTP 200
-if "!MARKITDOWN_HEALTHY!"=="true" (
-    echo [start]     - MarkItDown MCP ........ OK
-) else (
-    echo [start]     - MarkItDown MCP ........ WARN ^(unhealthy^)
-)
 echo [start]     - OpenClaw dashboard .... HTTP 200
 echo.
 echo [start]   Services:
