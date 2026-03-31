@@ -112,7 +112,6 @@ RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh \
 # ---------------------------------------------------------------------------
 ENV NODE_ENV="production" \
     LLAMACPP_BASE_URL="http://llamacpp:8000/v1" \
-    LLAMACPP_API_KEY="EMPTY" \
     LLAMACPP_MODEL_NAME="Qwen3.5-9B-Q4_K_M" \
     LLAMACPP_MAX_TOKENS=4096 \
     LLAMACPP_TEMPERATURE=0.7 \
@@ -124,11 +123,9 @@ ENV NODE_ENV="production" \
     OPENCLAW_HOST="0.0.0.0" \
     OPENAI_API_BASE="http://llamacpp:8000/v1" \
     OPENAI_BASE_URL="http://llamacpp:8000/v1" \
-    OPENAI_API_KEY="EMPTY" \
     OPENAI_MODEL="Qwen3.5-9B-Q4_K_M" \
     OPENCLAW_LLM_PROVIDER="openai-compatible" \
     OPENCLAW_LLM_BASE_URL="http://llamacpp:8000/v1" \
-    OPENCLAW_LLM_API_KEY="EMPTY" \
     OPENCLAW_LLM_MODEL="Qwen3.5-9B-Q4_K_M" \
     OPENCLAW_LLM_MAX_TOKENS=4096 \
     OPENCLAW_LLM_TEMPERATURE=0.7

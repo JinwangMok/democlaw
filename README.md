@@ -152,7 +152,10 @@ OpenClaw can use external tools via MCP servers. Run MCP servers as independent 
 DemoClaw의 커스텀 이미지는 SSE transport를 지원하므로 컨테이너 간 네트워크 통신이 가능합니다.
 
 ```bash
-# Linux
+# Build the image from the included markitdown/ directory
+docker build -t democlaw-markitdown:latest ./markitdown
+
+# Run on the same network as OpenClaw
 docker run -d \
     --name markitdown \
     --network democlaw-net \
@@ -161,12 +164,13 @@ docker run -d \
     -p 3001:3001 \
     -e "MARKITDOWN_PORT=3001" \
     -e "MARKITDOWN_HOST=0.0.0.0" \
-    docker.io/jinwangmok/democlaw-markitdown:v1.1.0
+    democlaw-markitdown:latest
 ```
 
 ```powershell
 # Windows
-docker run -d --name markitdown --network democlaw-net --network-alias markitdown --restart unless-stopped -p 3001:3001 -e "MARKITDOWN_PORT=3001" -e "MARKITDOWN_HOST=0.0.0.0" docker.io/jinwangmok/democlaw-markitdown:v1.1.0
+docker build -t democlaw-markitdown:latest .\markitdown
+docker run -d --name markitdown --network democlaw-net --network-alias markitdown --restart unless-stopped -p 3001:3001 -e "MARKITDOWN_PORT=3001" -e "MARKITDOWN_HOST=0.0.0.0" democlaw-markitdown:latest
 ```
 
 Health check:
