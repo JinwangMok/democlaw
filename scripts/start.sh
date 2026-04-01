@@ -373,14 +373,13 @@ fi
 # Phase 4: All health-checks passed — print dashboard URL
 # ===========================================================================
 
-# Resolve dashboard URL: retry a few times (gateway may need a moment after health-check)
+# Resolve dashboard URL: retry until the gateway is ready to report its URL
 DASHBOARD_URL=""
-for _url_attempt in 1 2 3; do
+log "Retrieving tokenized dashboard URL ..."
+for _url_attempt in $(seq 1 6); do
     # Method 1: openclaw dashboard --no-open (prints tokenized URL)
-    if [ -z "${DASHBOARD_URL}" ]; then
-        DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>&1 \
-            | grep -oE 'https?://[^ ]+' | head -1 || true)
-    fi
+    _raw=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>&1 || true)
+    DASHBOARD_URL=$(echo "${_raw}" | grep -oE 'https?://[^ ]+' | head -1 || true)
 
     # Method 2: search container logs for the tokenized URL
     if [ -z "${DASHBOARD_URL}" ]; then
@@ -388,8 +387,11 @@ for _url_attempt in 1 2 3; do
             | grep -oE "https?://[^ ]*token=[^ ]*" | tail -1 || true)
     fi
 
-    [ -n "${DASHBOARD_URL}" ] && break
-    sleep 5
+    if [ -n "${DASHBOARD_URL}" ]; then
+        break
+    fi
+    log "  ... URL not ready yet (attempt ${_url_attempt}/6), retrying in 10s"
+    sleep 10
 done
 
 # Normalize: replace 127.0.0.1 and 0.0.0.0 with localhost for host access
