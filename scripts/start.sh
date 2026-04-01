@@ -435,11 +435,6 @@ log ""
 log "  Web UI Dashboard:"
 log "    ${DASHBOARD_URL}"
 log ""
-
-# Print bare dashboard URL to stdout for easy parsing by scripts/tools
-echo "${DASHBOARD_URL}"
-
-log ""
 log "  NOTE: On first connect, click \"Connect\" in the browser."
 log "        The device pairing is auto-approved within ~2 seconds."
 log "        If needed, click \"Connect\" again after approval."
