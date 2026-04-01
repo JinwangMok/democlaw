@@ -371,14 +371,42 @@ exit /b 1
 :: ===========================================================================
 :show_result
 
-:: Try to get tokenized dashboard URL
+:: Try to get tokenized dashboard URL (multiple methods)
 set "DASHBOARD_URL="
+
+:: Method 1: openclaw dashboard --no-open
 for /f "tokens=*" %%U in ('%RUNTIME% exec %OPENCLAW_CONTAINER% openclaw dashboard --no-open 2^>nul') do (
     echo %%U | findstr /r "http" >nul 2>&1
-    if !errorlevel! equ 0 set "DASHBOARD_URL=%%U"
+    if !errorlevel! equ 0 if not defined DASHBOARD_URL set "DASHBOARD_URL=%%U"
 )
+
+:: Method 2: search container logs for tokenized URL
+if not defined DASHBOARD_URL (
+    for /f "tokens=*" %%U in ('%RUNTIME% logs %OPENCLAW_CONTAINER% 2^>^&1 ^| findstr /r "token="') do (
+        echo %%U | findstr /r "http" >nul 2>&1
+        if !errorlevel! equ 0 set "DASHBOARD_URL=%%U"
+    )
+    if defined DASHBOARD_URL (
+        for /f "tokens=*" %%U in ('echo !DASHBOARD_URL! ^| powershell -c "$input -replace '.*?(https?://\S+).*','$1'"') do set "DASHBOARD_URL=%%U"
+    )
+)
+
+:: Method 3: openclaw gateway url
+if not defined DASHBOARD_URL (
+    for /f "tokens=*" %%U in ('%RUNTIME% exec %OPENCLAW_CONTAINER% openclaw gateway url 2^>nul') do (
+        echo %%U | findstr /r "http" >nul 2>&1
+        if !errorlevel! equ 0 if not defined DASHBOARD_URL set "DASHBOARD_URL=%%U"
+    )
+)
+
+:: Normalize addresses for host access
 if defined DASHBOARD_URL set "DASHBOARD_URL=!DASHBOARD_URL:127.0.0.1=localhost!"
-if not defined DASHBOARD_URL set "DASHBOARD_URL=http://localhost:%OPENCLAW_PORT%"
+if defined DASHBOARD_URL set "DASHBOARD_URL=!DASHBOARD_URL:0.0.0.0=localhost!"
+if not defined DASHBOARD_URL (
+    set "DASHBOARD_URL=http://localhost:%OPENCLAW_PORT%"
+    echo [start] WARNING: Could not retrieve tokenized dashboard URL.
+    echo [start]   Try manually: %RUNTIME% exec %OPENCLAW_CONTAINER% openclaw dashboard --no-open
+)
 
 echo.
 echo [start] ========================================================

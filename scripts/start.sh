@@ -373,12 +373,37 @@ fi
 # Phase 4: All health-checks passed — print dashboard URL
 # ===========================================================================
 
-# Resolve dashboard URL: try tokenized URL from openclaw binary, fall back to localhost
-DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>/dev/null \
-    | grep -oE 'https?://[^ ]+' | head -1 | sed 's/127\.0\.0\.1/localhost/' || true)
+# Resolve dashboard URL: try multiple methods to find the tokenized URL
+DASHBOARD_URL=""
 
+# Method 1: openclaw dashboard --no-open (prints tokenized URL)
+if [ -z "${DASHBOARD_URL}" ]; then
+    DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>/dev/null \
+        | grep -oE 'https?://[^ ]+' | head -1 || true)
+fi
+
+# Method 2: search container logs for the tokenized URL
+if [ -z "${DASHBOARD_URL}" ]; then
+    DASHBOARD_URL=$("${RUNTIME}" logs "${OPENCLAW_CONTAINER}" 2>&1 \
+        | grep -oE "https?://[^ ]*token=[^ ]*" | tail -1 || true)
+fi
+
+# Method 3: try openclaw gateway url command
+if [ -z "${DASHBOARD_URL}" ]; then
+    DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw gateway url 2>/dev/null \
+        | grep -oE 'https?://[^ ]+' | head -1 || true)
+fi
+
+# Normalize: replace 127.0.0.1 and 0.0.0.0 with localhost for host access
+if [ -n "${DASHBOARD_URL}" ]; then
+    DASHBOARD_URL=$(echo "${DASHBOARD_URL}" | sed -e 's/127\.0\.0\.1/localhost/' -e 's/0\.0\.0\.0/localhost/')
+fi
+
+# Fallback: plain URL without token
 if [ -z "${DASHBOARD_URL}" ]; then
     DASHBOARD_URL="http://localhost:${OPENCLAW_PORT}"
+    log "WARNING: Could not retrieve tokenized dashboard URL."
+    log "  Try manually: ${RUNTIME} exec ${OPENCLAW_CONTAINER} openclaw dashboard --no-open"
 fi
 
 LLM_API_URL="http://localhost:${LLAMACPP_PORT}/v1"
