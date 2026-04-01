@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install ShellCheck
         run: |
@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install hadolint v2.12.0
         run: |
@@ -148,7 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Required files exist
         run: |
@@ -193,10 +193,10 @@ jobs:
     needs: [shellcheck, hadolint]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # llama.cpp: dry-run syntax check via docker buildx build --check.
       # Does NOT execute RUN instructions, does NOT create a local image. No GPU required.
@@ -266,7 +266,7 @@ jobs:
     needs: [shellcheck, hadolint]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Ensure Podman is available
         run: |
@@ -334,7 +334,7 @@ jobs:
     needs: [shellcheck]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Make healthcheck script executable
         run: chmod +x llamacpp/healthcheck.sh
@@ -455,7 +455,7 @@ jobs:
     needs: [shellcheck]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Make healthcheck script executable
         run: chmod +x markitdown/healthcheck.sh

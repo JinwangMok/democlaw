@@ -47,7 +47,7 @@ jobs:
       # 0. Checkout
       # -----------------------------------------------------------------------
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # -----------------------------------------------------------------------
       # 1. Install ShellCheck

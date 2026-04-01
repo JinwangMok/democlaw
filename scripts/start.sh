@@ -75,10 +75,10 @@ else
     error "No container runtime found. Install docker or podman."
 fi
 
-GPU_FLAGS="--gpus all"
-HOSTNAME_LLM="--hostname llamacpp"
-HOSTNAME_OPENCLAW="--hostname openclaw"
-SHM_FLAGS="--shm-size 1g"
+GPU_FLAGS=(--gpus all)
+HOSTNAME_LLM=(--hostname llamacpp)
+HOSTNAME_OPENCLAW=(--hostname openclaw)
+SHM_FLAGS=(--shm-size 1g)
 
 # Detect if the runtime is actually podman (covers podman-docker aliases)
 _is_podman=false
@@ -89,11 +89,11 @@ elif "${RUNTIME}" --version 2>/dev/null | grep -qi podman; then
 fi
 
 if [ "${_is_podman}" = "true" ]; then
-    GPU_FLAGS="--device nvidia.com/gpu=all"
+    GPU_FLAGS=(--device nvidia.com/gpu=all)
     # Podman rootful inherits host UTS/IPC namespaces; --hostname and --shm-size are invalid
-    HOSTNAME_LLM=""
-    HOSTNAME_OPENCLAW=""
-    SHM_FLAGS=""
+    HOSTNAME_LLM=()
+    HOSTNAME_OPENCLAW=()
+    SHM_FLAGS=()
 fi
 
 log "========================================================"
@@ -165,15 +165,14 @@ log "  Flash attn : ${FLASH_ATTN}"
 log "  KV cache   : K=${CACHE_TYPE_K}, V=${CACHE_TYPE_V}"
 log "  Model dir  : ${MODEL_DIR}"
 
-# shellcheck disable=SC2086
 "${RUNTIME}" run -d \
     --name "${LLAMACPP_CONTAINER}" \
     --network "${NETWORK}" \
-    ${HOSTNAME_LLM} \
+    "${HOSTNAME_LLM[@]}" \
     --network-alias llamacpp \
-    ${GPU_FLAGS} \
+    "${GPU_FLAGS[@]}" \
     --restart unless-stopped \
-    ${SHM_FLAGS} \
+    "${SHM_FLAGS[@]}" \
     -p "${LLAMACPP_PORT}:${LLAMACPP_PORT}" \
     -v "${MODEL_DIR}:/models:rw" \
     -e "MODEL_PATH=/models/${MODEL_FILE}" \
@@ -285,18 +284,18 @@ log "--- Phase 3: Start OpenClaw ---"
 log "Starting OpenClaw container ..."
 
 # mcporter configuration — mount from host if it exists
-MCPORTER_MOUNT=""
+MCPORTER_MOUNT=()
 MCPORTER_CONFIG="${PROJECT_ROOT}/config/mcporter.json"
 if [ -f "${MCPORTER_CONFIG}" ]; then
-    MCPORTER_MOUNT="-v ${MCPORTER_CONFIG}:/app/config/mcporter.json:ro"
+    MCPORTER_MOUNT=(-v "${MCPORTER_CONFIG}:/app/config/mcporter.json:ro")
     log "  mcporter config: ${MCPORTER_CONFIG} -> /app/config/mcporter.json"
 fi
 
 # Data persistence mount — persist OpenClaw settings, pairings, credentials
-DATA_MOUNT=""
+DATA_MOUNT=()
 if [ -n "${OPENCLAW_DATA_DIR:-}" ]; then
     if [ -d "${OPENCLAW_DATA_DIR}" ] || mkdir -p "${OPENCLAW_DATA_DIR}" 2>/dev/null; then
-        DATA_MOUNT="-v ${OPENCLAW_DATA_DIR}:/home/openclaw/.openclaw:rw"
+        DATA_MOUNT=(-v "${OPENCLAW_DATA_DIR}:/home/openclaw/.openclaw:rw")
         log "  data mount: ${OPENCLAW_DATA_DIR} -> /home/openclaw/.openclaw"
     else
         log "WARNING: OPENCLAW_DATA_DIR='${OPENCLAW_DATA_DIR}' could not be created. Skipping mount."
@@ -304,28 +303,27 @@ if [ -n "${OPENCLAW_DATA_DIR:-}" ]; then
 fi
 
 # Workspace volume mount — bind host directory into OpenClaw container
-WORKSPACE_MOUNT=""
+WORKSPACE_MOUNT=()
 if [ -n "${OPENCLAW_WORKSPACE_DIR:-}" ]; then
     if [ -d "${OPENCLAW_WORKSPACE_DIR}" ]; then
-        WORKSPACE_MOUNT="-v ${OPENCLAW_WORKSPACE_DIR}:/app/workspace:rw"
+        WORKSPACE_MOUNT=(-v "${OPENCLAW_WORKSPACE_DIR}:/app/workspace:rw")
         log "  workspace mount: ${OPENCLAW_WORKSPACE_DIR} -> /app/workspace"
     else
         log "WARNING: OPENCLAW_WORKSPACE_DIR='${OPENCLAW_WORKSPACE_DIR}' does not exist. Skipping mount."
     fi
 fi
 
-# shellcheck disable=SC2086
 "${RUNTIME}" run -d \
     --name "${OPENCLAW_CONTAINER}" \
     --network "${NETWORK}" \
-    ${HOSTNAME_OPENCLAW} \
+    "${HOSTNAME_OPENCLAW[@]}" \
     --network-alias openclaw \
     --restart unless-stopped \
     -p "${OPENCLAW_PORT}:${OPENCLAW_PORT}" \
     -p 18791:18791 \
-    ${MCPORTER_MOUNT} \
-    ${DATA_MOUNT} \
-    ${WORKSPACE_MOUNT} \
+    "${MCPORTER_MOUNT[@]}" \
+    "${DATA_MOUNT[@]}" \
+    "${WORKSPACE_MOUNT[@]}" \
     -e "LLAMACPP_BASE_URL=http://llamacpp:8000/v1" \
     -e "LLAMACPP_API_KEY=EMPTY" \
     -e "LLAMACPP_MODEL_NAME=${MODEL_NAME}" \
