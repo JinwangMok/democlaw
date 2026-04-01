@@ -378,7 +378,7 @@ DASHBOARD_URL=""
 for _url_attempt in 1 2 3; do
     # Method 1: openclaw dashboard --no-open (prints tokenized URL)
     if [ -z "${DASHBOARD_URL}" ]; then
-        DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>/dev/null \
+        DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>&1 \
             | grep -oE 'https?://[^ ]+' | head -1 || true)
     fi
 
