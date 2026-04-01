@@ -55,8 +55,8 @@ REPO_URL   ?= https://github.com/JinwangMok/democlaw
 # ---------------------------------------------------------------------------
 # Component versions
 # ---------------------------------------------------------------------------
-NODE_MAJOR           ?= 24
-OPENCLAW_NPM_VERSION ?= latest
+NODE_MAJOR           ?= 22
+OPENCLAW_NPM_VERSION ?= 2026.3.24
 
 # ---------------------------------------------------------------------------
 # Model and port configuration

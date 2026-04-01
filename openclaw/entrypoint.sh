@@ -149,7 +149,7 @@ fi
 # ---------------------------------------------------------------------------
 if [ ! -f "${HOME}/.openclaw/openclaw.json" ]; then
     echo "[openclaw-entrypoint] Running initial onboard (llama.cpp provider) ..."
-    if openclaw onboard \
+    openclaw onboard \
         --non-interactive \
         --accept-risk \
         --mode local \
@@ -158,28 +158,21 @@ if [ ! -f "${HOME}/.openclaw/openclaw.json" ]; then
         --custom-base-url "${LLAMACPP_BASE_URL}" \
         --custom-model-id "${LLAMACPP_MODEL_NAME}" \
         --custom-api-key "${LLAMACPP_API_KEY}" \
-        2>&1; then
-        echo "[openclaw-entrypoint] Onboard completed successfully."
-    else
-        echo "[openclaw-entrypoint] WARNING: Onboard exited with code $?. Continuing anyway ..."
-    fi
-else
-    echo "[openclaw-entrypoint] Onboard already done (${HOME}/.openclaw/openclaw.json exists)."
+        2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------
 # Configure gateway settings via CLI (these write to OpenClaw's own config store)
 # ---------------------------------------------------------------------------
-echo "[openclaw-entrypoint] Configuring gateway settings ..."
-openclaw config set gateway.mode local 2>&1 || echo "[openclaw-entrypoint] WARNING: gateway.mode config failed"
-openclaw config set gateway.bind lan 2>&1 || echo "[openclaw-entrypoint] WARNING: gateway.bind config failed"
-openclaw config set gateway.auth.mode token 2>&1 || echo "[openclaw-entrypoint] WARNING: gateway.auth.mode config failed"
-openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>&1 || echo "[openclaw-entrypoint] WARNING: controlUi config failed"
+openclaw config set gateway.mode local 2>/dev/null || true
+openclaw config set gateway.bind lan 2>/dev/null || true
+openclaw config set gateway.auth.mode token 2>/dev/null || true
+openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
 
 # Set default agent model to the local llama.cpp model.
 # The "llamacpp" provider was registered by onboard --custom-provider-id above.
 # Without this, OpenClaw defaults to anthropic/claude-opus-4-6.
-openclaw models set "llamacpp/${LLAMACPP_MODEL_NAME}" 2>&1 || echo "[openclaw-entrypoint] WARNING: models set failed"
+openclaw models set "llamacpp/${LLAMACPP_MODEL_NAME}" 2>/dev/null || true
 
 echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPENCLAW_PORT}) ..."
 
@@ -198,60 +191,38 @@ else
 fi
 GATEWAY_PID=$!
 
-# Wait for gateway to be ready (any HTTP response = ready)
+# Wait for gateway to be ready (poll instead of fixed sleep)
 gateway_wait=0
-while [ "${gateway_wait}" -lt 60 ]; do
-    gw_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 \
-        "http://localhost:${OPENCLAW_PORT}/" 2>/dev/null || echo "000")
-    if [ "${gw_code}" != "000" ]; then
-        echo "[openclaw-entrypoint] Gateway is responding on port ${OPENCLAW_PORT} (HTTP ${gw_code})."
+while [ "${gateway_wait}" -lt 30 ]; do
+    if curl -sf "http://localhost:${OPENCLAW_PORT}/" >/dev/null 2>&1; then
+        echo "[openclaw-entrypoint] Gateway is responding on port ${OPENCLAW_PORT}."
         break
     fi
     sleep 1
     gateway_wait=$((gateway_wait + 1))
 done
 
-if [ "${gw_code}" = "000" ]; then
-    echo "[openclaw-entrypoint] WARNING: Gateway not responding after 60s. Check gateway process."
-fi
-
-# Log the dashboard URL for start.sh to extract from container logs
-ENTRYPOINT_DASHBOARD_URL=$(openclaw dashboard --no-open 2>&1 || true)
-echo "[openclaw-entrypoint] Dashboard output: ${ENTRYPOINT_DASHBOARD_URL}"
-
 # ---------------------------------------------------------------------------
 # Auto-approve the FIRST device pairing request only (one-shot, not a loop)
 # After the first device is paired, stop watching — no blanket auto-approve.
-#
-# Runs in a BACKGROUND subshell with a 300s window so the user has enough
-# time to see the dashboard URL (printed by start.sh after health-check)
-# and click "Connect" in the browser.
 # ---------------------------------------------------------------------------
-AUTO_APPROVE_TIMEOUT="${AUTO_APPROVE_TIMEOUT:-300}"
-AUTO_APPROVE_ATTEMPTS=$(( AUTO_APPROVE_TIMEOUT / 2 ))
-
-echo "[openclaw-entrypoint] Device auto-approve active for ${AUTO_APPROVE_TIMEOUT}s (background)."
-echo "[openclaw-entrypoint]   Open the dashboard URL and click Connect to pair."
-
-(
-    APPROVED=false
-    for _attempt in $(seq 1 "${AUTO_APPROVE_ATTEMPTS}"); do
-        if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then break; fi
-        pending=$(openclaw devices list 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
-        if [ -n "$pending" ]; then
-            openclaw devices approve "$pending" 2>/dev/null && \
-                echo "[openclaw-entrypoint] First device auto-approved: $pending" && \
-                APPROVED=true
-            break
-        fi
-        sleep 2
-    done
-
-    if [ "$APPROVED" = false ]; then
-        echo "[openclaw-entrypoint] No pairing request received within ${AUTO_APPROVE_TIMEOUT}s. Manual approve required."
-        echo "[openclaw-entrypoint]   Run: ./scripts/device-approve.sh"
+echo "[openclaw-entrypoint] Waiting to auto-approve first device pairing ..."
+APPROVED=false
+for _attempt in $(seq 1 60); do
+    if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then break; fi
+    pending=$(openclaw devices list 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
+    if [ -n "$pending" ]; then
+        openclaw devices approve "$pending" 2>/dev/null && \
+            echo "[openclaw-entrypoint] First device auto-approved: $pending" && \
+            APPROVED=true
+        break
     fi
-) &
+    sleep 2
+done
+
+if [ "$APPROVED" = false ]; then
+    echo "[openclaw-entrypoint] No pairing request received within 120s. Manual approve required."
+fi
 
 # Hand off to gateway — block until it exits
 wait "$GATEWAY_PID"
