@@ -377,9 +377,17 @@ fi
 DASHBOARD_URL=""
 log "Retrieving tokenized dashboard URL ..."
 for _url_attempt in $(seq 1 6); do
-    # Method 1: openclaw dashboard --no-open (prints tokenized URL)
+    # Method 1: openclaw dashboard --no-open (look for URL with token)
     _raw=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>&1 || true)
-    DASHBOARD_URL=$(echo "${_raw}" | grep -oE 'https?://[^ ]+' | head -1 || true)
+    DASHBOARD_URL=$(echo "${_raw}" | grep -oE 'https?://[^ ]*token=[^ ]*' | head -1 || true)
+    # Fallback: any URL from the output (may lack token)
+    if [ -z "${DASHBOARD_URL}" ]; then
+        DASHBOARD_URL=$(echo "${_raw}" | grep -oE 'https?://[^ ]+' | head -1 || true)
+        # Only accept if it contains a token
+        if ! echo "${DASHBOARD_URL}" | grep -q 'token='; then
+            DASHBOARD_URL=""
+        fi
+    fi
 
     # Method 2: search container logs for the tokenized URL
     if [ -z "${DASHBOARD_URL}" ]; then
