@@ -44,13 +44,21 @@ for cname in democlaw-openclaw democlaw-llamacpp markitdown; do
 done
 
 # ---------------------------------------------------------------------------
-# Remove network
+# Remove network (skip unless REMOVE_NETWORK=true)
+# Note: start.sh Phase 0 always recreates the network, so this flag mainly
+# controls cleanup in teardown-only scenarios (no subsequent start).
 # ---------------------------------------------------------------------------
-if "${RUNTIME}" network inspect democlaw-net >/dev/null 2>&1; then
-    log "Removing network 'democlaw-net' ..."
-    "${RUNTIME}" network rm democlaw-net >/dev/null 2>&1 || true
+REMOVE_NETWORK="${REMOVE_NETWORK:-false}"
+
+if [ "${REMOVE_NETWORK}" = "true" ]; then
+    if "${RUNTIME}" network inspect democlaw-net >/dev/null 2>&1; then
+        log "Removing network 'democlaw-net' ..."
+        "${RUNTIME}" network rm democlaw-net >/dev/null 2>&1 || true
+    else
+        log "Network 'democlaw-net' not found -- skipping."
+    fi
 else
-    log "Network 'democlaw-net' not found -- skipping."
+    log "Network 'democlaw-net' preserved (REMOVE_NETWORK!=true)."
 fi
 
 log "Done."

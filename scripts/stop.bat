@@ -47,15 +47,20 @@ for %%c in (democlaw-openclaw democlaw-llamacpp markitdown) do (
     )
 )
 
-:: Remove network
-%RUNTIME% network inspect democlaw-net >nul 2>&1
-if !errorlevel! equ 0 (
-    echo [stop] Removing network 'democlaw-net' ...
-    %RUNTIME% network rm democlaw-net >nul 2>&1
+:: Remove network (skip unless REMOVE_NETWORK=true; start.sh recreates it anyway)
+if not defined REMOVE_NETWORK set "REMOVE_NETWORK=false"
+if "%REMOVE_NETWORK%"=="true" (
+    %RUNTIME% network inspect democlaw-net >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo [stop] Removing network 'democlaw-net' ...
+        %RUNTIME% network rm democlaw-net >nul 2>&1
+    ) else (
+        echo [stop] Network 'democlaw-net' not found -- skipping.
+    )
 ) else (
-    echo [stop] Network 'democlaw-net' not found -- skipping.
+    echo [stop] Network 'democlaw-net' preserved ^(REMOVE_NETWORK!=true^).
 )
 
-echo [stop] Done. (Model weights preserved at %%USERPROFILE%%\.cache\democlaw\models)
+echo [stop] Done. (Model weights preserved at %USERPROFILE%\.cache\democlaw\models)
 
 endlocal

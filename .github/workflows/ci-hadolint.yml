@@ -115,7 +115,7 @@ jobs:
           echo "✓ ${{ matrix.dockerfile }} — hadolint passed"
 
   # ---------------------------------------------------------------------------
-  # Gate job: require BOTH matrix jobs to pass before marking the workflow
+  # Gate job: require ALL matrix jobs to pass before marking the workflow
   # green.  Referenced as a required status check in branch-protection rules.
   # ---------------------------------------------------------------------------
   dockerfile-lint-all-passed:
@@ -135,5 +135,6 @@ jobs:
           fi
           echo "✓ llamacpp/Dockerfile — passed"
           echo "✓ openclaw/Dockerfile — passed"
+          echo "✓ markitdown/Dockerfile — passed"
           echo ""
           echo "All Dockerfile lint jobs passed."

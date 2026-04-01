@@ -50,12 +50,12 @@ export DOCKER_BUILDKIT
 VERSION    ?= $(shell git -C "$(PROJECT_ROOT)" describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 GIT_COMMIT ?= $(shell git -C "$(PROJECT_ROOT)" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-REPO_URL   ?= https://github.com/democlaw/democlaw
+REPO_URL   ?= https://github.com/JinwangMok/democlaw
 
 # ---------------------------------------------------------------------------
 # Component versions
 # ---------------------------------------------------------------------------
-NODE_MAJOR           ?= 22
+NODE_MAJOR           ?= 24
 OPENCLAW_NPM_VERSION ?= latest
 
 # ---------------------------------------------------------------------------

@@ -14,10 +14,11 @@ setlocal enabledelayedexpansion
 :: Load .env file if present (overrides defaults below)
 :: ---------------------------------------------------------------------------
 set "SCRIPT_DIR=%~dp0"
-for %%I in ("%SCRIPT_DIR%\..") do set "PROJECT_ROOT_ENV=%%~fI"
-if exist "%PROJECT_ROOT_ENV%\.env" (
-    echo [start] Loading config from %PROJECT_ROOT_ENV%\.env ...
-    for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%PROJECT_ROOT_ENV%\.env") do (
+set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
+for %%I in ("%SCRIPT_DIR%\..") do set "PROJECT_ROOT=%%~fI"
+if exist "%PROJECT_ROOT%\.env" (
+    echo [start] Loading config from %PROJECT_ROOT%\.env ...
+    for /f "usebackq eol=# tokens=1,* delims==" %%A in ("%PROJECT_ROOT%\.env") do (
         if not "%%A"=="" if not "%%B"=="" set "%%A=%%B"
     )
 )
@@ -51,15 +52,12 @@ set "OPENCLAW_PORT=18789"
 
 :: Timeouts (seconds)
 set "LLAMACPP_HEALTH_TIMEOUT=600"
-set "OPENCLAW_HEALTH_TIMEOUT=120"
+set "OPENCLAW_HEALTH_TIMEOUT=300"
 
 :: Model directory (host path mounted into container)
 if not defined MODEL_DIR set "MODEL_DIR=%USERPROFILE%\.cache\democlaw\models"
 
-:: Project root
-set "SCRIPT_DIR=%~dp0"
-set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
-for %%I in ("%SCRIPT_DIR%\..") do set "PROJECT_ROOT=%%~fI"
+:: (PROJECT_ROOT already set during .env loading above)
 
 :: ---------------------------------------------------------------------------
 :: Detect container runtime
@@ -232,7 +230,7 @@ if !errorlevel! equ 0 (
     goto llamacpp_models_check
 )
 
-timeout /t 5 /nobreak >nul
+powershell -c "Start-Sleep -Seconds 5"
 set /a "ELAPSED+=5"
 set /a "MOD30=ELAPSED %% 30"
 if !MOD30! equ 0 echo [start]   ... llama.cpp loading ^(!ELAPSED!/%LLAMACPP_HEALTH_TIMEOUT%s^)
@@ -264,7 +262,7 @@ if !errorlevel! equ 0 (
     goto start_openclaw_container
 )
 
-timeout /t 5 /nobreak >nul
+powershell -c "Start-Sleep -Seconds 5"
 set /a "MODELS_ELAPSED+=5"
 set /a "MOD15=MODELS_ELAPSED %% 15"
 if !MOD15! equ 0 echo [start]   ... waiting for /v1/models ^(!MODELS_ELAPSED!/%MODELS_TIMEOUT%s^)
@@ -355,7 +353,7 @@ if !errorlevel! equ 0 (
     goto show_result
 )
 
-timeout /t 3 /nobreak >nul
+powershell -c "Start-Sleep -Seconds 3"
 set /a "OC_ELAPSED+=3"
 set /a "OC_MOD15=OC_ELAPSED %% 15"
 if !OC_MOD15! equ 0 echo [start]   ... waiting for OpenClaw ^(!OC_ELAPSED!/%OPENCLAW_HEALTH_TIMEOUT%s^)

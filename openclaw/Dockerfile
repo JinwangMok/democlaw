@@ -3,7 +3,7 @@
 # Configured to use llama.cpp as its LLM provider via OpenAI-compatible endpoint
 #
 # Build arguments (all overridable via --build-arg):
-#   NODE_MAJOR           — Node.js major version to install (default: 20)
+#   NODE_MAJOR           — Node.js major version to install (default: 24)
 #   OPENCLAW_NPM_VERSION — npm package version/tag to install (default: latest)
 #   LLAMACPP_BASE_URL    — default llama.cpp backend URL   (default: http://llamacpp:8000/v1)
 #   LLAMACPP_MODEL_NAME  — default model name          (default: Qwen3.5-9B-Q4_K_M)
@@ -16,7 +16,7 @@
 # ---------------------------------------------------------------------------
 # Build-time arguments — all have safe defaults for direct docker/podman build
 # ---------------------------------------------------------------------------
-ARG NODE_MAJOR=22
+ARG NODE_MAJOR=24
 ARG OPENCLAW_NPM_VERSION=latest
 ARG LLAMACPP_BASE_URL=http://llamacpp:8000/v1
 ARG LLAMACPP_MODEL_NAME=Qwen3.5-9B-Q4_K_M
@@ -44,7 +44,7 @@ LABEL org.opencontainers.image.description="OpenClaw AI assistant configured wit
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
-LABEL org.opencontainers.image.source="https://github.com/democlaw/democlaw"
+LABEL org.opencontainers.image.source="https://github.com/JinwangMok/democlaw"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.vendor="democlaw"
 LABEL democlaw.node-major="${NODE_MAJOR}"

@@ -56,7 +56,7 @@ OPENCLAW_PORT="18789"
 
 # Timeouts (seconds)
 LLAMACPP_HEALTH_TIMEOUT=600   # longer: model may need to download on first run
-OPENCLAW_HEALTH_TIMEOUT=120
+OPENCLAW_HEALTH_TIMEOUT=300   # longer: gateway init (onboard + plugin load) can take time
 
 # Model directory (host path mounted into the container)
 MODEL_DIR="${MODEL_DIR:-${HOME}/.cache/democlaw/models}"

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================================
-# download-models.sh — Pre-download GGUF model weights for DemoClaw (Linux)
+# download-model.sh — Pre-download GGUF model weights for DemoClaw (Linux)
 #
 # Downloads Qwen3.5-9B-Q4_K_M.gguf from HuggingFace so llama.cpp startup is
 # fast — no download delay on first container run.
 #
 # Usage:
-#   ./scripts/download-models.sh
-#   ./scripts/download-models.sh --model-dir /path/to/models
+#   ./scripts/download-model.sh
+#   ./scripts/download-model.sh --model-dir /path/to/models
 #
 # Environment variables:
 #   MODEL_REPO      — HuggingFace repo ID (default: unsloth/Qwen3.5-9B-GGUF)
@@ -22,11 +22,11 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 _use_color() { [ -t 1 ] && [ "${NO_COLOR:-}" != "1" ]; }
 
-log()   { echo "[download-models] $*"; }
-warn()  { if _use_color; then echo -e "\033[33m[download-models] WARNING: $*\033[0m" >&2; else echo "[download-models] WARNING: $*" >&2; fi; }
-error() { if _use_color; then echo -e "\033[31m[download-models] ERROR: $*\033[0m" >&2; else echo "[download-models] ERROR: $*" >&2; fi; exit 1; }
-ok()    { if _use_color; then echo -e "\033[32m[download-models] $*\033[0m"; else echo "[download-models] OK: $*"; fi; }
-info()  { if _use_color; then echo -e "\033[36m[download-models] $*\033[0m"; else echo "[download-models] $*"; fi; }
+log()   { echo "[download-model] $*"; }
+warn()  { if _use_color; then echo -e "\033[33m[download-model] WARNING: $*\033[0m" >&2; else echo "[download-model] WARNING: $*" >&2; fi; }
+error() { if _use_color; then echo -e "\033[31m[download-model] ERROR: $*\033[0m" >&2; else echo "[download-model] ERROR: $*" >&2; fi; exit 1; }
+ok()    { if _use_color; then echo -e "\033[32m[download-model] $*\033[0m"; else echo "[download-model] OK: $*"; fi; }
+info()  { if _use_color; then echo -e "\033[36m[download-model] $*\033[0m"; else echo "[download-model] $*"; fi; }
 
 # ---------------------------------------------------------------------------
 # Configuration (all overridable via environment)

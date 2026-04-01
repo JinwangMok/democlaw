@@ -205,24 +205,36 @@ done
 # ---------------------------------------------------------------------------
 # Auto-approve the FIRST device pairing request only (one-shot, not a loop)
 # After the first device is paired, stop watching — no blanket auto-approve.
+#
+# Runs in a BACKGROUND subshell with a 300s window so the user has enough
+# time to see the dashboard URL (printed by start.sh after health-check)
+# and click "Connect" in the browser.
 # ---------------------------------------------------------------------------
-echo "[openclaw-entrypoint] Waiting to auto-approve first device pairing ..."
-APPROVED=false
-for _attempt in $(seq 1 60); do
-    if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then break; fi
-    pending=$(openclaw devices list 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
-    if [ -n "$pending" ]; then
-        openclaw devices approve "$pending" 2>/dev/null && \
-            echo "[openclaw-entrypoint] First device auto-approved: $pending" && \
-            APPROVED=true
-        break
-    fi
-    sleep 2
-done
+AUTO_APPROVE_TIMEOUT="${AUTO_APPROVE_TIMEOUT:-300}"
+AUTO_APPROVE_ATTEMPTS=$(( AUTO_APPROVE_TIMEOUT / 2 ))
 
-if [ "$APPROVED" = false ]; then
-    echo "[openclaw-entrypoint] No pairing request received within 120s. Manual approve required."
-fi
+echo "[openclaw-entrypoint] Device auto-approve active for ${AUTO_APPROVE_TIMEOUT}s (background)."
+echo "[openclaw-entrypoint]   Open the dashboard URL and click Connect to pair."
+
+(
+    APPROVED=false
+    for _attempt in $(seq 1 "${AUTO_APPROVE_ATTEMPTS}"); do
+        if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then break; fi
+        pending=$(openclaw devices list 2>/dev/null | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1 || true)
+        if [ -n "$pending" ]; then
+            openclaw devices approve "$pending" 2>/dev/null && \
+                echo "[openclaw-entrypoint] First device auto-approved: $pending" && \
+                APPROVED=true
+            break
+        fi
+        sleep 2
+    done
+
+    if [ "$APPROVED" = false ]; then
+        echo "[openclaw-entrypoint] No pairing request received within ${AUTO_APPROVE_TIMEOUT}s. Manual approve required."
+        echo "[openclaw-entrypoint]   Run: ./scripts/device-approve.sh"
+    fi
+) &
 
 # Hand off to gateway — block until it exits
 wait "$GATEWAY_PID"

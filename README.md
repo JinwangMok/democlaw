@@ -62,7 +62,7 @@ Container orchestration for running [OpenClaw](https://github.com/openclaw) AI a
 ### Linux
 
 ```bash
-git clone https://github.com/democlaw/democlaw.git
+git clone https://github.com/JinwangMok/democlaw.git
 cd democlaw
 
 # (Optional) Copy and edit environment config
@@ -81,7 +81,7 @@ cp .env.example .env
 ### Windows 11
 
 ```powershell
-git clone https://github.com/democlaw/democlaw.git
+git clone https://github.com/JinwangMok/democlaw.git
 cd democlaw
 
 # Start the full stack
