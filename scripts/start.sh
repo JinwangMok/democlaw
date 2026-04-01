@@ -373,26 +373,24 @@ fi
 # Phase 4: All health-checks passed — print dashboard URL
 # ===========================================================================
 
-# Resolve dashboard URL: try multiple methods to find the tokenized URL
+# Resolve dashboard URL: retry a few times (gateway may need a moment after health-check)
 DASHBOARD_URL=""
+for _url_attempt in 1 2 3; do
+    # Method 1: openclaw dashboard --no-open (prints tokenized URL)
+    if [ -z "${DASHBOARD_URL}" ]; then
+        DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>/dev/null \
+            | grep -oE 'https?://[^ ]+' | head -1 || true)
+    fi
 
-# Method 1: openclaw dashboard --no-open (prints tokenized URL)
-if [ -z "${DASHBOARD_URL}" ]; then
-    DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw dashboard --no-open 2>/dev/null \
-        | grep -oE 'https?://[^ ]+' | head -1 || true)
-fi
+    # Method 2: search container logs for the tokenized URL
+    if [ -z "${DASHBOARD_URL}" ]; then
+        DASHBOARD_URL=$("${RUNTIME}" logs "${OPENCLAW_CONTAINER}" 2>&1 \
+            | grep -oE "https?://[^ ]*token=[^ ]*" | tail -1 || true)
+    fi
 
-# Method 2: search container logs for the tokenized URL
-if [ -z "${DASHBOARD_URL}" ]; then
-    DASHBOARD_URL=$("${RUNTIME}" logs "${OPENCLAW_CONTAINER}" 2>&1 \
-        | grep -oE "https?://[^ ]*token=[^ ]*" | tail -1 || true)
-fi
-
-# Method 3: try openclaw gateway url command
-if [ -z "${DASHBOARD_URL}" ]; then
-    DASHBOARD_URL=$("${RUNTIME}" exec "${OPENCLAW_CONTAINER}" openclaw gateway url 2>/dev/null \
-        | grep -oE 'https?://[^ ]+' | head -1 || true)
-fi
+    [ -n "${DASHBOARD_URL}" ] && break
+    sleep 5
+done
 
 # Normalize: replace 127.0.0.1 and 0.0.0.0 with localhost for host access
 if [ -n "${DASHBOARD_URL}" ]; then
