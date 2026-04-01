@@ -332,13 +332,14 @@ if !errorlevel! neq 0 (
 echo [start] OpenClaw container started. Waiting for dashboard ...
 
 :: ---------------------------------------------------------------------------
-:: Wait for OpenClaw dashboard
+:: Wait for OpenClaw gateway to respond (any HTTP code = gateway is up)
+:: The dashboard root returns HTTP 500 without auth token — this is normal.
 :: ---------------------------------------------------------------------------
 set "OC_ELAPSED=0"
 
 :oc_health_loop
 if %OC_ELAPSED% geq %OPENCLAW_HEALTH_TIMEOUT% (
-    echo [start] ERROR: OpenClaw dashboard did not respond within %OPENCLAW_HEALTH_TIMEOUT%s. >&2
+    echo [start] ERROR: OpenClaw gateway did not respond within %OPENCLAW_HEALTH_TIMEOUT%s. >&2
     echo [start] Check logs: %RUNTIME% logs %OPENCLAW_CONTAINER% >&2
     exit /b 1
 )
@@ -347,9 +348,10 @@ if %OC_ELAPSED% geq %OPENCLAW_HEALTH_TIMEOUT% (
 %RUNTIME% ps -a --filter "name=%OPENCLAW_CONTAINER%" 2>nul | findstr /i "Exited Dead" >nul 2>&1
 if !errorlevel! equ 0 goto oc_died
 
-curl -sf "http://localhost:%OPENCLAW_PORT%/" >nul 2>&1
-if !errorlevel! equ 0 (
-    echo [start] OpenClaw dashboard health-check passed ^(HTTP 200^).
+:: Any HTTP response (even 500) means the gateway is running
+for /f %%H in ('curl -s -o nul -w "%%{http_code}" --max-time 5 "http://localhost:%OPENCLAW_PORT%/" 2^>nul') do set "OC_HTTP=%%H"
+if defined OC_HTTP if not "!OC_HTTP!"=="000" (
+    echo [start] OpenClaw gateway is responding ^(HTTP !OC_HTTP!^).
     goto show_result
 )
 
@@ -385,7 +387,7 @@ echo [start] ========================================================
 echo.
 echo [start]   Health-checks passed:
 echo [start]     - llama.cpp /v1/models ... HTTP 200
-echo [start]     - OpenClaw dashboard .... HTTP 200
+echo [start]     - OpenClaw gateway ..... responding
 echo.
 echo [start]   Services:
 echo [start]     LLM API  : http://localhost:%LLAMACPP_PORT%/v1

@@ -333,7 +333,12 @@ fi
 log "OpenClaw container started. Waiting for dashboard ..."
 
 # ---------------------------------------------------------------------------
-# Wait for OpenClaw dashboard — requires HTTP 200 to pass health-check
+# Wait for OpenClaw gateway to respond on its port
+#
+# The dashboard root (/) returns HTTP 500 without an auth token — this is
+# normal.  We only need to confirm the gateway process is listening: any
+# HTTP response (200, 500, 302, …) means the gateway is up.  HTTP 000
+# means the port is not yet open (connection refused / timeout).
 # ---------------------------------------------------------------------------
 oc_elapsed=0
 oc_http_code="000"
@@ -348,20 +353,20 @@ while [ "${oc_elapsed}" -lt "${OPENCLAW_HEALTH_TIMEOUT}" ]; do
     oc_http_code=$(curl -s -o /dev/null -w "%{http_code}" \
         --max-time 5 "http://localhost:${OPENCLAW_PORT}/" 2>/dev/null || echo "000")
 
-    if [ "${oc_http_code}" = "200" ]; then
-        log "OpenClaw dashboard health-check passed (HTTP 200)."
+    if [ "${oc_http_code}" != "000" ]; then
+        log "OpenClaw gateway is responding (HTTP ${oc_http_code})."
         break
     fi
 
     sleep 3
     oc_elapsed=$((oc_elapsed + 3))
     if [ $((oc_elapsed % 15)) -eq 0 ]; then
-        log "  ... waiting for OpenClaw (${oc_elapsed}/${OPENCLAW_HEALTH_TIMEOUT}s, HTTP ${oc_http_code})"
+        log "  ... waiting for OpenClaw gateway (${oc_elapsed}/${OPENCLAW_HEALTH_TIMEOUT}s)"
     fi
 done
 
-if [ "${oc_http_code}" != "200" ]; then
-    error "OpenClaw dashboard did not return HTTP 200 within ${OPENCLAW_HEALTH_TIMEOUT}s (last: HTTP ${oc_http_code}). Check logs: ${RUNTIME} logs ${OPENCLAW_CONTAINER}"
+if [ "${oc_http_code}" = "000" ]; then
+    error "OpenClaw gateway did not respond within ${OPENCLAW_HEALTH_TIMEOUT}s. Check logs: ${RUNTIME} logs ${OPENCLAW_CONTAINER}"
 fi
 
 # ===========================================================================
@@ -385,7 +390,7 @@ log "========================================================"
 log ""
 log "  Health-checks passed:"
 log "    - llama.cpp /v1/models ... HTTP 200"
-log "    - OpenClaw dashboard .... HTTP 200"
+log "    - OpenClaw gateway ..... responding"
 log ""
 log "  Services:"
 log "    LLM API  : ${LLM_API_URL}"
