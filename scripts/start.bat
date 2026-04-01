@@ -26,10 +26,10 @@ if exist "%PROJECT_ROOT%\.env" (
 :: ---------------------------------------------------------------------------
 :: Configuration (matches start.sh defaults; override via environment)
 :: ---------------------------------------------------------------------------
-if not defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=docker.io/jinwangmok/democlaw-llamacpp:v1.1.0"
+if not defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=docker.io/jinwangmok/democlaw-llamacpp:v1.2.0"
 if defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=%DEMOCLAW_LLAMACPP_IMAGE%"
 
-if not defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=docker.io/jinwangmok/democlaw-openclaw:v1.1.0"
+if not defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=docker.io/jinwangmok/democlaw-openclaw:v1.2.0"
 if defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=%DEMOCLAW_OPENCLAW_IMAGE%"
 
 set "NETWORK=democlaw-net"
