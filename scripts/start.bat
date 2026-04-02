@@ -322,6 +322,7 @@ if defined OPENCLAW_WORKSPACE_DIR (
     -e "LLAMACPP_API_KEY=EMPTY" ^
     -e "LLAMACPP_MODEL_NAME=%MODEL_NAME%" ^
     -e "OPENCLAW_PORT=%OPENCLAW_PORT%" ^
+    -e "CTX_SIZE=%CTX_SIZE%" ^
     %OPENCLAW_IMAGE%
 
 if !errorlevel! neq 0 (

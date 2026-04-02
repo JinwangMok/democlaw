@@ -328,6 +328,7 @@ fi
     -e "LLAMACPP_API_KEY=EMPTY" \
     -e "LLAMACPP_MODEL_NAME=${MODEL_NAME}" \
     -e "OPENCLAW_PORT=${OPENCLAW_PORT}" \
+    -e "CTX_SIZE=${CTX_SIZE}" \
     "${OPENCLAW_IMAGE}" || error "Failed to start OpenClaw container."
 
 log "OpenClaw container started. Waiting for dashboard ..."

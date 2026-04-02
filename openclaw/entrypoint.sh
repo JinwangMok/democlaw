@@ -25,8 +25,9 @@ LLAMACPP_MODEL_NAME="${LLAMACPP_MODEL_NAME:-Qwen3.5-9B-Q4_K_M}"
 LLAMACPP_MAX_TOKENS="${LLAMACPP_MAX_TOKENS:-4096}"
 LLAMACPP_TEMPERATURE="${LLAMACPP_TEMPERATURE:-0.7}"
 OPENCLAW_PORT="${OPENCLAW_PORT:-18789}"
+CTX_SIZE="${CTX_SIZE:-32768}"
 
-export LLAMACPP_BASE_URL LLAMACPP_API_KEY LLAMACPP_MODEL_NAME OPENCLAW_PORT
+export LLAMACPP_BASE_URL LLAMACPP_API_KEY LLAMACPP_MODEL_NAME OPENCLAW_PORT CTX_SIZE
 
 # ---------------------------------------------------------------------------
 # Generate runtime OpenClaw configuration from environment variables
@@ -173,6 +174,12 @@ openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback t
 # The "llamacpp" provider was registered by onboard --custom-provider-id above.
 # Without this, OpenClaw defaults to anthropic/claude-opus-4-6.
 openclaw models set "llamacpp/${LLAMACPP_MODEL_NAME}" 2>/dev/null || true
+
+# Sync the model's context window with the actual llama.cpp CTX_SIZE.
+# onboard registers custom models with a conservative default (16k), but the
+# llama.cpp server may be configured for a larger context (e.g. 32k or 64k).
+openclaw config set "models.providers.llamacpp.models.0.contextWindow" "${CTX_SIZE}" --json 2>/dev/null || true
+echo "[openclaw-entrypoint] Model context window set to ${CTX_SIZE} tokens."
 
 echo "[openclaw-entrypoint] Starting OpenClaw (config=${CONFIG_FILE}, port=${OPENCLAW_PORT}) ..."
 
