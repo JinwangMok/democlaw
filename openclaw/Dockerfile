@@ -17,7 +17,7 @@
 # Build-time arguments — all have safe defaults for direct docker/podman build
 # ---------------------------------------------------------------------------
 ARG NODE_MAJOR=22
-ARG OPENCLAW_NPM_VERSION=2026.3.24
+ARG OPENCLAW_NPM_VERSION=2026.4.1
 ARG LLAMACPP_BASE_URL=http://llamacpp:8000/v1
 ARG LLAMACPP_MODEL_NAME=Qwen3.5-9B-Q4_K_M
 ARG OPENCLAW_PORT=18789
@@ -73,6 +73,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install OpenClaw globally via npm (version controlled by OPENCLAW_NPM_VERSION ARG)
 # ---------------------------------------------------------------------------
 RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" supergateway \
+    && cd "$(npm root -g)/openclaw" \
+    && npm install --no-fund --no-audit @buape/carbon 2>/dev/null || true \
     && npm cache clean --force
 
 # ---------------------------------------------------------------------------
