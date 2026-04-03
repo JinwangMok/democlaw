@@ -74,7 +74,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---------------------------------------------------------------------------
 RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" supergateway \
     && cd "$(npm root -g)/openclaw" \
-    && npm install --no-fund --no-audit @buape/carbon 2>/dev/null || true \
+    && npm install --no-fund --no-audit "@buape/carbon@0.0.0-beta-20260327000044" \
     && npm cache clean --force
 
 # ---------------------------------------------------------------------------
