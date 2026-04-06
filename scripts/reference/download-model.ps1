@@ -4,14 +4,14 @@
     Pre-download GGUF model weights for DemoClaw (Windows).
 
 .DESCRIPTION
-    Downloads Qwen3.5-9B-Q4_K_M.gguf from HuggingFace so llama.cpp startup
+    Downloads Gemma 4 E4B Q4_K_M GGUF from HuggingFace so llama.cpp startup
     is fast — no download delay on first container run.
 
 .PARAMETER ModelRepo
-    HuggingFace repo ID. Default: unsloth/Qwen3.5-9B-GGUF
+    HuggingFace repo ID. Default: unsloth/gemma-4-E4B-it-GGUF
 
 .PARAMETER ModelFile
-    GGUF filename. Default: Qwen3.5-9B-Q4_K_M.gguf
+    GGUF filename. Default: gemma-4-E4B-it-Q4_K_M.gguf
 
 .PARAMETER ModelDir
     Local directory for GGUF files.
@@ -29,10 +29,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [string]$ModelRepo = "unsloth/Qwen3.5-9B-GGUF",
+    [string]$ModelRepo = "unsloth/gemma-4-E4B-it-GGUF",
 
     [Parameter(Mandatory = $false)]
-    [string]$ModelFile = "Qwen3.5-9B-Q4_K_M.gguf",
+    [string]$ModelFile = "gemma-4-E4B-it-Q4_K_M.gguf",
 
     [Parameter(Mandatory = $false)]
     [string]$ModelDir = "",

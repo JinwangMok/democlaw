@@ -347,7 +347,7 @@ jobs:
           python3 - <<'PYEOF' &
           import http.server, json, os
 
-          MODEL = os.environ.get("MODEL_NAME", "Qwen3.5-9B-Q4_K_M")
+          MODEL = os.environ.get("MODEL_NAME", "gemma-4-E4B-it")
 
           class Handler(http.server.BaseHTTPRequestHandler):
               def log_message(self, fmt, *args):

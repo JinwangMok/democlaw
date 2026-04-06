@@ -62,7 +62,7 @@ Expected response:
   "object": "list",
   "data": [
     {
-      "id": "Qwen3.5-9B-Q4_K_M",
+      "id": "gemma-4-E4B-it",
       "object": "model",
       "created": 1700000000,
       "owned_by": "llamacpp"
@@ -77,7 +77,7 @@ Expected response:
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen3.5-9B-Q4_K_M",
+    "model": "gemma-4-E4B-it",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user",   "content": "What is the capital of France?"}
@@ -94,7 +94,7 @@ Expected response shape:
   "id": "chatcmpl-...",
   "object": "chat.completion",
   "created": 1700000000,
-  "model": "Qwen3.5-9B-Q4_K_M",
+  "model": "gemma-4-E4B-it",
   "choices": [
     {
       "index": 0,
@@ -113,29 +113,49 @@ Expected response shape:
 }
 ```
 
+### Gemma 4 response format notes
+
+Gemma 4 models served via llama.cpp have a few format characteristics that
+consuming applications (including OpenClaw) should handle:
+
+| Behaviour | Detail | Handling |
+|-----------|--------|----------|
+| **Thinking tokens** | Gemma 4 may prefix responses with `<start_of_thinking>...</end_of_thinking>` blocks containing internal reasoning. | Strip with regex before displaying to users. |
+| **Finish reason** | May return `"stop"`, `"end_turn"`, `"eos"`, or `"length"`. All are valid completion signals. | Accept any of these as a successful stop. |
+| **MoE token counts** | The 26B A4B MoE variant may report different `usage` counts than dense models. | Accept any positive `completion_tokens` value. |
+| **Model name** | The `model` field in responses matches the `--alias` flag (e.g. `gemma-4-E4B-it` or `gemma-4-26B-A4B-it`). | Match against `MODEL_NAME` from `.env`. |
+
 ### Automated endpoint validation
 
-Use the bundled validation script to test all three key endpoints in one step:
+Use the bundled validation scripts to test endpoints:
+
+**Quick health + model + chat completion check:**
 
 ```bash
-./scripts/validate-api.sh
+./scripts/validate-chat-completion.sh
+# Windows: scripts\validate-chat-completion.bat
 ```
 
-This checks:
-1. `GET /health` — liveness probe (expects HTTP 200)
-2. `GET /v1/models` — model listing (expects valid OpenAI JSON with ≥ 1 model)
-3. `POST /v1/chat/completions` — end-to-end inference (expects valid chat completion JSON)
+This runs 7 compatibility checks:
+1. Non-streaming chat completion — full OpenAI response schema
+2. Streaming chat completion — SSE (Server-Sent Events) format
+3. Gemma 4 thinking-token handling
+4. Model name agreement (`/v1/models` vs response `model` field)
+5. Multi-turn conversation (system + user + assistant history)
+6. Finish reason validation (`stop`/`end_turn`/`eos`/`length`)
+7. Usage token counts (`prompt_tokens` + `completion_tokens` + `total_tokens`)
 
-To skip the inference step (e.g. in CI without a GPU):
+Custom endpoint / model:
 
 ```bash
-SKIP_INFERENCE_TEST=true ./scripts/validate-api.sh
+LLAMACPP_PORT=8001 MODEL_NAME=gemma-4-26B-A4B-it ./scripts/validate-chat-completion.sh
 ```
 
-Custom base URL (e.g. remote server):
+**Full E2E validation pipeline** (GPU, memory, throughput, API):
 
 ```bash
-LLAMACPP_BASE_URL=http://192.168.1.10:8000 ./scripts/validate-api.sh
+./scripts/validate-e2e.sh
+# Windows: scripts\validate-e2e.bat
 ```
 
 Exit code `0` = all checks passed; `1` = one or more checks failed.
@@ -155,7 +175,7 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="Qwen3.5-9B-Q4_K_M",
+    model="gemma-4-E4B-it",
     messages=[
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user",   "content": "Explain llama.cpp in one sentence."},
@@ -174,7 +194,7 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="EMPTY")
 
 with client.chat.completions.create(
-    model="Qwen3.5-9B-Q4_K_M",
+    model="gemma-4-E4B-it",
     messages=[{"role": "user", "content": "Count to 5."}],
     max_tokens=64,
     stream=True,
@@ -196,7 +216,7 @@ const client = new OpenAI({
 });
 
 const response = await client.chat.completions.create({
-  model: "Qwen3.5-9B-Q4_K_M",
+  model: "gemma-4-E4B-it",
   messages: [
     { role: "system", content: "You are a helpful assistant." },
     { role: "user",   content: "What is the capital of France?" },
@@ -285,7 +305,9 @@ curl http://localhost:8000/v1/models \
 | `HTTP 000` from `validate-api.sh` | Server not yet ready (model loading) | Wait and retry; monitor with `docker logs -f democlaw-llamacpp` |
 | `/v1/models` returns empty `data: []` | Model weights still loading | First run downloads ~5.7 GB; check logs |
 | `HTTP 401 Unauthorized` | `LLAMACPP_API_KEY` set but request has no token | Add `-H "Authorization: Bearer <key>"` |
-| Wrong model in `/v1/models` | `MODEL_NAME` env var mismatch | Verify `MODEL_NAME=Qwen3.5-9B-Q4_K_M` in `.env` |
+| Wrong model in `/v1/models` | `MODEL_NAME` env var mismatch | Verify `MODEL_NAME=gemma-4-E4B-it` (or `gemma-4-26B-A4B-it` for DGX Spark) in `.env` |
+| Thinking tokens in response | Gemma 4 includes `<start_of_thinking>` blocks | Strip with regex: `re.sub(r'<start_of_thinking>.*?<end_of_thinking>\s*', '', content, flags=re.DOTALL)` |
+| Unexpected `finish_reason` | Gemma 4 may return `end_turn` or `eos` | All of `stop`, `end_turn`, `eos`, `length` are valid |
 
 For the full healthcheck output:
 

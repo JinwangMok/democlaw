@@ -6,7 +6,7 @@
 #   NODE_MAJOR           — Node.js major version to install (default: 24)
 #   OPENCLAW_NPM_VERSION — npm package version/tag to install (default: latest)
 #   LLAMACPP_BASE_URL    — default llama.cpp backend URL   (default: http://llamacpp:8000/v1)
-#   LLAMACPP_MODEL_NAME  — default model name          (default: Qwen3.5-9B-Q4_K_M)
+#   LLAMACPP_MODEL_NAME  — default model name          (default: gemma-4-E4B-it)
 #   OPENCLAW_PORT        — port the dashboard listens on (default: 18789)
 #   VERSION              — image version label          (default: dev)
 #   BUILD_DATE           — ISO-8601 build timestamp     (default: unknown)
@@ -19,7 +19,7 @@
 ARG NODE_MAJOR=22
 ARG OPENCLAW_NPM_VERSION=2026.4.1
 ARG LLAMACPP_BASE_URL=http://llamacpp:8000/v1
-ARG LLAMACPP_MODEL_NAME=Qwen3.5-9B-Q4_K_M
+ARG LLAMACPP_MODEL_NAME=gemma-4-E4B-it
 ARG OPENCLAW_PORT=18789
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
@@ -114,7 +114,7 @@ RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh \
 # ---------------------------------------------------------------------------
 ENV NODE_ENV="production" \
     LLAMACPP_BASE_URL="http://llamacpp:8000/v1" \
-    LLAMACPP_MODEL_NAME="Qwen3.5-9B-Q4_K_M" \
+    LLAMACPP_MODEL_NAME="gemma-4-E4B-it" \
     LLAMACPP_MAX_TOKENS=4096 \
     LLAMACPP_TEMPERATURE=0.7 \
     LLAMACPP_HEALTH_RETRIES=60 \
@@ -125,10 +125,10 @@ ENV NODE_ENV="production" \
     OPENCLAW_HOST="0.0.0.0" \
     OPENAI_API_BASE="http://llamacpp:8000/v1" \
     OPENAI_BASE_URL="http://llamacpp:8000/v1" \
-    OPENAI_MODEL="Qwen3.5-9B-Q4_K_M" \
+    OPENAI_MODEL="gemma-4-E4B-it" \
     OPENCLAW_LLM_PROVIDER="openai-compatible" \
     OPENCLAW_LLM_BASE_URL="http://llamacpp:8000/v1" \
-    OPENCLAW_LLM_MODEL="Qwen3.5-9B-Q4_K_M" \
+    OPENCLAW_LLM_MODEL="gemma-4-E4B-it" \
     OPENCLAW_LLM_MAX_TOKENS=4096 \
     OPENCLAW_LLM_TEMPERATURE=0.7
 
