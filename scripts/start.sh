@@ -330,6 +330,9 @@ if [ -n "${OPENCLAW_WORKSPACE_DIR:-}" ]; then
     fi
 fi
 
+NOVNC_PORT="${NOVNC_PORT:-6080}"
+PLAYWRIGHT_MCP_PORT="${PLAYWRIGHT_MCP_PORT:-8931}"
+
 MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
     --name "${OPENCLAW_CONTAINER}" \
     --network "${NETWORK}" \
@@ -338,6 +341,8 @@ MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
     --restart unless-stopped \
     -p "${OPENCLAW_PORT}:${OPENCLAW_PORT}" \
     -p 18791:18791 \
+    -p "${NOVNC_PORT}:6080" \
+    -p "${PLAYWRIGHT_MCP_PORT}:8931" \
     "${MCPORTER_MOUNT[@]}" \
     "${DATA_MOUNT[@]}" \
     "${WORKSPACE_MOUNT[@]}" \
@@ -346,6 +351,8 @@ MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
     -e "LLAMACPP_MODEL_NAME=${MODEL_NAME}" \
     -e "OPENCLAW_PORT=${OPENCLAW_PORT}" \
     -e "CTX_SIZE=${CTX_SIZE}" \
+    -e "NOVNC_PORT=${NOVNC_PORT}" \
+    -e "PLAYWRIGHT_MCP_PORT=${PLAYWRIGHT_MCP_PORT}" \
     "${OPENCLAW_IMAGE}" || error "Failed to start OpenClaw container."
 
 log "OpenClaw container started. Waiting for dashboard ..."

@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# =============================================================================
+# OpenClaw Init Script (s6-overlay oneshot)
+#
+# Runs once at container startup before any long-running services.
+# Handles: config generation, llama.cpp health wait, onboard, model setup.
+# =============================================================================
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Default environment variables (overridable via .env or container env)
+# ---------------------------------------------------------------------------
+LLAMACPP_BASE_URL="${LLAMACPP_BASE_URL:-http://llamacpp:8000/v1}"
+LLAMACPP_API_KEY="${LLAMACPP_API_KEY:-EMPTY}"
+LLAMACPP_MODEL_NAME="${LLAMACPP_MODEL_NAME:-gemma-4-E4B-it}"
+LLAMACPP_MAX_TOKENS="${LLAMACPP_MAX_TOKENS:-4096}"
+LLAMACPP_TEMPERATURE="${LLAMACPP_TEMPERATURE:-0.7}"
+OPENCLAW_PORT="${OPENCLAW_PORT:-18789}"
+CTX_SIZE="${CTX_SIZE:-131072}"
+
+# ---------------------------------------------------------------------------
+# Generate runtime OpenClaw configuration from environment variables
+# ---------------------------------------------------------------------------
+OPENCLAW_CONFIG_DIR="${OPENCLAW_CONFIG_DIR:-/app/config}"
+mkdir -p "${OPENCLAW_CONFIG_DIR}"
+
+CONFIG_FILE="${OPENCLAW_CONFIG_DIR}/config.json"
+cat > "${CONFIG_FILE}" <<JSONEOF
+{
+  "llm": {
+    "provider": "openai-compatible",
+    "baseUrl": "${LLAMACPP_BASE_URL}",
+    "apiKey": "${LLAMACPP_API_KEY}",
+    "model": "${LLAMACPP_MODEL_NAME}",
+    "maxTokens": ${LLAMACPP_MAX_TOKENS},
+    "temperature": ${LLAMACPP_TEMPERATURE}
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": ${OPENCLAW_PORT}
+  },
+  "gateway": {
+    "mode": "local",
+    "bind": "lan",
+    "controlUi": {
+      "allowedOrigins": ["*"],
+      "dangerouslyAllowHostHeaderOriginFallback": true
+    }
+  }
+}
+JSONEOF
+
+echo "[init-openclaw] LLM provider configuration written to ${CONFIG_FILE}"
+echo "[init-openclaw]   Provider : openai-compatible (llama.cpp)"
+echo "[init-openclaw]   Base URL : ${LLAMACPP_BASE_URL}"
+echo "[init-openclaw]   Model    : ${LLAMACPP_MODEL_NAME}"
+echo "[init-openclaw]   API Key  : ${LLAMACPP_API_KEY:0:4}****"
+echo "[init-openclaw]   Tokens   : ${LLAMACPP_MAX_TOKENS}"
+echo "[init-openclaw]   Port     : ${OPENCLAW_PORT}"
+
+# ---------------------------------------------------------------------------
+# Export OpenAI-compatible environment variables
+# ---------------------------------------------------------------------------
+export OPENAI_API_BASE="${LLAMACPP_BASE_URL}"
+export OPENAI_BASE_URL="${LLAMACPP_BASE_URL}"
+export OPENAI_API_KEY="${LLAMACPP_API_KEY}"
+export OPENAI_MODEL="${LLAMACPP_MODEL_NAME}"
+
+# ---------------------------------------------------------------------------
+# Export OpenClaw-specific provider env vars
+# ---------------------------------------------------------------------------
+export OPENCLAW_LLM_PROVIDER="openai-compatible"
+export OPENCLAW_LLM_BASE_URL="${LLAMACPP_BASE_URL}"
+export OPENCLAW_LLM_API_KEY="${LLAMACPP_API_KEY}"
+export OPENCLAW_LLM_MODEL="${LLAMACPP_MODEL_NAME}"
+export OPENCLAW_LLM_MAX_TOKENS="${LLAMACPP_MAX_TOKENS}"
+export OPENCLAW_LLM_TEMPERATURE="${LLAMACPP_TEMPERATURE}"
+export OPENCLAW_CONFIG="${CONFIG_FILE}"
+export OPENCLAW_HOST="0.0.0.0"
+
+# ---------------------------------------------------------------------------
+# Wait for the llama.cpp server to become available
+# ---------------------------------------------------------------------------
+LLAMACPP_HEALTH_URL="${LLAMACPP_BASE_URL%/v1}/health"
+MAX_RETRIES="${LLAMACPP_HEALTH_RETRIES:-60}"
+RETRY_INTERVAL="${LLAMACPP_HEALTH_INTERVAL:-5}"
+
+echo "[init-openclaw] Waiting for llama.cpp server at ${LLAMACPP_HEALTH_URL} ..."
+retries=0
+while [ "${retries}" -lt "${MAX_RETRIES}" ]; do
+    if curl -sf "${LLAMACPP_HEALTH_URL}" > /dev/null 2>&1; then
+        echo "[init-openclaw] llama.cpp server is ready."
+        break
+    fi
+    retries=$((retries + 1))
+    if [ $((retries % 6)) -eq 0 ]; then
+        echo "[init-openclaw] llama.cpp not ready yet (attempt ${retries}/${MAX_RETRIES}). Retrying in ${RETRY_INTERVAL}s ..."
+    fi
+    sleep "${RETRY_INTERVAL}"
+done
+
+if [ "${retries}" -ge "${MAX_RETRIES}" ]; then
+    echo "[init-openclaw] ERROR: llama.cpp server did not become ready after $((MAX_RETRIES * RETRY_INTERVAL))s."
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Verify the expected model is loaded
+# ---------------------------------------------------------------------------
+echo "[init-openclaw] Verifying model '${LLAMACPP_MODEL_NAME}' is available ..."
+MODEL_RESPONSE=$(curl -sf "${LLAMACPP_BASE_URL}/models" 2>/dev/null || echo "")
+if [ -n "${MODEL_RESPONSE}" ]; then
+    if echo "${MODEL_RESPONSE}" | grep -q "${LLAMACPP_MODEL_NAME}"; then
+        echo "[init-openclaw] Confirmed: model '${LLAMACPP_MODEL_NAME}' is loaded."
+    else
+        echo "[init-openclaw] WARNING: Model '${LLAMACPP_MODEL_NAME}' not found in /v1/models."
+        echo "[init-openclaw] Proceeding — the model name may differ in the listing."
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Run onboard if not already done
+# ---------------------------------------------------------------------------
+if [ ! -f "${HOME}/.openclaw/openclaw.json" ]; then
+    echo "[init-openclaw] Running initial onboard (llama.cpp provider) ..."
+    openclaw onboard \
+        --non-interactive \
+        --accept-risk \
+        --mode local \
+        --auth-choice custom-api-key \
+        --custom-provider-id llamacpp \
+        --custom-base-url "${LLAMACPP_BASE_URL}" \
+        --custom-model-id "${LLAMACPP_MODEL_NAME}" \
+        --custom-api-key "${LLAMACPP_API_KEY}" \
+        2>/dev/null || true
+fi
+
+# ---------------------------------------------------------------------------
+# Configure gateway settings
+# ---------------------------------------------------------------------------
+openclaw config set gateway.mode local 2>/dev/null || true
+openclaw config set gateway.bind lan 2>/dev/null || true
+openclaw config set gateway.auth.mode token 2>/dev/null || true
+openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
+openclaw models set "llamacpp/${LLAMACPP_MODEL_NAME}" 2>/dev/null || true
+openclaw config set "models.providers.llamacpp.models.0.contextWindow" "${CTX_SIZE}" --json 2>/dev/null || true
+echo "[init-openclaw] Model context window set to ${CTX_SIZE} tokens."
+
+echo "[init-openclaw] Initialization complete."

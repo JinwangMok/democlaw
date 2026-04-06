@@ -1,0 +1,22 @@
+#!/bin/sh
+export DISPLAY=:99
+# Wait for Xvfb to be ready
+while ! xdpyinfo -display :99 >/dev/null 2>&1; do sleep 0.5; done
+
+PLAYWRIGHT_MCP_PORT="${PLAYWRIGHT_MCP_PORT:-8931}"
+
+# Use Playwright's bundled Chromium if available, else fall back to system chromium
+PW_CHROME=$(find "${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}" -name chrome -type f 2>/dev/null | head -1)
+if [ -n "${PW_CHROME}" ]; then
+    exec npx @playwright/mcp@latest \
+        --port "${PLAYWRIGHT_MCP_PORT}" \
+        --host 0.0.0.0 \
+        --executable-path "${PW_CHROME}" \
+        --no-sandbox
+else
+    exec npx @playwright/mcp@latest \
+        --port "${PLAYWRIGHT_MCP_PORT}" \
+        --host 0.0.0.0 \
+        --executable-path /usr/bin/chromium-browser \
+        --no-sandbox
+fi

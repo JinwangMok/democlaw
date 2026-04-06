@@ -1,0 +1,28 @@
+#!/bin/sh
+# Auto-approve the FIRST device pairing request only (one-shot)
+OPENCLAW_PORT="${OPENCLAW_PORT:-18789}"
+
+echo "[device-approve] Waiting for gateway to be ready ..."
+elapsed=0
+while [ "${elapsed}" -lt 30 ]; do
+    if curl -sf "http://localhost:${OPENCLAW_PORT}/" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+done
+
+echo "[device-approve] Waiting for first device pairing request ..."
+for _attempt in $(seq 1 60); do
+    pending=$(openclaw devices list 2>/dev/null \
+        | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' \
+        | head -1 || true)
+    if [ -n "$pending" ]; then
+        openclaw devices approve "$pending" 2>/dev/null \
+            && echo "[device-approve] First device auto-approved: $pending"
+        exit 0
+    fi
+    sleep 2
+done
+
+echo "[device-approve] No pairing request received within 120s. Manual approve required."

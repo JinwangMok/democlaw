@@ -116,7 +116,13 @@ ENV MODEL_PATH="/models/gemma-4-E4B-it-Q4_K_M.gguf" \
     FLASH_ATTN="1" \
     CACHE_TYPE_K="q4_0" \
     CACHE_TYPE_V="q4_0" \
-    AUTO_DETECT_MODEL="1"
+    AUTO_DETECT_MODEL="1" \
+    ENABLE_VISION="1" \
+    MMPROJ_FILE="mmproj-BF16.gguf" \
+    MMPROJ_REPO="" \
+    IMAGE_TOKENS="1120" \
+    UBATCH_SIZE="2048" \
+    BATCH_SIZE="2048"
 # AUTO_DETECT_MODEL=1 enables in-container hardware detection at startup.
 # The entrypoint will query nvidia-smi and auto-select the appropriate
 # Gemma 4 variant (E4B for <=8GB VRAM, 26B A4B MoE for DGX Spark).

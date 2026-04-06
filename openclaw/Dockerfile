@@ -1,9 +1,13 @@
 # =============================================================================
-# OpenClaw Container — Ubuntu 24.04 + Node.js + OpenClaw
+# OpenClaw Container — Ubuntu 24.04 + Node.js + OpenClaw + GUI (VNC/noVNC)
 # Configured to use llama.cpp as its LLM provider via OpenAI-compatible endpoint
 #
+# GUI stack: Xvfb + openbox + x11vnc + noVNC + Playwright MCP
+# Process supervision: s6-overlay
+# Access: noVNC web client at http://<host>:6080
+#
 # Build arguments (all overridable via --build-arg):
-#   NODE_MAJOR           — Node.js major version to install (default: 24)
+#   NODE_MAJOR           — Node.js major version to install (default: 22)
 #   OPENCLAW_NPM_VERSION — npm package version/tag to install (default: latest)
 #   LLAMACPP_BASE_URL    — default llama.cpp backend URL   (default: http://llamacpp:8000/v1)
 #   LLAMACPP_MODEL_NAME  — default model name          (default: gemma-4-E4B-it)
@@ -24,6 +28,7 @@ ARG OPENCLAW_PORT=18789
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
 ARG GIT_COMMIT=unknown
+ARG S6_OVERLAY_VERSION=3.2.0.2
 
 FROM docker.io/ubuntu:24.04
 
@@ -36,11 +41,13 @@ ARG OPENCLAW_PORT
 ARG VERSION
 ARG BUILD_DATE
 ARG GIT_COMMIT
+ARG S6_OVERLAY_VERSION
+ARG TARGETARCH
 
 LABEL maintainer="democlaw"
-LABEL description="OpenClaw AI assistant configured with llama.cpp backend"
+LABEL description="OpenClaw AI assistant with GUI desktop (VNC/noVNC) and llama.cpp backend"
 LABEL org.opencontainers.image.title="democlaw-openclaw"
-LABEL org.opencontainers.image.description="OpenClaw AI assistant configured with llama.cpp backend"
+LABEL org.opencontainers.image.description="OpenClaw AI assistant with GUI desktop and llama.cpp backend"
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
@@ -54,13 +61,23 @@ LABEL democlaw.llamacpp-url="${LLAMACPP_BASE_URL}"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ---------------------------------------------------------------------------
-# Install system dependencies + Node.js (version controlled by NODE_MAJOR ARG)
+# Install system dependencies + Node.js + GUI packages
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         gnupg \
         jq \
+        xz-utils \
+        xvfb \
+        openbox \
+        x11vnc \
+        x11-utils \
+        novnc \
+        websockify \
+        fonts-liberation \
+        fonts-noto-color-emoji \
+        dbus-x11 \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
         | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
@@ -70,12 +87,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
+# Install s6-overlay for process supervision (~3 MB, arm64-compatible)
+# ---------------------------------------------------------------------------
+ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp/
+RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && rm /tmp/s6-overlay-noarch.tar.xz
+
+RUN case "${TARGETARCH}" in \
+        amd64) S6_ARCH=x86_64 ;; \
+        arm64) S6_ARCH=aarch64 ;; \
+        *)     S6_ARCH="${TARGETARCH}" ;; \
+    esac \
+    && curl -fsSL "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${S6_ARCH}.tar.xz" \
+        -o /tmp/s6-overlay-arch.tar.xz \
+    && tar -C / -Jxpf /tmp/s6-overlay-arch.tar.xz \
+    && rm /tmp/s6-overlay-arch.tar.xz
+
+# ---------------------------------------------------------------------------
 # Install OpenClaw globally via npm (version controlled by OPENCLAW_NPM_VERSION ARG)
 # ---------------------------------------------------------------------------
 RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" supergateway \
     && cd "$(npm root -g)/openclaw" \
     && npm install --no-fund --no-audit "@buape/carbon@0.0.0-beta-20260327000044" \
     && npm cache clean --force
+
+# ---------------------------------------------------------------------------
+# Install Playwright MCP server + Chromium (as root for --with-deps)
+# ---------------------------------------------------------------------------
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g --no-fund --no-audit @playwright/mcp@latest \
+    && npx playwright install chromium --with-deps 2>/dev/null || true \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ---------------------------------------------------------------------------
 # Create non-root user for running the application
@@ -96,21 +137,22 @@ RUN if id -u openclaw >/dev/null 2>&1; then \
 # ---------------------------------------------------------------------------
 WORKDIR /app
 
-# Copy configuration template, entrypoint, and healthcheck
+# Copy configuration template and healthcheck
 COPY config.json /app/config/config.json
-COPY entrypoint.sh /app/entrypoint.sh
 COPY healthcheck.sh /app/healthcheck.sh
-RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh \
+RUN chmod +x /app/healthcheck.sh \
     && chown -R openclaw:openclaw /app
 
+# Copy s6-overlay service definitions
+COPY rootfs/ /
+
+# Ensure all s6 scripts are executable
+RUN chmod +x /etc/s6-overlay/scripts/* \
+    && find /etc/s6-overlay/s6-rc.d -name 'run' -exec chmod +x {} \; \
+    && find /etc/s6-overlay/s6-rc.d -name 'up' -exec chmod +x {} \;
+
 # ---------------------------------------------------------------------------
-# Environment variables — defaults connect to llama.cpp container on shared network
-#
-# The entrypoint.sh script uses these to:
-#   1. Generate /app/config/config.json with resolved values
-#   2. Export OpenAI-compatible env vars (OPENAI_API_BASE, etc.)
-#   3. Export OpenClaw-specific env vars (OPENCLAW_LLM_*)
-#   4. Wait for llama.cpp readiness before starting OpenClaw
+# Environment variables
 # ---------------------------------------------------------------------------
 ENV NODE_ENV="production" \
     LLAMACPP_BASE_URL="http://llamacpp:8000/v1" \
@@ -130,23 +172,26 @@ ENV NODE_ENV="production" \
     OPENCLAW_LLM_BASE_URL="http://llamacpp:8000/v1" \
     OPENCLAW_LLM_MODEL="gemma-4-E4B-it" \
     OPENCLAW_LLM_MAX_TOKENS=4096 \
-    OPENCLAW_LLM_TEMPERATURE=0.7
+    OPENCLAW_LLM_TEMPERATURE=0.7 \
+    DISPLAY=":99" \
+    NOVNC_PORT=6080 \
+    PLAYWRIGHT_MCP_PORT=8931 \
+    S6_KEEP_ENV=1 \
+    S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
+    S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0
 
 # ---------------------------------------------------------------------------
 # Switch to non-root user
 # ---------------------------------------------------------------------------
 USER openclaw
 
-# Expose the OpenClaw dashboard port
-EXPOSE 18789
+# Expose ports: OpenClaw dashboard + noVNC + VNC + Playwright MCP
+EXPOSE 18789 6080 5900 8931
 
-# Healthcheck — verify the dashboard is responding and serving content
-# Uses the dedicated healthcheck script that validates HTTP status AND HTML content
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+# Healthcheck — verify the dashboard and noVNC are responding
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD ["/app/healthcheck.sh"]
 
-ENTRYPOINT ["/app/entrypoint.sh"]
-# No default CMD args — the entrypoint resolves OPENCLAW_PORT / OPENCLAW_HOST
-# from env vars and starts OpenClaw automatically.
-# To override (e.g. for debugging):  docker run --rm -it <image> bash
+# s6-overlay as init system
+ENTRYPOINT ["/init"]
 CMD []

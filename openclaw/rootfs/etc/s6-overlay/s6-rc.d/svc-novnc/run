@@ -1,0 +1,3 @@
+#!/bin/sh
+NOVNC_PORT="${NOVNC_PORT:-6080}"
+exec /usr/share/novnc/utils/novnc_proxy --vnc localhost:5900 --listen "${NOVNC_PORT}"

@@ -1,33 +1,39 @@
 #!/usr/bin/env bash
 # =============================================================================
-# healthcheck.sh — In-container healthcheck for the OpenClaw dashboard
+# healthcheck.sh — In-container healthcheck for the OpenClaw dashboard + noVNC
 #
 # Verifies:
-#   1. The dashboard HTTP endpoint responds with HTTP 200
-#   2. The response body is non-empty (confirms the UI actually loads)
-#   3. Optionally checks for HTML content markers
+#   1. The dashboard HTTP endpoint responds (any HTTP status except 000)
+#   2. The noVNC web client responds on its port
 #
 # Used as the Docker/Podman HEALTHCHECK command inside the OpenClaw container.
-# Exit 0 = healthy (HTTP 200), Exit 1 = unhealthy.
+# Exit 0 = healthy, Exit 1 = unhealthy.
 # =============================================================================
 set -euo pipefail
 
 PORT="${OPENCLAW_PORT:-18789}"
-BASE_URL="http://localhost:${PORT}"
+NOVNC_PORT="${NOVNC_PORT:-6080}"
 TIMEOUT=5
 
 # --- Check 1: Gateway process responds on the port ---
-# The dashboard root (/) returns HTTP 500 without an auth token — this is
-# expected behaviour.  Any HTTP response means the gateway is alive.
-# Only HTTP 000 (connection refused / timeout) is unhealthy.
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
     --max-time "${TIMEOUT}" \
-    "${BASE_URL}/" 2>/dev/null || echo "000")
+    "http://localhost:${PORT}/" 2>/dev/null || echo "000")
 
 if [ "${HTTP_CODE}" = "000" ]; then
-    echo "UNHEALTHY: Gateway not responding at ${BASE_URL}/" >&2
+    echo "UNHEALTHY: Gateway not responding at http://localhost:${PORT}/" >&2
     exit 1
 fi
 
-echo "HEALTHY: Gateway responding (HTTP ${HTTP_CODE})"
+# --- Check 2: noVNC responds ---
+NOVNC_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+    --max-time "${TIMEOUT}" \
+    "http://localhost:${NOVNC_PORT}/" 2>/dev/null || echo "000")
+
+if [ "${NOVNC_CODE}" = "000" ]; then
+    echo "UNHEALTHY: noVNC not responding at http://localhost:${NOVNC_PORT}/" >&2
+    exit 1
+fi
+
+echo "HEALTHY: Gateway (HTTP ${HTTP_CODE}), noVNC (HTTP ${NOVNC_CODE})"
 exit 0

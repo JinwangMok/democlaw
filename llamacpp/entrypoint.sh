@@ -96,6 +96,8 @@ _detect_and_apply_profile() {
         FLASH_ATTN="${FLASH_ATTN:-1}"
         CACHE_TYPE_K="${CACHE_TYPE_K:-q8_0}"
         CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
+        MMPROJ_FILE="${MMPROJ_FILE:-mmproj-BF16.gguf}"
+        MMPROJ_REPO="${MMPROJ_REPO:-unsloth/gemma-4-26B-A4B-it-GGUF}"
     else
         echo "[entrypoint] Applying consumer GPU profile: Gemma 4 E4B"
         MODEL_REPO="${MODEL_REPO:-unsloth/gemma-4-E4B-it-GGUF}"
@@ -106,6 +108,8 @@ _detect_and_apply_profile() {
         FLASH_ATTN="${FLASH_ATTN:-1}"
         CACHE_TYPE_K="${CACHE_TYPE_K:-q4_0}"
         CACHE_TYPE_V="${CACHE_TYPE_V:-q4_0}"
+        MMPROJ_FILE="${MMPROJ_FILE:-mmproj-BF16.gguf}"
+        MMPROJ_REPO="${MMPROJ_REPO:-unsloth/gemma-4-E4B-it-GGUF}"
     fi
 
     # Derive MODEL_PATH from MODEL_FILE (always under /models/)
@@ -197,6 +201,40 @@ if [ "${_model_size}" -lt "${_min_model_bytes}" ] 2>/dev/null; then
 fi
 
 # ---------------------------------------------------------------------------
+# Download mmproj (multimodal projector) for vision support
+# ---------------------------------------------------------------------------
+_enable_vision="${ENABLE_VISION:-1}"
+_mmproj_file="${MMPROJ_FILE:-mmproj-BF16.gguf}"
+_mmproj_repo="${MMPROJ_REPO:-${_model_repo}}"
+_mmproj_path="/models/${_mmproj_file}"
+MMPROJ_FLAG=""
+
+if [ "${_enable_vision}" = "1" ] || [ "${_enable_vision}" = "true" ]; then
+    if [ ! -f "${_mmproj_path}" ]; then
+        echo "[entrypoint] Vision: Downloading mmproj ${_mmproj_file} from ${_mmproj_repo} ..."
+        _mmproj_url="https://huggingface.co/${_mmproj_repo}/resolve/main/${_mmproj_file}"
+        curl -L --retry 3 --retry-delay 5 \
+            -o "${_mmproj_path}.tmp" \
+            -C - \
+            "${_mmproj_url}"
+        mv "${_mmproj_path}.tmp" "${_mmproj_path}"
+        echo "[entrypoint] Vision: mmproj download complete."
+    else
+        echo "[entrypoint] Vision: mmproj found at ${_mmproj_path}"
+    fi
+
+    if [ -s "${_mmproj_path}" ]; then
+        MMPROJ_FLAG="--mmproj ${_mmproj_path}"
+        echo "[entrypoint] Vision: ENABLED (mmproj=${_mmproj_file})"
+    else
+        echo "[entrypoint] WARNING: mmproj file is empty or missing. Vision disabled."
+        rm -f "${_mmproj_path}"
+    fi
+else
+    echo "[entrypoint] Vision: DISABLED (ENABLE_VISION=${_enable_vision})"
+fi
+
+# ---------------------------------------------------------------------------
 # Resolve API key / no-auth mode
 # ---------------------------------------------------------------------------
 _api_key="${LLAMA_API_KEY:-}"
@@ -234,6 +272,7 @@ echo "[entrypoint]   KV cache K : ${_cache_type_k}"
 echo "[entrypoint]   KV cache V : ${_cache_type_v}"
 echo "[entrypoint]   Alias      : ${_model_alias}"
 echo "[entrypoint]   Tool calls : ENABLED (--jinja)"
+echo "[entrypoint]   Vision     : ${MMPROJ_FLAG:+ENABLED}${MMPROJ_FLAG:-DISABLED}"
 
 # ---------------------------------------------------------------------------
 # Build flash-attn flag
@@ -259,7 +298,20 @@ fi
 #   --chat-template-file (optional) Custom chat template
 #   --api-key           (Optional) Require Bearer token auth
 # ---------------------------------------------------------------------------
-# SC2086: intentional — API_KEY_ARGS and FLASH_ATTN_FLAG expand to zero or more words.
+# ---------------------------------------------------------------------------
+# Resolve vision image token settings
+# Gemma 4 vision requires fixed token budgets: 70, 140, 280, 560, or 1120.
+# ubatch-size must be >= image token count for non-causal attention.
+# ---------------------------------------------------------------------------
+IMAGE_TOKEN_ARGS=""
+if [ -n "${MMPROJ_FLAG}" ]; then
+    _image_tokens="${IMAGE_TOKENS:-1120}"
+    _ubatch_size="${UBATCH_SIZE:-2048}"
+    _batch_size="${BATCH_SIZE:-2048}"
+    IMAGE_TOKEN_ARGS="--image-max-tokens ${_image_tokens} --ubatch-size ${_ubatch_size} --batch-size ${_batch_size}"
+fi
+
+# SC2086: intentional — variable flags expand to zero or more words.
 # shellcheck disable=SC2086
 exec llama-server \
     --host "${_host}" \
@@ -272,4 +324,6 @@ exec llama-server \
     --cache-type-k "${_cache_type_k}" \
     --cache-type-v "${_cache_type_v}" \
     --jinja \
+    ${MMPROJ_FLAG} \
+    ${IMAGE_TOKEN_ARGS} \
     ${API_KEY_ARGS}

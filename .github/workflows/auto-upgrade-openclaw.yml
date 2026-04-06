@@ -1,0 +1,203 @@
+# Auto-Upgrade OpenClaw
+#
+# Daily cron checks for new OpenClaw npm releases.
+# If a new version is found:
+#   1. Creates a PR with version bumps (Dockerfile, Makefile, start.sh)
+#   2. Enables auto-merge (squash) — PR merges when CI passes
+# On push to master (after auto-merge or manual merge):
+#   3. Builds multi-arch images (amd64 + arm64) and pushes to Docker Hub
+#
+# Required GitHub Secrets:
+#   - DOCKERHUB_USERNAME: Docker Hub username
+#   - DOCKERHUB_TOKEN:    Docker Hub access token
+#
+name: Auto-Upgrade OpenClaw
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # Daily at 06:00 UTC
+  workflow_dispatch: {}
+  push:
+    branches: [master]
+    paths:
+      - 'openclaw/Dockerfile'
+      - 'llamacpp/Dockerfile'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Job 1: Check if a newer OpenClaw version exists on npm
+  # -------------------------------------------------------------------------
+  check-version:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      needs_update: ${{ steps.compare.outputs.needs_update }}
+      new_version: ${{ steps.compare.outputs.new_version }}
+      current_version: ${{ steps.compare.outputs.current_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare npm version with Dockerfile
+        id: compare
+        run: |
+          current=$(grep 'ARG OPENCLAW_NPM_VERSION=' openclaw/Dockerfile \
+            | head -1 | sed 's/.*=//')
+          latest=$(npm view openclaw version 2>/dev/null) \
+            || { echo "::warning::npm registry unreachable"; exit 0; }
+
+          echo "current_version=${current}" >> "$GITHUB_OUTPUT"
+          echo "new_version=${latest}"      >> "$GITHUB_OUTPUT"
+
+          if [ "${current}" != "${latest}" ]; then
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::OpenClaw update available: ${current} → ${latest}"
+          else
+            echo "needs_update=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OpenClaw is up-to-date (${current})"
+          fi
+
+  # -------------------------------------------------------------------------
+  # Job 2: Bump version in source files, create PR, enable auto-merge
+  # -------------------------------------------------------------------------
+  update-and-pr:
+    needs: check-version
+    if: needs.check-version.outputs.needs_update == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history for git describe
+
+      - name: Update version in Dockerfile, Makefile, and start.sh
+        env:
+          NEW_VERSION: ${{ needs.check-version.outputs.new_version }}
+        run: |
+          # Update Dockerfile ARG
+          sed -i "s/ARG OPENCLAW_NPM_VERSION=.*/ARG OPENCLAW_NPM_VERSION=${NEW_VERSION}/" \
+            openclaw/Dockerfile
+
+          # Update Makefile default (keep ?= syntax)
+          sed -i "s/OPENCLAW_NPM_VERSION ?= .*/OPENCLAW_NPM_VERSION ?= ${NEW_VERSION}/" \
+            Makefile
+
+          # Compute next democlaw semver from git tags
+          CURRENT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v2.0.0")
+          MAJOR=$(echo "${CURRENT_TAG}" | sed 's/v//' | cut -d. -f1)
+          MINOR=$(echo "${CURRENT_TAG}" | sed 's/v//' | cut -d. -f2)
+          NEXT_TAG="v${MAJOR}.$((MINOR + 1)).0"
+
+          # Update hardcoded image tag defaults in start.sh
+          sed -i "s|democlaw-llamacpp:v[0-9]*\.[0-9]*\.[0-9]*\"|democlaw-llamacpp:${NEXT_TAG}\"|" \
+            scripts/start.sh
+          sed -i "s|democlaw-openclaw:v[0-9]*\.[0-9]*\.[0-9]*\"|democlaw-openclaw:${NEXT_TAG}\"|" \
+            scripts/start.sh
+
+          echo "NEXT_TAG=${NEXT_TAG}" >> "$GITHUB_ENV"
+
+      - name: Create branch, commit, push
+        env:
+          NEW_VERSION: ${{ needs.check-version.outputs.new_version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "auto/openclaw-${NEW_VERSION}"
+          git add openclaw/Dockerfile Makefile scripts/start.sh
+          git commit -m "chore: bump OpenClaw to ${NEW_VERSION}"
+          git push -u origin "auto/openclaw-${NEW_VERSION}"
+
+      - name: Create PR with auto-merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ needs.check-version.outputs.new_version }}
+          OLD_VERSION: ${{ needs.check-version.outputs.current_version }}
+        run: |
+          PR_URL=$(gh pr create \
+            --title "chore: bump OpenClaw ${OLD_VERSION} → ${NEW_VERSION}" \
+            --body "$(cat <<'BODY'
+          ## Automated OpenClaw Version Upgrade
+
+          | File | Change |
+          |------|--------|
+          | `openclaw/Dockerfile` | `OPENCLAW_NPM_VERSION` → `${{ needs.check-version.outputs.new_version }}` |
+          | `Makefile` | `OPENCLAW_NPM_VERSION` synced |
+          | `scripts/start.sh` | Image tag defaults updated |
+
+          CI must pass before auto-merge proceeds.
+
+          🤖 Created by [auto-upgrade-openclaw](.github/workflows/auto-upgrade-openclaw.yml) workflow.
+          BODY
+          )" \
+            --label "auto-upgrade")
+
+          # Enable auto-merge — PR merges automatically when all CI checks pass
+          gh pr merge --auto --squash "${PR_URL}"
+
+  # -------------------------------------------------------------------------
+  # Job 3: Build multi-arch images and push to Docker Hub
+  #         Triggered on push to master (after auto-merge or manual merge)
+  # -------------------------------------------------------------------------
+  docker-push:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history for git describe
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          OC_VERSION=$(grep 'ARG OPENCLAW_NPM_VERSION=' openclaw/Dockerfile \
+            | head -1 | sed 's/.*=//')
+          SEMVER=$(git describe --tags --abbrev=0 2>/dev/null || echo "v2.0.0")
+          echo "oc_version=${OC_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "semver=${SEMVER}"         >> "$GITHUB_OUTPUT"
+
+      - name: Check which Dockerfiles changed
+        id: changes
+        run: |
+          if git diff --name-only HEAD~1 2>/dev/null | grep -q '^llamacpp/'; then
+            echo "llamacpp_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "llamacpp_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+          if git diff --name-only HEAD~1 2>/dev/null | grep -q '^openclaw/'; then
+            echo "openclaw_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "openclaw_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push OpenClaw image
+        if: steps.changes.outputs.openclaw_changed == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./openclaw
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            jinwangmok/democlaw-openclaw:${{ steps.tags.outputs.semver }}
+            jinwangmok/democlaw-openclaw:oc-${{ steps.tags.outputs.oc_version }}
+            jinwangmok/democlaw-openclaw:latest
+
+      - name: Build and push llama.cpp image
+        if: steps.changes.outputs.llamacpp_changed == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./llamacpp
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            jinwangmok/democlaw-llamacpp:${{ steps.tags.outputs.semver }}
+            jinwangmok/democlaw-llamacpp:latest

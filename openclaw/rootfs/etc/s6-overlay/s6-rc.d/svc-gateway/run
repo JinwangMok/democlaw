@@ -1,0 +1,3 @@
+#!/bin/sh
+OPENCLAW_PORT="${OPENCLAW_PORT:-18789}"
+exec openclaw gateway --port "${OPENCLAW_PORT}" --bind lan --allow-unconfigured
