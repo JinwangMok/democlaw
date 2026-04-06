@@ -127,7 +127,7 @@ _apply_dgx_spark_profile() {
     _default MIN_DRIVER_VERSION        "550.0"
     _default LLAMACPP_MODEL_NAME       "gemma-4-26B-A4B-it"
     _default LLAMACPP_MAX_TOKENS       "8192"
-    _default LLAMACPP_HEALTH_TIMEOUT   "900"
+    _default LLAMACPP_HEALTH_TIMEOUT   "1800"
     _default LLAMACPP_TEMPERATURE      "0.7"
 
     _profile_log "  Model     : ${MODEL_REPO}/${MODEL_FILE}"

@@ -71,7 +71,7 @@ LLAMACPP_PORT="8000"
 OPENCLAW_PORT="18789"
 
 # Timeouts (seconds) — LLAMACPP_HEALTH_TIMEOUT may be set by apply-profile.sh
-LLAMACPP_HEALTH_TIMEOUT="${LLAMACPP_HEALTH_TIMEOUT:-600}"
+LLAMACPP_HEALTH_TIMEOUT="${LLAMACPP_HEALTH_TIMEOUT:-1800}"
 OPENCLAW_HEALTH_TIMEOUT=300   # longer: gateway init (onboard + plugin load) can take time
 
 # Model directory (host path mounted into the container)
@@ -208,9 +208,12 @@ MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
 log "llama.cpp container started. Waiting for health ..."
 
 # ---------------------------------------------------------------------------
-# Wait for llama.cpp /health
+# Wait for llama.cpp /health — with live progress from container logs
 # ---------------------------------------------------------------------------
 elapsed=0
+_prev_log_lines=0
+_phase="starting"
+
 while [ "${elapsed}" -lt "${LLAMACPP_HEALTH_TIMEOUT}" ]; do
     state=$("${RUNTIME}" container inspect --format '{{.State.Status}}' "${LLAMACPP_CONTAINER}" 2>/dev/null || echo "unknown")
     if [ "${state}" = "exited" ] || [ "${state}" = "dead" ]; then
@@ -226,13 +229,49 @@ while [ "${elapsed}" -lt "${LLAMACPP_HEALTH_TIMEOUT}" ]; do
 
     sleep 5
     elapsed=$((elapsed + 5))
-    if [ $((elapsed % 30)) -eq 0 ]; then
-        log "  ... llama.cpp loading (${elapsed}/${LLAMACPP_HEALTH_TIMEOUT}s)"
+
+    # Parse container logs to show progress
+    if [ $((elapsed % 10)) -eq 0 ]; then
+        _last_log=$("${RUNTIME}" logs --tail 3 "${LLAMACPP_CONTAINER}" 2>&1 | tail -1)
+        _progress=""
+
+        # Detect download progress (curl output: "XX 4746M  XX 1234M")
+        if echo "${_last_log}" | grep -qE '[0-9]+M.*[0-9]+M'; then
+            _pct=$(echo "${_last_log}" | grep -oE '^[[:space:]]*[0-9]+' | head -1 | xargs)
+            _progress="downloading model: ${_pct}%"
+        # Detect model loading
+        elif echo "${_last_log}" | grep -qi "loading model"; then
+            _progress="loading model into memory"
+        # Detect GGUF metadata parsing
+        elif echo "${_last_log}" | grep -qi "llama_model_loader"; then
+            _progress="parsing model metadata"
+        # Detect layer offloading
+        elif echo "${_last_log}" | grep -qiE "offload|VRAM|device"; then
+            _progress="offloading layers to GPU"
+        # Detect KV cache allocation
+        elif echo "${_last_log}" | grep -qi "KV"; then
+            _progress="allocating KV cache"
+        # Detect server ready signals
+        elif echo "${_last_log}" | grep -qi "listening"; then
+            _progress="server starting"
+        # Detect fitting params
+        elif echo "${_last_log}" | grep -qi "fitting params"; then
+            _progress="fitting model to device memory"
+        fi
+
+        if [ -n "${_progress}" ]; then
+            log "  ... ${_progress} (${elapsed}/${LLAMACPP_HEALTH_TIMEOUT}s)"
+        else
+            log "  ... waiting (${elapsed}/${LLAMACPP_HEALTH_TIMEOUT}s)"
+        fi
     fi
 done
 
 if [ "${elapsed}" -ge "${LLAMACPP_HEALTH_TIMEOUT}" ]; then
-    error "llama.cpp did not become healthy within ${LLAMACPP_HEALTH_TIMEOUT}s. Check logs: ${RUNTIME} logs ${LLAMACPP_CONTAINER}"
+    log "ERROR: llama.cpp did not become healthy within ${LLAMACPP_HEALTH_TIMEOUT}s."
+    log "Last container logs:"
+    "${RUNTIME}" logs --tail 15 "${LLAMACPP_CONTAINER}" 2>&1 || true
+    error "Timeout waiting for llama.cpp. Check: ${RUNTIME} logs ${LLAMACPP_CONTAINER}"
 fi
 
 # ---------------------------------------------------------------------------
