@@ -26,7 +26,7 @@ the DemoClaw benchmark script.
 | MODEL_NAME     | `gemma-4-26B-A4B-it`                           |
 | Quantization   | Q4_K_M (~15-16 GB on disk)                    |
 | Architecture   | Mixture of Experts (4 active / N total)        |
-| CTX_SIZE       | 131072 (128k tokens)                           |
+| CTX_SIZE       | 262144 (256k tokens)                           |
 | N_GPU_LAYERS   | 99 (full offload)                              |
 | FLASH_ATTN     | 1 (enabled)                                    |
 | CACHE_TYPE_K   | q8_0                                           |

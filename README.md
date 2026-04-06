@@ -420,7 +420,7 @@ Key settings:
 | `CONTAINER_RUNTIME` | auto-detect | Force `docker` or `podman` |
 | `MODEL_REPO` | `unsloth/gemma-4-E4B-it-GGUF` | HuggingFace model repo |
 | `MODEL_FILE` | `gemma-4-E4B-it-Q4_K_M.gguf` | GGUF model filename |
-| `CTX_SIZE` | `8192` | Context length (tokens) |
+| `CTX_SIZE` | `131072` | Context length (tokens) |
 | `LLAMACPP_PORT` | `8000` | llama.cpp API port |
 | `OPENCLAW_PORT` | `18789` | OpenClaw dashboard port |
 | `MODEL_DIR` | `~/.cache/democlaw/models` | Host model cache directory |

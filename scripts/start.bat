@@ -55,7 +55,7 @@ if not defined MODEL_REPO set "MODEL_REPO=unsloth/gemma-4-E4B-it-GGUF"
 if not defined MODEL_FILE set "MODEL_FILE=gemma-4-E4B-it-Q4_K_M.gguf"
 
 :: llama.cpp tuning — defaults now set by apply-profile.bat based on hardware.
-if not defined CTX_SIZE set "CTX_SIZE=8192"
+if not defined CTX_SIZE set "CTX_SIZE=131072"
 if not defined N_GPU_LAYERS set "N_GPU_LAYERS=99"
 if not defined FLASH_ATTN set "FLASH_ATTN=1"
 if not defined CACHE_TYPE_K set "CACHE_TYPE_K=q4_0"

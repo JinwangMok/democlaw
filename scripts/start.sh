@@ -60,7 +60,7 @@ MODEL_REPO="${MODEL_REPO:-unsloth/gemma-4-E4B-it-GGUF}"
 MODEL_FILE="${MODEL_FILE:-gemma-4-E4B-it-Q4_K_M.gguf}"
 
 # llama.cpp tuning — defaults now set by apply-profile.sh based on hardware.
-CTX_SIZE="${CTX_SIZE:-8192}"
+CTX_SIZE="${CTX_SIZE:-131072}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-99}"
 FLASH_ATTN="${FLASH_ATTN:-1}"
 CACHE_TYPE_K="${CACHE_TYPE_K:-q4_0}"

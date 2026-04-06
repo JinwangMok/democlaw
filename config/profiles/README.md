@@ -46,7 +46,7 @@ All profiles use the same environment variables as `.env.example`. You can overr
 
 | Variable | Description | DGX Spark | 8GB VRAM |
 |----------|-------------|-----------|----------|
-| `CTX_SIZE` | Max context tokens | 131072 | 8192 |
+| `CTX_SIZE` | Max context tokens | 262144 | 131072 |
 | `N_GPU_LAYERS` | Layers on GPU | 99 (all) | 99 (all) |
 | `FLASH_ATTN` | Flash attention | 1 (on) | 1 (on) |
 | `CACHE_TYPE_K` | KV cache key type | q8_0 | q4_0 |
