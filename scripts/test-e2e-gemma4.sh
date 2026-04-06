@@ -164,6 +164,7 @@ fi
 HARDWARE_PROFILE="${HARDWARE_PROFILE:-${EXPECTED_PROFILE}}"
 
 # Profile-specific parameters
+# shellcheck disable=SC2034  # EXPECTED_MIN_CTX reserved for future context-window gate
 case "${HARDWARE_PROFILE}" in
     dgx_spark)
         PROFILE_LABEL="DGX Spark (128GB unified)"

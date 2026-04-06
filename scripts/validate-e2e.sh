@@ -79,6 +79,7 @@ VRAM_BUDGET_MIB="${VRAM_BUDGET_MIB:-8192}"
 declare -A GATE_RESULTS=()
 declare -A GATE_DETAILS=()
 OVERALL_PASS=true
+# shellcheck disable=SC2034  # START_TIME_NS/END_TIME_NS reserved for elapsed-time reporting
 START_TIME_NS=""
 END_TIME_NS=""
 
@@ -1034,6 +1035,7 @@ print(json.dumps(report, indent=2))
 # Main
 # ===========================================================================
 main() {
+    # shellcheck disable=SC2034  # START_TIME_NS reserved for elapsed-time reporting
     START_TIME_NS=$(date +%s%N 2>/dev/null || python3 -c "import time; print(int(time.time()*1e9))")
 
     _e2e_log "========================================================"

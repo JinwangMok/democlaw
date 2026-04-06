@@ -18,6 +18,7 @@ ignored:
   - DL3008   # apt-get install — pin package versions
   - DL3016   # npm install — pin package versions
   - DL3028   # gem install — pin gem versions
+  - DL3003   # cd in RUN — used for npm install in specific directory
   - DL4006   # Set SHELL option -o pipefail before RUN with pipe
 
 # Treat all remaining violations as errors (default: info)
