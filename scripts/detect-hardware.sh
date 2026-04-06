@@ -98,7 +98,7 @@ check_dgx_system_identifiers() {
     if [ -f /sys/devices/virtual/dmi/id/product_name ]; then
         local product_name
         product_name=$(cat /sys/devices/virtual/dmi/id/product_name 2>/dev/null || true)
-        if echo "${product_name}" | grep -qi "DGX"; then
+        if echo "${product_name}" | grep -qi "DGX\|Spark"; then
             return 0
         fi
     fi
@@ -107,7 +107,7 @@ check_dgx_system_identifiers() {
     if [ -f /sys/devices/virtual/dmi/id/board_name ]; then
         local board_name
         board_name=$(cat /sys/devices/virtual/dmi/id/board_name 2>/dev/null || true)
-        if echo "${board_name}" | grep -qi "DGX\|Grace\|GH200"; then
+        if echo "${board_name}" | grep -qi "DGX\|Grace\|GH200\|GB10\|Blackwell\|Spark"; then
             return 0
         fi
     fi
@@ -121,7 +121,7 @@ check_dgx_system_identifiers() {
 check_gpu_name_match() {
     local name="${1}"
 
-    # GH200 Grace Hopper Superchip (DGX Spark)
+    # GH200 Grace Hopper Superchip
     if echo "${name}" | grep -qi "GH200"; then
         return 0
     fi
@@ -136,7 +136,22 @@ check_gpu_name_match() {
         return 0
     fi
 
-    # GB202 / Blackwell-based DGX Spark variants (future-proofing)
+    # GB10 Grace Blackwell — DGX Spark desktop
+    if echo "${name}" | grep -qi "GB10"; then
+        return 0
+    fi
+
+    # Blackwell architecture (B100, B200, GB series)
+    if echo "${name}" | grep -qi "Blackwell"; then
+        return 0
+    fi
+
+    # DGX Spark specific identifiers
+    if echo "${name}" | grep -qi "Spark"; then
+        return 0
+    fi
+
+    # GB202 / Blackwell-based variants (future-proofing)
     if echo "${name}" | grep -qi "GB20[0-9]"; then
         return 0
     fi

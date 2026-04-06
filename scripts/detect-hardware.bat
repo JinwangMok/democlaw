@@ -118,12 +118,36 @@ if defined HW_GPU_NAME (
         echo [detect-hardware] Detected DGX Spark via GPU name: '!HW_GPU_NAME!'
         goto :print_summary
     )
+
+    echo !HW_GPU_NAME! | findstr /i "GB10" >nul 2>&1
+    if !errorlevel! equ 0 (
+        set "HW_PROFILE=dgx_spark"
+        set "HW_DETECT_METHOD=gpu_name"
+        echo [detect-hardware] Detected DGX Spark via GPU name: '!HW_GPU_NAME!'
+        goto :print_summary
+    )
+
+    echo !HW_GPU_NAME! | findstr /i "Blackwell" >nul 2>&1
+    if !errorlevel! equ 0 (
+        set "HW_PROFILE=dgx_spark"
+        set "HW_DETECT_METHOD=gpu_name"
+        echo [detect-hardware] Detected DGX Spark via GPU name: '!HW_GPU_NAME!'
+        goto :print_summary
+    )
+
+    echo !HW_GPU_NAME! | findstr /i "Spark" >nul 2>&1
+    if !errorlevel! equ 0 (
+        set "HW_PROFILE=dgx_spark"
+        set "HW_DETECT_METHOD=gpu_name"
+        echo [detect-hardware] Detected DGX Spark via GPU name: '!HW_GPU_NAME!'
+        goto :print_summary
+    )
 )
 
 :: ---------------------------------------------------------------------------
 :: Priority 3: System identifiers (Windows — check WMI for DGX product name)
 :: ---------------------------------------------------------------------------
-for /f "tokens=*" %%P in ('wmic computersystem get model 2^>nul ^| findstr /i "DGX Grace GH200"') do (
+for /f "tokens=*" %%P in ('wmic computersystem get model 2^>nul ^| findstr /i "DGX Grace GH200 GB10 Blackwell Spark"') do (
     set "HW_PROFILE=dgx_spark"
     set "HW_DETECT_METHOD=system_id"
     echo [detect-hardware] Detected DGX Spark via system identifier: %%P

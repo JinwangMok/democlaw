@@ -70,7 +70,7 @@ _detect_and_apply_profile() {
                 ;;
         esac
     # GPU name matching (GH200, Grace Hopper, DGX)
-    elif echo "${_gpu_name}" | grep -qiE "GH200|Grace.Hopper|DGX|GB20[0-9]"; then
+    elif echo "${_gpu_name}" | grep -qiE "GH200|Grace.Hopper|DGX|GB10|Blackwell|Spark|GB20[0-9]"; then
         _detected_profile="dgx_spark"
         _detect_method="gpu_name"
     # DGX system identifiers

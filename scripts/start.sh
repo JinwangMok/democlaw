@@ -48,7 +48,7 @@ fi
 # Configuration
 # ---------------------------------------------------------------------------
 LLAMACPP_IMAGE="${DEMOCLAW_LLAMACPP_IMAGE:-docker.io/jinwangmok/democlaw-llamacpp:v2.0.0}"
-OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-openclaw:v1.3.1}"
+OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-openclaw:v2.0.0}"
 NETWORK="democlaw-net"
 LLAMACPP_CONTAINER="democlaw-llamacpp"
 OPENCLAW_CONTAINER="democlaw-openclaw"
