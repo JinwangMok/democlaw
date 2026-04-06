@@ -116,7 +116,7 @@ _apply_dgx_spark_profile() {
     _profile_log "Applying profile: Gemma 4 26B A4B MoE (DGX Spark / 128GB)"
 
     _default MODEL_REPO                "unsloth/gemma-4-26B-A4B-it-GGUF"
-    _default MODEL_FILE                "gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    _default MODEL_FILE                "gemma-4-26B-A4B-it-Q8_0.gguf"
     _default MODEL_NAME                "gemma-4-26B-A4B-it"
     _default CTX_SIZE                  "262144"
     _default N_GPU_LAYERS              "99"

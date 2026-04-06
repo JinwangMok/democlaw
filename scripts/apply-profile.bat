@@ -118,7 +118,7 @@ goto :print_summary
 echo [apply-profile] Applying profile: Gemma 4 26B A4B MoE ^(DGX Spark / 128GB^)
 
 if not defined MODEL_REPO              set "MODEL_REPO=unsloth/gemma-4-26B-A4B-it-GGUF"
-if not defined MODEL_FILE              set "MODEL_FILE=gemma-4-26B-A4B-it-Q4_K_M.gguf"
+if not defined MODEL_FILE              set "MODEL_FILE=gemma-4-26B-A4B-it-Q8_0.gguf"
 if not defined MODEL_NAME              set "MODEL_NAME=gemma-4-26B-A4B-it"
 if not defined CTX_SIZE                set "CTX_SIZE=262144"
 if not defined N_GPU_LAYERS            set "N_GPU_LAYERS=99"

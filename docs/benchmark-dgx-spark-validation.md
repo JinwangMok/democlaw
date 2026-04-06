@@ -22,7 +22,7 @@ the DemoClaw benchmark script.
 | Parameter      | Value                                          |
 |----------------|------------------------------------------------|
 | MODEL_REPO     | `unsloth/gemma-4-26B-A4B-it-GGUF`             |
-| MODEL_FILE     | `gemma-4-26B-A4B-it-Q4_K_M.gguf`              |
+| MODEL_FILE     | `gemma-4-26B-A4B-it-Q8_0.gguf`              |
 | MODEL_NAME     | `gemma-4-26B-A4B-it`                           |
 | Quantization   | Q4_K_M (~15-16 GB on disk)                    |
 | Architecture   | Mixture of Experts (4 active / N total)        |

@@ -89,7 +89,7 @@ _detect_and_apply_profile() {
     if [ "${_detected_profile}" = "dgx_spark" ]; then
         echo "[entrypoint] Applying DGX Spark profile: Gemma 4 26B A4B MoE"
         MODEL_REPO="${MODEL_REPO:-unsloth/gemma-4-26B-A4B-it-GGUF}"
-        MODEL_FILE="${MODEL_FILE:-gemma-4-26B-A4B-it-Q4_K_M.gguf}"
+        MODEL_FILE="${MODEL_FILE:-gemma-4-26B-A4B-it-Q8_0.gguf}"
         MODEL_ALIAS="${MODEL_ALIAS:-gemma-4-26B-A4B-it}"
         CTX_SIZE="${CTX_SIZE:-262144}"
         N_GPU_LAYERS="${N_GPU_LAYERS:-99}"
@@ -182,8 +182,19 @@ if [ ! -s "${_model_path}" ]; then
     exit 1
 fi
 
-_model_size=$(stat -c%s "${_model_path}" 2>/dev/null || stat -f%z "${_model_path}" 2>/dev/null || echo "unknown")
+_model_size=$(stat -c%s "${_model_path}" 2>/dev/null || stat -f%z "${_model_path}" 2>/dev/null || echo "0")
 echo "[entrypoint] Model file size: ${_model_size} bytes"
+
+# A valid GGUF model must be at least 1 MB. Smaller files are likely
+# HTML error pages from HuggingFace (redirect/404) or corrupt downloads.
+_min_model_bytes=1048576
+if [ "${_model_size}" -lt "${_min_model_bytes}" ] 2>/dev/null; then
+    echo "[entrypoint] ERROR: Model file too small (${_model_size} bytes < 1 MB)." >&2
+    echo "[entrypoint] This usually means the download failed (got an HTML error page)." >&2
+    echo "[entrypoint] Removing corrupt file and exiting. Re-run to retry download." >&2
+    rm -f "${_model_path}"
+    exit 1
+fi
 
 # ---------------------------------------------------------------------------
 # Resolve API key / no-auth mode
