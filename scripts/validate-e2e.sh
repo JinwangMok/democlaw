@@ -79,8 +79,9 @@ VRAM_BUDGET_MIB="${VRAM_BUDGET_MIB:-8192}"
 declare -A GATE_RESULTS=()
 declare -A GATE_DETAILS=()
 OVERALL_PASS=true
-# shellcheck disable=SC2034  # START_TIME_NS/END_TIME_NS reserved for elapsed-time reporting
+# shellcheck disable=SC2034
 START_TIME_NS=""
+# shellcheck disable=SC2034
 END_TIME_NS=""
 
 # ---------------------------------------------------------------------------
