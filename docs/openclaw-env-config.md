@@ -36,7 +36,7 @@ groups are derived from these.
 |----------|---------------|-------------|
 | `LLAMACPP_BASE_URL` | `http://llamacpp:8000/v1` | Full base URL of the llama.cpp OpenAI-compatible API. Uses the container hostname `llamacpp` on the shared `democlaw-net` network. Change only if the llama.cpp container has a different hostname or port. |
 | `LLAMACPP_API_KEY` | `EMPTY` | API key sent in `Authorization: Bearer` headers. llama.cpp accepts any non-empty string by default; set `EMPTY` or any placeholder value. |
-| `LLAMACPP_MODEL_NAME` | `Qwen3.5-9B-Q4_K_M` | Model identifier that llama.cpp is serving. Must match the `MODEL_NAME` passed to the llama.cpp container. |
+| `LLAMACPP_MODEL_NAME` | `gemma-4-E4B-it` | Model identifier that llama.cpp is serving. Must match the `MODEL_NAME` passed to the llama.cpp container. |
 | `LLAMACPP_MAX_TOKENS` | `4096` | Maximum number of tokens per LLM response. |
 | `LLAMACPP_TEMPERATURE` | `0.7` | Sampling temperature (`0.0` = deterministic, `1.0+` = more random). |
 
@@ -70,7 +70,7 @@ conventions (e.g. `openai`, LangChain.js, LiteLLM).
 | `OPENAI_API_BASE` | `http://llamacpp:8000/v1` | `LLAMACPP_BASE_URL` | Base URL for the OpenAI-compatible endpoint. Used by older OpenAI SDK versions and many third-party libraries. |
 | `OPENAI_BASE_URL` | `http://llamacpp:8000/v1` | `LLAMACPP_BASE_URL` | Same as above; used by OpenAI SDK v4+ and newer libraries. Both are set for maximum compatibility. |
 | `OPENAI_API_KEY` | `EMPTY` | `LLAMACPP_API_KEY` | API key in the OpenAI SDK format. Set to any non-empty placeholder. |
-| `OPENAI_MODEL` | `Qwen3.5-9B-Q4_K_M` | `LLAMACPP_MODEL_NAME` | Default model identifier used in API requests. |
+| `OPENAI_MODEL` | `gemma-4-E4B-it` | `LLAMACPP_MODEL_NAME` | Default model identifier used in API requests. |
 
 ### OpenClaw-Specific LLM Provider Variables
 
@@ -82,7 +82,7 @@ path.
 | `OPENCLAW_LLM_PROVIDER` | `openai-compatible` | (hardcoded) | LLM provider type. Must be `openai-compatible` for llama.cpp. |
 | `OPENCLAW_LLM_BASE_URL` | `http://llamacpp:8000/v1` | `LLAMACPP_BASE_URL` | Base URL of the OpenAI-compatible API endpoint. |
 | `OPENCLAW_LLM_API_KEY` | `EMPTY` | `LLAMACPP_API_KEY` | API key for the LLM provider. |
-| `OPENCLAW_LLM_MODEL` | `Qwen3.5-9B-Q4_K_M` | `LLAMACPP_MODEL_NAME` | Model identifier to request from the provider. |
+| `OPENCLAW_LLM_MODEL` | `gemma-4-E4B-it` | `LLAMACPP_MODEL_NAME` | Model identifier to request from the provider. |
 | `OPENCLAW_LLM_MAX_TOKENS` | `4096` | `LLAMACPP_MAX_TOKENS` | Maximum tokens per response. |
 | `OPENCLAW_LLM_TEMPERATURE` | `0.7` | `LLAMACPP_TEMPERATURE` | Sampling temperature. |
 
@@ -119,7 +119,7 @@ environment-variable values:
     "provider": "openai-compatible",
     "baseUrl": "http://llamacpp:8000/v1",
     "apiKey": "EMPTY",
-    "model": "Qwen3.5-9B-Q4_K_M",
+    "model": "gemma-4-E4B-it",
     "maxTokens": 4096,
     "temperature": 0.7
   },
@@ -137,7 +137,7 @@ environment-variable values:
 | `llm.provider` | hardcoded | `"openai-compatible"` — selects the OpenAI-compatible provider |
 | `llm.baseUrl` | `LLAMACPP_BASE_URL` | Full URL ending in `/v1`, e.g. `"http://llamacpp:8000/v1"` |
 | `llm.apiKey` | `LLAMACPP_API_KEY` | Any non-empty string; llama.cpp default accepts `"EMPTY"` |
-| `llm.model` | `LLAMACPP_MODEL_NAME` | Model identifier as loaded by llama.cpp, e.g. `"Qwen3.5-9B-Q4_K_M"` |
+| `llm.model` | `LLAMACPP_MODEL_NAME` | Model identifier as loaded by llama.cpp, e.g. `"gemma-4-E4B-it"` |
 | `llm.maxTokens` | `LLAMACPP_MAX_TOKENS` | Integer, e.g. `4096` |
 | `llm.temperature` | `LLAMACPP_TEMPERATURE` | Float in `[0.0, 2.0]`, e.g. `0.7` |
 | `server.host` | hardcoded | `"0.0.0.0"` — bind to all interfaces |
@@ -156,7 +156,7 @@ All primary variables can be overridden in the project `.env` file (copy from
 # .env
 LLAMACPP_BASE_URL=http://llamacpp:8000/v1
 LLAMACPP_API_KEY=EMPTY
-LLAMACPP_MODEL_NAME=Qwen3.5-9B-Q4_K_M
+LLAMACPP_MODEL_NAME=gemma-4-E4B-it
 LLAMACPP_MAX_TOKENS=4096
 LLAMACPP_TEMPERATURE=0.7
 OPENCLAW_PORT=18789
@@ -168,7 +168,7 @@ OPENCLAW_PORT=18789
 docker run \
   -e LLAMACPP_BASE_URL=http://llamacpp:8000/v1 \
   -e LLAMACPP_API_KEY=EMPTY \
-  -e LLAMACPP_MODEL_NAME=Qwen3.5-9B-Q4_K_M \
+  -e LLAMACPP_MODEL_NAME=gemma-4-E4B-it \
   -e OPENCLAW_PORT=18789 \
   democlaw/openclaw:latest
 ```

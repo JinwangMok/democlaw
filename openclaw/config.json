@@ -4,7 +4,7 @@
     "baseUrl": "http://llamacpp:8000/v1",
     "apiKey": "EMPTY",
     "_apiKey_note": "Set to match LLAMACPP_API_KEY in .env. 'EMPTY' (or any value) works when llama.cpp runs in no-auth mode. When LLAMACPP_API_KEY is a real secret, set apiKey to that same value so OpenClaw sends 'Authorization: Bearer <key>'.",
-    "model": "Qwen3.5-9B-Q4_K_M",
+    "model": "gemma-4-E4B-it",
     "maxTokens": 4096,
     "temperature": 0.7
   },

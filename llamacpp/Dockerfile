@@ -1,13 +1,17 @@
 # =============================================================================
 # llama.cpp Server Dockerfile (CUDA backend)
-# Serves Qwen3.5-9B Q4_K_M GGUF via OpenAI-compatible API
+# Serves Google Gemma 4 GGUF models via OpenAI-compatible API
+#
+# Supported models (selected via .env / environment variables):
+#   - Gemma 4 E4B Q4_K_M   (~4.7 GB, 8 GB VRAM GPUs)
+#   - Gemma 4 26B A4B MoE   (128 GB unified memory, DGX Spark)
 #
 # Two-stage build:
 #   1. Compile llama.cpp from source with CUDA support
 #   2. Minimal runtime image with the server binary
 #
 # Requirements (host):
-#   - NVIDIA GPU with >= 8 GB VRAM (e.g. RTX 3070/4070)
+#   - NVIDIA GPU with >= 8 GB VRAM (e.g. RTX 3070/4070) or DGX Spark
 #   - NVIDIA driver >= 525 (CUDA 12.x compatible)
 #   - nvidia-container-toolkit (for Docker)
 #
@@ -69,9 +73,9 @@ ARG BUILD_DATE
 ARG GIT_COMMIT
 
 LABEL maintainer="democlaw"
-LABEL description="llama.cpp OpenAI-compatible server for Qwen3.5-9B Q4_K_M GGUF (CUDA)"
+LABEL description="llama.cpp OpenAI-compatible server for Google Gemma 4 GGUF (CUDA)"
 LABEL org.opencontainers.image.title="democlaw-llamacpp"
-LABEL org.opencontainers.image.description="Serves Qwen3.5-9B Q4_K_M via llama.cpp OpenAI-compatible API"
+LABEL org.opencontainers.image.description="Serves Gemma 4 (E4B / 26B-A4B) via llama.cpp OpenAI-compatible API"
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
@@ -79,7 +83,7 @@ LABEL org.opencontainers.image.source="https://github.com/JinwangMok/democlaw"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.vendor="democlaw"
 LABEL democlaw.engine="llama.cpp"
-LABEL democlaw.model="Qwen3.5-9B-Q4_K_M"
+LABEL democlaw.model="gemma-4"
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -101,17 +105,23 @@ RUN ldconfig
 # Default runtime environment variables
 # All values are overridable at container start via --env / --env-file.
 # ---------------------------------------------------------------------------
-ENV MODEL_PATH="/models/Qwen3.5-9B-Q4_K_M.gguf" \
-    MODEL_REPO="unsloth/Qwen3.5-9B-GGUF" \
-    MODEL_FILE="Qwen3.5-9B-Q4_K_M.gguf" \
-    MODEL_ALIAS="Qwen3.5-9B-Q4_K_M" \
+ENV MODEL_PATH="/models/gemma-4-E4B-it-Q4_K_M.gguf" \
+    MODEL_REPO="unsloth/gemma-4-E4B-it-GGUF" \
+    MODEL_FILE="gemma-4-E4B-it-Q4_K_M.gguf" \
+    MODEL_ALIAS="gemma-4-E4B-it" \
     LLAMA_HOST="0.0.0.0" \
     LLAMA_PORT="8000" \
-    CTX_SIZE="32768" \
+    CTX_SIZE="131072" \
     N_GPU_LAYERS="99" \
     FLASH_ATTN="1" \
-    CACHE_TYPE_K="q8_0" \
-    CACHE_TYPE_V="q8_0"
+    CACHE_TYPE_K="q4_0" \
+    CACHE_TYPE_V="q4_0" \
+    AUTO_DETECT_MODEL="1"
+# AUTO_DETECT_MODEL=1 enables in-container hardware detection at startup.
+# The entrypoint will query nvidia-smi and auto-select the appropriate
+# Gemma 4 variant (E4B for <=8GB VRAM, 26B A4B MoE for DGX Spark).
+# Set AUTO_DETECT_MODEL=0 to skip detection and use the ENV defaults above.
+#
 # LLAMA_API_KEY is intentionally NOT set here to avoid the
 # SecretsUsedInArgOrEnv lint warning. The entrypoint falls back
 # to no-auth mode when the variable is unset (${LLAMA_API_KEY:-}).

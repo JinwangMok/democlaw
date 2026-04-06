@@ -2,7 +2,7 @@
 :: =============================================================================
 :: download-model.bat -- Pre-download GGUF model weights (Windows)
 ::
-:: Downloads Qwen3.5-9B-Q4_K_M.gguf from HuggingFace so llama.cpp startup
+:: Downloads Gemma 4 E4B Q4_K_M GGUF from HuggingFace so llama.cpp startup
 :: is fast. Delegates to reference\download-model.ps1 for actual processing.
 ::
 :: Usage:

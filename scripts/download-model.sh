@@ -2,7 +2,7 @@
 # =============================================================================
 # download-model.sh — Pre-download GGUF model weights for DemoClaw (Linux)
 #
-# Downloads Qwen3.5-9B-Q4_K_M.gguf from HuggingFace so llama.cpp startup is
+# Downloads Gemma 4 E4B Q4_K_M GGUF from HuggingFace so llama.cpp startup is
 # fast — no download delay on first container run.
 #
 # Usage:
@@ -10,8 +10,8 @@
 #   ./scripts/download-model.sh --model-dir /path/to/models
 #
 # Environment variables:
-#   MODEL_REPO      — HuggingFace repo ID (default: unsloth/Qwen3.5-9B-GGUF)
-#   MODEL_FILE      — GGUF filename       (default: Qwen3.5-9B-Q4_K_M.gguf)
+#   MODEL_REPO      — HuggingFace repo ID (default: unsloth/gemma-4-E4B-it-GGUF)
+#   MODEL_FILE      — GGUF filename       (default: gemma-4-E4B-it-Q4_K_M.gguf)
 #   MODEL_DIR       — Local directory      (default: ~/.cache/democlaw/models)
 #   HF_TOKEN        — HuggingFace token for gated models (optional)
 # =============================================================================
@@ -31,8 +31,8 @@ info()  { if _use_color; then echo -e "\033[36m[download-model] $*\033[0m"; else
 # ---------------------------------------------------------------------------
 # Configuration (all overridable via environment)
 # ---------------------------------------------------------------------------
-MODEL_REPO="${MODEL_REPO:-unsloth/Qwen3.5-9B-GGUF}"
-MODEL_FILE="${MODEL_FILE:-Qwen3.5-9B-Q4_K_M.gguf}"
+MODEL_REPO="${MODEL_REPO:-unsloth/gemma-4-E4B-it-GGUF}"
+MODEL_FILE="${MODEL_FILE:-gemma-4-E4B-it-Q4_K_M.gguf}"
 MODEL_DIR="${MODEL_DIR:-${HOME}/.cache/democlaw/models}"
 HF_TOKEN="${HF_TOKEN:-}"
 

@@ -61,12 +61,12 @@ OPENCLAW_NPM_VERSION ?= 2026.3.24
 # ---------------------------------------------------------------------------
 # Model and port configuration
 # ---------------------------------------------------------------------------
-MODEL_NAME             ?= Qwen3.5-9B-Q4_K_M
+MODEL_NAME             ?= gemma-4-E4B-it
 LLAMACPP_PORT          ?= 8000
 OPENCLAW_PORT          ?= 18789
 LLAMACPP_BASE_URL      ?= http://llamacpp:8000/v1
 LLAMACPP_API_KEY       ?= EMPTY
-LLAMACPP_MODEL_NAME    ?= Qwen3.5-9B-Q4_K_M
+LLAMACPP_MODEL_NAME    ?= gemma-4-E4B-it
 MODEL_DIR              ?= $(HOME)/.cache/democlaw/models
 
 # ---------------------------------------------------------------------------
@@ -102,7 +102,8 @@ export _runtime_missing_msg
        shell shell-llamacpp shell-openclaw \
        build-llamacpp build-openclaw \
        logs-llamacpp logs-openclaw \
-       build-info env-check _require-runtime
+       build-info env-check benchmark validate validate-running validate-chat \
+       test-e2e test-e2e-json _require-runtime
 
 _require-runtime:
 	@if [ -z "$(CONTAINER_RUNTIME)" ]; then \
@@ -249,6 +250,34 @@ follow-llamacpp:
 ## follow-openclaw: Follow OpenClaw logs in real time
 follow-openclaw:
 	@$(CONTAINER_RUNTIME) logs -f $(OPENCLAW_CONTAINER_NAME)
+
+# =============================================================================
+##@ Benchmarking
+# =============================================================================
+
+## benchmark: Run LLM throughput benchmark (tokens/sec) against the running stack
+benchmark: _require-runtime
+	@bash "$(SCRIPTS_DIR)/benchmark-tps.sh"
+
+## validate: Run full E2E validation pipeline (preflight, health, memory, throughput, API)
+validate: _require-runtime
+	@bash "$(SCRIPTS_DIR)/validate-e2e.sh"
+
+## validate-running: Validate an already-running stack (skip container startup)
+validate-running: _require-runtime
+	@SKIP_STARTUP=1 bash "$(SCRIPTS_DIR)/validate-e2e.sh"
+
+## validate-chat: Validate chat completion format compatibility with OpenClaw
+validate-chat: _require-runtime
+	@bash "$(SCRIPTS_DIR)/validate-chat-completion.sh"
+
+## test-e2e: Run Gemma 4 E2E dashboard integration tests (both variants)
+test-e2e:
+	@bash "$(SCRIPTS_DIR)/test-e2e-gemma4.sh"
+
+## test-e2e-json: Run Gemma 4 E2E tests with JSON output (for CI)
+test-e2e-json:
+	@TEST_OUTPUT_FORMAT=json bash "$(SCRIPTS_DIR)/test-e2e-gemma4.sh"
 
 # =============================================================================
 ##@ Debugging

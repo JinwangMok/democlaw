@@ -24,34 +24,49 @@ if exist "%PROJECT_ROOT%\.env" (
 )
 
 :: ---------------------------------------------------------------------------
+:: Hardware-aware model/config selection
+:: ---------------------------------------------------------------------------
+:: apply-profile.bat detects hardware (or uses HARDWARE_PROFILE from .env),
+:: then sets model and runtime defaults for the appropriate Gemma 4 variant.
+:: Variables already set in .env are NOT overridden (user settings win).
+if exist "%SCRIPT_DIR%\apply-profile.bat" (
+    call "%SCRIPT_DIR%\apply-profile.bat"
+) else (
+    echo [start] WARNING: apply-profile.bat not found. Using hardcoded defaults.
+)
+
+:: ---------------------------------------------------------------------------
 :: Configuration (matches start.sh defaults; override via environment)
 :: ---------------------------------------------------------------------------
-if not defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=docker.io/jinwangmok/democlaw-llamacpp:v1.2.0"
+if not defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=docker.io/jinwangmok/democlaw-llamacpp:v2.0.0"
 if defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=%DEMOCLAW_LLAMACPP_IMAGE%"
 
-if not defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=docker.io/jinwangmok/democlaw-openclaw:v1.3.1"
+if not defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=docker.io/jinwangmok/democlaw-openclaw:v2.0.0"
 if defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=%DEMOCLAW_OPENCLAW_IMAGE%"
 
 set "NETWORK=democlaw-net"
 set "LLAMACPP_CONTAINER=democlaw-llamacpp"
 set "OPENCLAW_CONTAINER=democlaw-openclaw"
-set "MODEL_NAME=Qwen3.5-9B-Q4_K_M"
-set "MODEL_REPO=unsloth/Qwen3.5-9B-GGUF"
-set "MODEL_FILE=Qwen3.5-9B-Q4_K_M.gguf"
 
-:: llama.cpp tuning for 8GB VRAM
-if not defined CTX_SIZE set "CTX_SIZE=32768"
+:: Model config — defaults now set by apply-profile.bat based on hardware detection.
+:: These fallbacks are only reached if apply-profile.bat was not called.
+if not defined MODEL_NAME set "MODEL_NAME=gemma-4-E4B-it"
+if not defined MODEL_REPO set "MODEL_REPO=unsloth/gemma-4-E4B-it-GGUF"
+if not defined MODEL_FILE set "MODEL_FILE=gemma-4-E4B-it-Q4_K_M.gguf"
+
+:: llama.cpp tuning — defaults now set by apply-profile.bat based on hardware.
+if not defined CTX_SIZE set "CTX_SIZE=131072"
 if not defined N_GPU_LAYERS set "N_GPU_LAYERS=99"
 if not defined FLASH_ATTN set "FLASH_ATTN=1"
-if not defined CACHE_TYPE_K set "CACHE_TYPE_K=q8_0"
-if not defined CACHE_TYPE_V set "CACHE_TYPE_V=q8_0"
+if not defined CACHE_TYPE_K set "CACHE_TYPE_K=q4_0"
+if not defined CACHE_TYPE_V set "CACHE_TYPE_V=q4_0"
 
 :: Ports
 set "LLAMACPP_PORT=8000"
 set "OPENCLAW_PORT=18789"
 
-:: Timeouts (seconds)
-set "LLAMACPP_HEALTH_TIMEOUT=600"
+:: Timeouts (seconds) — LLAMACPP_HEALTH_TIMEOUT may already be set by apply-profile.bat
+if not defined LLAMACPP_HEALTH_TIMEOUT set "LLAMACPP_HEALTH_TIMEOUT=600"
 set "OPENCLAW_HEALTH_TIMEOUT=300"
 
 :: Model directory (host path mounted into container)
@@ -199,6 +214,7 @@ echo [start]   Model dir  : %MODEL_DIR%
     -e "FLASH_ATTN=%FLASH_ATTN%" ^
     -e "CACHE_TYPE_K=%CACHE_TYPE_K%" ^
     -e "CACHE_TYPE_V=%CACHE_TYPE_V%" ^
+    -e "AUTO_DETECT_MODEL=0" ^
     %LLAMACPP_IMAGE%
 
 if !errorlevel! neq 0 (

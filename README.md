@@ -28,7 +28,7 @@ Container orchestration for running [OpenClaw](https://github.com/openclaw) AI a
 
 | Container | Purpose | Host Port |
 |-----------|---------|-----------|
-| **llama.cpp** | Qwen3.5-9B Q4_K_M GGUF via OpenAI-compatible API (CUDA) | `localhost:8000` |
+| **llama.cpp** | Gemma 4 E4B GGUF via OpenAI-compatible API (CUDA) | `localhost:8000` |
 | **OpenClaw** | AI assistant web dashboard | `localhost:18789` |
 | *MCP sidecars* | Optional tool servers (e.g., MarkItDown) | user-defined |
 
@@ -418,9 +418,9 @@ Key settings:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONTAINER_RUNTIME` | auto-detect | Force `docker` or `podman` |
-| `MODEL_REPO` | `unsloth/Qwen3.5-9B-GGUF` | HuggingFace model repo |
-| `MODEL_FILE` | `Qwen3.5-9B-Q4_K_M.gguf` | GGUF model filename |
-| `CTX_SIZE` | `32768` | Context length (tokens) |
+| `MODEL_REPO` | `unsloth/gemma-4-E4B-it-GGUF` | HuggingFace model repo |
+| `MODEL_FILE` | `gemma-4-E4B-it-Q4_K_M.gguf` | GGUF model filename |
+| `CTX_SIZE` | `131072` | Context length (tokens) |
 | `LLAMACPP_PORT` | `8000` | llama.cpp API port |
 | `OPENCLAW_PORT` | `18789` | OpenClaw dashboard port |
 | `MODEL_DIR` | `~/.cache/democlaw/models` | Host model cache directory |

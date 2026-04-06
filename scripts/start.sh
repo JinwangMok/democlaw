@@ -32,30 +32,46 @@ if [ -f "${ENV_FILE}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Hardware-aware model/config selection
+# ---------------------------------------------------------------------------
+# apply-profile.sh detects hardware (or uses HARDWARE_PROFILE from .env),
+# then sets model and runtime defaults for the appropriate Gemma 4 variant.
+# Variables already set in .env are NOT overridden (user settings win).
+if [ -f "${SCRIPT_DIR}/apply-profile.sh" ]; then
+    # shellcheck source=apply-profile.sh
+    source "${SCRIPT_DIR}/apply-profile.sh"
+else
+    log "WARNING: apply-profile.sh not found. Using hardcoded defaults."
+fi
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-LLAMACPP_IMAGE="${DEMOCLAW_LLAMACPP_IMAGE:-docker.io/jinwangmok/democlaw-llamacpp:v1.2.0}"
-OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-openclaw:v1.3.1}"
+LLAMACPP_IMAGE="${DEMOCLAW_LLAMACPP_IMAGE:-docker.io/jinwangmok/democlaw-llamacpp:v2.0.0}"
+OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-openclaw:v2.0.0}"
 NETWORK="democlaw-net"
 LLAMACPP_CONTAINER="democlaw-llamacpp"
 OPENCLAW_CONTAINER="democlaw-openclaw"
-MODEL_NAME="Qwen3.5-9B-Q4_K_M"
-MODEL_REPO="unsloth/Qwen3.5-9B-GGUF"
-MODEL_FILE="Qwen3.5-9B-Q4_K_M.gguf"
 
-# llama.cpp tuning for 8GB VRAM
-CTX_SIZE="${CTX_SIZE:-32768}"
+# Model config — defaults now set by apply-profile.sh based on hardware detection.
+# These fallbacks are only reached if apply-profile.sh was not sourced.
+MODEL_NAME="${MODEL_NAME:-gemma-4-E4B-it}"
+MODEL_REPO="${MODEL_REPO:-unsloth/gemma-4-E4B-it-GGUF}"
+MODEL_FILE="${MODEL_FILE:-gemma-4-E4B-it-Q4_K_M.gguf}"
+
+# llama.cpp tuning — defaults now set by apply-profile.sh based on hardware.
+CTX_SIZE="${CTX_SIZE:-131072}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-99}"
 FLASH_ATTN="${FLASH_ATTN:-1}"
-CACHE_TYPE_K="${CACHE_TYPE_K:-q8_0}"
-CACHE_TYPE_V="${CACHE_TYPE_V:-q8_0}"
+CACHE_TYPE_K="${CACHE_TYPE_K:-q4_0}"
+CACHE_TYPE_V="${CACHE_TYPE_V:-q4_0}"
 
 # Ports
 LLAMACPP_PORT="8000"
 OPENCLAW_PORT="18789"
 
-# Timeouts (seconds)
-LLAMACPP_HEALTH_TIMEOUT=600   # longer: model may need to download on first run
+# Timeouts (seconds) — LLAMACPP_HEALTH_TIMEOUT may be set by apply-profile.sh
+LLAMACPP_HEALTH_TIMEOUT="${LLAMACPP_HEALTH_TIMEOUT:-1800}"
 OPENCLAW_HEALTH_TIMEOUT=300   # longer: gateway init (onboard + plugin load) can take time
 
 # Model directory (host path mounted into the container)
@@ -165,7 +181,7 @@ log "  Flash attn : ${FLASH_ATTN}"
 log "  KV cache   : K=${CACHE_TYPE_K}, V=${CACHE_TYPE_V}"
 log "  Model dir  : ${MODEL_DIR}"
 
-"${RUNTIME}" run -d \
+MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
     --name "${LLAMACPP_CONTAINER}" \
     --network "${NETWORK}" \
     "${HOSTNAME_LLM[@]}" \
@@ -186,6 +202,7 @@ log "  Model dir  : ${MODEL_DIR}"
     -e "FLASH_ATTN=${FLASH_ATTN}" \
     -e "CACHE_TYPE_K=${CACHE_TYPE_K}" \
     -e "CACHE_TYPE_V=${CACHE_TYPE_V}" \
+    -e "AUTO_DETECT_MODEL=0" \
     "${LLAMACPP_IMAGE}" || error "Failed to start llama.cpp container."
 
 log "llama.cpp container started. Waiting for health ..."
@@ -313,7 +330,7 @@ if [ -n "${OPENCLAW_WORKSPACE_DIR:-}" ]; then
     fi
 fi
 
-"${RUNTIME}" run -d \
+MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
     --name "${OPENCLAW_CONTAINER}" \
     --network "${NETWORK}" \
     "${HOSTNAME_OPENCLAW[@]}" \
