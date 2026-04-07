@@ -331,6 +331,8 @@ if defined OPENCLAW_WORKSPACE_DIR (
     --restart unless-stopped ^
     -p %OPENCLAW_PORT%:%OPENCLAW_PORT% ^
     -p 18791:18791 ^
+    -p 6080:6080 ^
+    -p 8931:8931 ^
     %MCPORTER_MOUNT% ^
     %DATA_MOUNT% ^
     %WORKSPACE_MOUNT% ^
