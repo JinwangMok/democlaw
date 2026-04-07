@@ -47,18 +47,26 @@ if !errorlevel! neq 0 (
 )
 set "HW_NVIDIA_OK=1"
 
-:: Query GPU name
-for /f "tokens=*" %%G in ('nvidia-smi --query-gpu=gpu_name --format=csv,noheader 2^>nul') do (
+:: Query GPU name (use skip=1 to skip CSV header — avoids noheader parsing issues on Windows)
+for /f "skip=1 tokens=*" %%G in ('nvidia-smi --query-gpu=gpu_name --format=csv 2^>nul') do (
     if not defined HW_GPU_NAME set "HW_GPU_NAME=%%G"
 )
 
 :: Query GPU memory (MiB)
-for /f "tokens=*" %%M in ('nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2^>nul') do (
+:: Try with nounits first (returns plain number), fall back to parsing "8192 MiB"
+set "HW_GPU_VRAM=0"
+for /f "skip=1 tokens=1 delims= " %%M in ('nvidia-smi --query-gpu=memory.total --format=csv 2^>nul') do (
     if "!HW_GPU_VRAM!"=="0" (
-        :: Trim whitespace
-        for /f "tokens=*" %%T in ("%%M") do set "HW_GPU_VRAM=%%T"
+        set "HW_GPU_VRAM_RAW=%%M"
+        :: Strip non-numeric characters (handles "8192" or "8192 MiB")
+        for /f "delims=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ " %%N in ("%%M") do (
+            set "HW_GPU_VRAM=%%N"
+        )
     )
 )
+
+:: Final numeric validation — if still not a number, default to 0
+set /a "HW_GPU_VRAM=HW_GPU_VRAM+0" 2>nul
 
 echo [detect-hardware] GPU name   : !HW_GPU_NAME!
 echo [detect-hardware] GPU memory : !HW_GPU_VRAM! MiB
