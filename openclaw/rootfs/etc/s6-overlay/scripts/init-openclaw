@@ -59,24 +59,27 @@ echo "[init-openclaw]   Tokens   : ${LLAMACPP_MAX_TOKENS}"
 echo "[init-openclaw]   Port     : ${OPENCLAW_PORT}"
 
 # ---------------------------------------------------------------------------
-# Export OpenAI-compatible environment variables
+# Persist derived environment variables for s6-overlay services
+#
+# Exports in a oneshot script die with the process. Write to
+# /run/s6/container_environment/ so s6-overlay injects them into
+# all long-running services (gateway, playwright-mcp, etc.).
 # ---------------------------------------------------------------------------
-export OPENAI_API_BASE="${LLAMACPP_BASE_URL}"
-export OPENAI_BASE_URL="${LLAMACPP_BASE_URL}"
-export OPENAI_API_KEY="${LLAMACPP_API_KEY}"
-export OPENAI_MODEL="${LLAMACPP_MODEL_NAME}"
+S6_ENV_DIR="/run/s6/container_environment"
+mkdir -p "${S6_ENV_DIR}"
 
-# ---------------------------------------------------------------------------
-# Export OpenClaw-specific provider env vars
-# ---------------------------------------------------------------------------
-export OPENCLAW_LLM_PROVIDER="openai-compatible"
-export OPENCLAW_LLM_BASE_URL="${LLAMACPP_BASE_URL}"
-export OPENCLAW_LLM_API_KEY="${LLAMACPP_API_KEY}"
-export OPENCLAW_LLM_MODEL="${LLAMACPP_MODEL_NAME}"
-export OPENCLAW_LLM_MAX_TOKENS="${LLAMACPP_MAX_TOKENS}"
-export OPENCLAW_LLM_TEMPERATURE="${LLAMACPP_TEMPERATURE}"
-export OPENCLAW_CONFIG="${CONFIG_FILE}"
-export OPENCLAW_HOST="0.0.0.0"
+echo "${LLAMACPP_BASE_URL}"       > "${S6_ENV_DIR}/OPENAI_API_BASE"
+echo "${LLAMACPP_BASE_URL}"       > "${S6_ENV_DIR}/OPENAI_BASE_URL"
+echo "${LLAMACPP_API_KEY}"        > "${S6_ENV_DIR}/OPENAI_API_KEY"
+echo "${LLAMACPP_MODEL_NAME}"     > "${S6_ENV_DIR}/OPENAI_MODEL"
+echo "openai-compatible"          > "${S6_ENV_DIR}/OPENCLAW_LLM_PROVIDER"
+echo "${LLAMACPP_BASE_URL}"       > "${S6_ENV_DIR}/OPENCLAW_LLM_BASE_URL"
+echo "${LLAMACPP_API_KEY}"        > "${S6_ENV_DIR}/OPENCLAW_LLM_API_KEY"
+echo "${LLAMACPP_MODEL_NAME}"     > "${S6_ENV_DIR}/OPENCLAW_LLM_MODEL"
+echo "${LLAMACPP_MAX_TOKENS}"     > "${S6_ENV_DIR}/OPENCLAW_LLM_MAX_TOKENS"
+echo "${LLAMACPP_TEMPERATURE}"    > "${S6_ENV_DIR}/OPENCLAW_LLM_TEMPERATURE"
+echo "${CONFIG_FILE}"             > "${S6_ENV_DIR}/OPENCLAW_CONFIG"
+echo "0.0.0.0"                    > "${S6_ENV_DIR}/OPENCLAW_HOST"
 
 # ---------------------------------------------------------------------------
 # Wait for the llama.cpp server to become available

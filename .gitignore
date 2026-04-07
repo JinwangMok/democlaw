@@ -13,3 +13,6 @@ Thumbs.db
 
 # OMC state
 .omc/
+.playwright-mcp/
+screenshots/
+__pycache__/

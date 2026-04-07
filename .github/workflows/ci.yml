@@ -271,7 +271,11 @@ jobs:
           echo "::endgroup::"
 
           echo "✓ Smoke test passed — no missing modules, noVNC responding (HTTP ${NOVNC_CODE})"
-          docker rm -f openclaw-smoke
+          docker rm -f openclaw-smoke 2>/dev/null || true
+
+      - name: Cleanup smoke test container (always)
+        if: always()
+        run: docker rm -f openclaw-smoke 2>/dev/null || true
 
       # MarkItDown: full build (python:3.12-slim base, fast and small).
       - name: Build MarkItDown image (Docker)

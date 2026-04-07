@@ -112,7 +112,6 @@ jobs:
           |------|--------|
           | `openclaw/Dockerfile` | `OPENCLAW_NPM_VERSION` → `${{ needs.check-version.outputs.new_version }}` |
           | `Makefile` | `OPENCLAW_NPM_VERSION` synced |
-          | `scripts/start.sh` | Image tag defaults updated |
 
           CI must pass before auto-merge proceeds.
 
