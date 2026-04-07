@@ -84,19 +84,7 @@ jobs:
           sed -i "s/OPENCLAW_NPM_VERSION ?= .*/OPENCLAW_NPM_VERSION ?= ${NEW_VERSION}/" \
             Makefile
 
-          # Compute next democlaw semver from git tags
-          CURRENT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v2.0.0")
-          MAJOR=$(echo "${CURRENT_TAG}" | sed 's/v//' | cut -d. -f1)
-          MINOR=$(echo "${CURRENT_TAG}" | sed 's/v//' | cut -d. -f2)
-          NEXT_TAG="v${MAJOR}.$((MINOR + 1)).0"
-
-          # Update hardcoded image tag defaults in start.sh
-          sed -i "s|democlaw-llamacpp:v[0-9]*\.[0-9]*\.[0-9]*\"|democlaw-llamacpp:${NEXT_TAG}\"|" \
-            scripts/start.sh
-          sed -i "s|democlaw-openclaw:v[0-9]*\.[0-9]*\.[0-9]*\"|democlaw-openclaw:${NEXT_TAG}\"|" \
-            scripts/start.sh
-
-          echo "NEXT_TAG=${NEXT_TAG}" >> "$GITHUB_ENV"
+          # Note: start.sh uses :latest tag, no sed needed
 
       - name: Create branch, commit, push
         env:
@@ -105,7 +93,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "auto/openclaw-${NEW_VERSION}"
-          git add openclaw/Dockerfile Makefile scripts/start.sh
+          git add openclaw/Dockerfile Makefile
           git commit -m "chore: bump OpenClaw to ${NEW_VERSION}"
           git push -u origin "auto/openclaw-${NEW_VERSION}"
 

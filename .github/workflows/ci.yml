@@ -242,6 +242,7 @@ jobs:
           # Start with minimal config — llama.cpp is not available, so init
           # will timeout on health check. We only need ~30s to detect module errors.
           docker run -d --name openclaw-smoke \
+            -p 16080:6080 -p 18931:8931 \
             -e LLAMACPP_BASE_URL=http://localhost:9999/v1 \
             -e LLAMACPP_HEALTH_RETRIES=3 \
             -e LLAMACPP_HEALTH_INTERVAL=2 \
@@ -249,7 +250,7 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Waiting for startup and checking logs"
-          sleep 30
+          sleep 45
           LOGS=$(docker logs openclaw-smoke 2>&1)
 
           # Check for missing module errors (the pattern that has broken us before)
@@ -259,9 +260,17 @@ jobs:
             docker rm -f openclaw-smoke
             exit 1
           fi
+
+          # Check noVNC is responding on port 6080
+          NOVNC_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:16080/ 2>/dev/null || echo "000")
+          if [ "${NOVNC_CODE}" = "000" ]; then
+            echo "::error::noVNC not responding on port 6080"
+            docker rm -f openclaw-smoke
+            exit 1
+          fi
           echo "::endgroup::"
 
-          echo "✓ Smoke test passed — no missing module errors"
+          echo "✓ Smoke test passed — no missing modules, noVNC responding (HTTP ${NOVNC_CODE})"
           docker rm -f openclaw-smoke
 
       # MarkItDown: full build (python:3.12-slim base, fast and small).

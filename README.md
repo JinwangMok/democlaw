@@ -30,6 +30,8 @@ Container orchestration for running [OpenClaw](https://github.com/openclaw) AI a
 |-----------|---------|-----------|
 | **llama.cpp** | Gemma 4 E4B GGUF via OpenAI-compatible API (CUDA) | `localhost:8000` |
 | **OpenClaw** | AI assistant web dashboard | `localhost:18789` |
+| **OpenClaw** | noVNC web desktop | `localhost:6080` |
+| **OpenClaw** | Playwright MCP endpoint | `localhost:8931` |
 | *MCP sidecars* | Optional tool servers (e.g., MarkItDown) | user-defined |
 
 ## Minimum Requirements
@@ -219,6 +221,55 @@ Or run directly inside the container:
 docker exec democlaw-openclaw openclaw pairing approve discord <CODE>
 ```
 
+## GUI Desktop (noVNC + Playwright MCP)
+
+The OpenClaw container includes a full desktop environment accessible from a browser or VNC client, supervised by s6-overlay.
+
+| Interface | Address | Description |
+|-----------|---------|-------------|
+| **noVNC web client** | `http://localhost:6080/vnc.html` | Browser-based desktop (no client install required) |
+| **VNC direct** | `localhost:5900` | Native VNC client connection |
+| **Playwright MCP** | `localhost:8931` | Browser automation MCP endpoint |
+
+### Process supervision
+
+All GUI services (Xvfb, Openbox, noVNC, Playwright MCP) run under [s6-overlay](https://github.com/just-containers/s6-overlay). If any service crashes it is automatically restarted.
+
+### Port configuration
+
+Override the default ports via environment variables in your `.env` file:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `NOVNC_PORT` | `6080` | Host port for the noVNC web client |
+| `PLAYWRIGHT_MCP_PORT` | `8931` | Host port for the Playwright MCP server |
+
+## Vision (Gemma 4 Multimodal)
+
+DemoClaw supports multimodal vision via Gemma 4's image understanding capability. Vision is enabled by default.
+
+### How it works
+
+When the stack starts, `download-model.sh` (and the llama.cpp entrypoint) automatically downloads the multimodal projector file (`mmproj-BF16.gguf`) alongside the main GGUF weights. llama.cpp loads the projector at startup, enabling image inputs to the model.
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_VISION` | `1` | Set to `0` to skip the mmproj download and disable vision |
+| `MMPROJ_FILE` | `mmproj-BF16.gguf` | Filename of the multimodal projector to download |
+| `IMAGE_TOKENS` | `256` | Token budget per image (`--image-max-tokens` in llama.cpp) |
+| `UBATCH_SIZE` | `512` | Micro-batch size (`--ubatch-size`); increase for faster vision inference |
+
+### Disabling vision
+
+```bash
+# In .env
+ENABLE_VISION=0
+```
+
+With vision disabled, the mmproj file is not downloaded and llama.cpp starts in text-only mode, reducing VRAM usage.
+
 ## MCP (Model Context Protocol) Sidecar
 
 OpenClaw는 MCP 서버를 통해 외부 도구를 사용할 수 있습니다. DemoClaw는 [supergateway](https://github.com/supercorp-ai/supergateway)를 사용하여 별도 컨테이너의 SSE MCP 서버를 OpenClaw에 연결합니다.
@@ -405,6 +456,38 @@ OPENCLAW_WORKSPACE_DIR=C:\Users\YourName\workspace
 - 변수가 설정되지 않으면 볼륨 마운트 없이 실행됩니다 (기본 동작).
 - 지정된 디렉토리가 존재하지 않으면 경고를 출력하고 마운트를 건너뜁니다.
 
+## CI/CD
+
+### Existing checks
+
+Every pull request runs the following GitHub Actions jobs:
+
+| Job | Tool | What it checks |
+|-----|------|---------------|
+| `shellcheck` | ShellCheck | Shell script correctness |
+| `hadolint` | Hadolint | Dockerfile best practices |
+| `docker-build` | Docker Buildx | Image builds successfully |
+| `smoke-test` | docker compose | Stack starts and LLM API responds |
+| `healthcheck` | curl | `/health` endpoint returns 200 |
+
+### Auto-upgrade workflow
+
+A daily cron workflow checks for new llama.cpp and OpenClaw releases. When an upgrade is detected it:
+
+1. Updates the version pins in `Dockerfile` / `docker-compose.yml`.
+2. Opens an auto-PR with the diff.
+3. Merges the PR automatically once all CI checks pass.
+4. Pushes the new image to Docker Hub.
+
+### Required GitHub Secrets
+
+| Secret | Description |
+|--------|-------------|
+| `DOCKERHUB_USERNAME` | Docker Hub account username |
+| `DOCKERHUB_TOKEN` | Docker Hub access token (read/write) |
+
+Set these under **Settings > Secrets and variables > Actions** in your fork before enabling the auto-upgrade workflow.
+
 ## Configuration
 
 All settings are configurable via environment variables. Copy `.env.example` to `.env` and edit:
@@ -426,6 +509,12 @@ Key settings:
 | `MODEL_DIR` | `~/.cache/democlaw/models` | Host model cache directory |
 | `OPENCLAW_DATA_DIR` | *(unset)* | Host directory to persist OpenClaw settings/pairings |
 | `OPENCLAW_WORKSPACE_DIR` | *(unset)* | Host directory to mount into OpenClaw |
+| `ENABLE_VISION` | `1` | Set to `0` to disable multimodal vision and skip mmproj download |
+| `MMPROJ_FILE` | `mmproj-BF16.gguf` | Multimodal projector filename |
+| `IMAGE_TOKENS` | `256` | Token budget per image |
+| `UBATCH_SIZE` | `512` | Micro-batch size for inference |
+| `NOVNC_PORT` | `6080` | Host port for noVNC web client |
+| `PLAYWRIGHT_MCP_PORT` | `8931` | Host port for Playwright MCP server |
 
 See `.env.example` for the full list.
 
