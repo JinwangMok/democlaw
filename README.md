@@ -225,6 +225,10 @@ docker exec democlaw-openclaw openclaw pairing approve discord <CODE>
 
 The OpenClaw container includes a full desktop environment accessible from a browser or VNC client, supervised by s6-overlay.
 
+> **Security note:** VNC and Playwright MCP are exposed without authentication.
+> This is intentional for local demo/development use. Do not expose ports 5900,
+> 6080, or 8931 to untrusted networks.
+
 | Interface | Address | Description |
 |-----------|---------|-------------|
 | **noVNC web client** | `http://localhost:6080/vnc.html` | Browser-based desktop (no client install required) |
