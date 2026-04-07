@@ -157,20 +157,6 @@ jobs:
           echo "oc_version=${OC_VERSION}" >> "$GITHUB_OUTPUT"
           echo "semver=${SEMVER}"         >> "$GITHUB_OUTPUT"
 
-      - name: Check which Dockerfiles changed
-        id: changes
-        run: |
-          if git diff --name-only HEAD~1 2>/dev/null | grep -q '^llamacpp/'; then
-            echo "llamacpp_changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "llamacpp_changed=false" >> "$GITHUB_OUTPUT"
-          fi
-          if git diff --name-only HEAD~1 2>/dev/null | grep -q '^openclaw/'; then
-            echo "openclaw_changed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "openclaw_changed=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
@@ -180,7 +166,6 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push OpenClaw image
-        if: steps.changes.outputs.openclaw_changed == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./openclaw
@@ -192,7 +177,6 @@ jobs:
             jinwangmok/democlaw-openclaw:latest
 
       - name: Build and push llama.cpp image
-        if: steps.changes.outputs.llamacpp_changed == 'true'
         uses: docker/build-push-action@v6
         with:
           context: ./llamacpp
