@@ -107,7 +107,7 @@ RUN case "${TARGETARCH}" in \
 # ---------------------------------------------------------------------------
 RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" supergateway \
     && cd "$(npm root -g)/openclaw" \
-    && npm install --no-fund --no-audit "@buape/carbon@0.0.0-beta-20260327000044" "@larksuiteoapi/node-sdk" \
+    && npm install --no-fund --no-audit --omit=dev \
     && npm cache clean --force
 
 # ---------------------------------------------------------------------------

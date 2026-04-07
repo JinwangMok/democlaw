@@ -232,6 +232,38 @@ jobs:
           echo "::endgroup::"
           echo "✓ OpenClaw image built successfully (Docker)"
 
+      # Smoke test: start the built OpenClaw container and check for missing
+      # npm module errors. This catches optional/peer dependency issues that
+      # pass `docker build` but fail at runtime (e.g., @buape/carbon,
+      # @larksuiteoapi/node-sdk).
+      - name: Smoke test — OpenClaw starts without missing modules
+        run: |
+          echo "::group::Starting OpenClaw container for smoke test"
+          # Start with minimal config — llama.cpp is not available, so init
+          # will timeout on health check. We only need ~30s to detect module errors.
+          docker run -d --name openclaw-smoke \
+            -e LLAMACPP_BASE_URL=http://localhost:9999/v1 \
+            -e LLAMACPP_HEALTH_RETRIES=3 \
+            -e LLAMACPP_HEALTH_INTERVAL=2 \
+            democlaw/openclaw:ci-docker
+          echo "::endgroup::"
+
+          echo "::group::Waiting for startup and checking logs"
+          sleep 30
+          LOGS=$(docker logs openclaw-smoke 2>&1)
+
+          # Check for missing module errors (the pattern that has broken us before)
+          if echo "$LOGS" | grep -qiE "Cannot find module|MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND"; then
+            echo "::error::Missing npm module detected in container logs:"
+            echo "$LOGS" | grep -iE "Cannot find module|MODULE_NOT_FOUND"
+            docker rm -f openclaw-smoke
+            exit 1
+          fi
+          echo "::endgroup::"
+
+          echo "✓ Smoke test passed — no missing module errors"
+          docker rm -f openclaw-smoke
+
       # MarkItDown: full build (python:3.12-slim base, fast and small).
       - name: Build MarkItDown image (Docker)
         run: |
