@@ -38,10 +38,10 @@ if exist "%SCRIPT_DIR%\apply-profile.bat" (
 :: ---------------------------------------------------------------------------
 :: Configuration (matches start.sh defaults; override via environment)
 :: ---------------------------------------------------------------------------
-if not defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=docker.io/jinwangmok/democlaw-llamacpp:v2.0.0"
+if not defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=docker.io/jinwangmok/democlaw-llamacpp:latest"
 if defined DEMOCLAW_LLAMACPP_IMAGE set "LLAMACPP_IMAGE=%DEMOCLAW_LLAMACPP_IMAGE%"
 
-if not defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=docker.io/jinwangmok/democlaw-openclaw:v2.0.0"
+if not defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=docker.io/jinwangmok/democlaw-openclaw:latest"
 if defined DEMOCLAW_OPENCLAW_IMAGE set "OPENCLAW_IMAGE=%DEMOCLAW_OPENCLAW_IMAGE%"
 
 set "NETWORK=democlaw-net"
