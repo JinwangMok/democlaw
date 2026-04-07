@@ -108,6 +108,9 @@ RUN case "${TARGETARCH}" in \
 RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" supergateway \
     && cd "$(npm root -g)/openclaw" \
     && npm install --no-fund --no-audit --omit=dev \
+    && (test -f scripts/postinstall-bundled-plugins.mjs \
+        && node scripts/postinstall-bundled-plugins.mjs \
+        || echo "WARN: postinstall-bundled-plugins.mjs not found, skipping") \
     && npm cache clean --force
 
 # ---------------------------------------------------------------------------
