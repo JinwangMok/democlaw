@@ -1,6 +1,6 @@
 # =============================================================================
 # llama.cpp Server Dockerfile (CUDA backend)
-# Serves Google Gemma 4 GGUF models via OpenAI-compatible API
+# Serves Google Gemma 4 GGUF models via OpenAI-compatible API (with multimodal vision)
 #
 # Supported models (selected via .env / environment variables):
 #   - Gemma 4 E4B Q4_K_M   (~4.7 GB, 8 GB VRAM GPUs)
