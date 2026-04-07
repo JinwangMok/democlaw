@@ -430,31 +430,46 @@ if not defined DASHBOARD_URL (
 )
 
 echo.
-echo [start] ========================================================
-echo [start]   DemoClaw is running!
-echo [start] ========================================================
+echo  ======  ======  =======  =====  ===   ===        =====  ==
+echo  ==   == ==   == ==      ==   == ==== ====       ==   == ==
+echo  ==   == ======  =====   ======= == === == ----- ======= ==
+echo  ==   == ==   == ==      ==   == ==     ==       ==   == ==
+echo  ======  ==   == ======= ==   == ==     ==       ==   == ==
 echo.
-echo [start]   Health-checks passed:
-echo [start]     - llama.cpp /v1/models ... HTTP 200
-echo [start]     - OpenClaw gateway ..... responding
+echo  *~*~--------------------------:==:--------------------------~*~*
 echo.
-echo [start]   Services:
-echo [start]     LLM API  : http://localhost:%LLAMACPP_PORT%/v1
-echo [start]     Engine   : llama.cpp (CUDA)
-echo [start]     Model    : %MODEL_NAME% (%MODEL_REPO%)
-echo [start]     Context  : %CTX_SIZE% tokens
-echo [start]     Runtime  : %RUNTIME%
+echo    ======   == ======= ========
+echo   ==        == ==         ==
+echo   ==   ===  == =======    ==
+echo   ==    ==  ==      ==    ==
+echo    ======   == =======    ==
 echo.
-echo [start]   Web UI Dashboard:
-echo [start]     !DASHBOARD_URL!
+echo  Welcome to GIST Dream AI Lab.
+echo  Gwangju Institute of Science and Technology.
 echo.
-echo !DASHBOARD_URL!
+echo   ____                         ____ _
+echo  ^|  _ \  ___ _ __ ___   ___   / ___^| ^| __ ___      __
+echo  ^| ^| ^| ^|/ _ \ '_ ` _ \ / _ \ ^| ^|   ^| ^|/ _` \ \ /\ / /
+echo  ^| ^|_^| ^|  __/ ^| ^| ^| ^| ^| (_) ^|^| ^|___^| ^| (_^| ^|\ V  V /
+echo  ^|____/ \___^|_^| ^|_^| ^|_^|\___/  \____^|_^|\__,_^| \_/\_/
 echo.
-echo [start]   NOTE: On first connect, click "Connect" in the browser.
-echo [start]         The device pairing is auto-approved within ~2 seconds.
-echo [start]
-echo [start]   Stop with: scripts\stop.bat
-echo [start] ========================================================
+echo  ^>^>^> All systems operational ^<^<^<
+echo.
+echo  ----------------------------------------------------------
+echo   Services
+echo     LLM API  : http://localhost:%LLAMACPP_PORT%/v1
+echo     Engine   : llama.cpp (CUDA)
+echo     Model    : %MODEL_NAME% (%MODEL_REPO%)
+echo     Context  : %CTX_SIZE% tokens
+echo     Runtime  : %RUNTIME%
+echo.
+echo   Dashboard
+echo     !DASHBOARD_URL!
+echo.
+echo   First connect: click "Connect" in the browser.
+echo   Stop: scripts\stop.bat
+echo  ----------------------------------------------------------
+echo.
 
 endlocal
 exit /b 0

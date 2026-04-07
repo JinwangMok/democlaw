@@ -441,28 +441,46 @@ fi
 
 LLM_API_URL="http://localhost:${LLAMACPP_PORT}/v1"
 
-log ""
-log "========================================================"
-log "  DemoClaw is running!"
-log "========================================================"
-log ""
-log "  Health-checks passed:"
-log "    - llama.cpp /v1/models ... HTTP 200"
-log "    - OpenClaw gateway ..... responding"
-log ""
-log "  Services:"
-log "    LLM API  : ${LLM_API_URL}"
-log "    Engine   : llama.cpp (CUDA)"
-log "    Model    : ${MODEL_NAME} (${MODEL_REPO})"
-log "    Context  : ${CTX_SIZE} tokens"
-log "    Runtime  : ${RUNTIME}"
-log ""
-log "  Web UI Dashboard:"
-log "    ${DASHBOARD_URL}"
-log ""
-log "  NOTE: On first connect, click \"Connect\" in the browser."
-log "        The device pairing is auto-approved within ~2 seconds."
-log "        If needed, click \"Connect\" again after approval."
-log ""
-log "  Stop with: ./scripts/stop.sh"
-log "========================================================"
+# --- GIST Dream AI Lab Banner ---
+printf '\n'
+printf ' \033[1;34m ██████  ██████  ███████  █████  ███   ███        █████  ██\033[0m \033[1;33m✦\033[0m\n'
+printf ' \033[1;34m ██   ██ ██   ██ ██      ██   ██ ████ ████       ██   ██ ██\033[0m\n'
+printf ' \033[1;34m ██   ██ ██████  █████   ███████ ██ ███ ██ ───── ███████ ██\033[0m\n'
+printf ' \033[1;34m ██   ██ ██   ██ ██      ██   ██ ██     ██       ██   ██ ██\033[0m\n'
+printf ' \033[1;34m ██████  ██   ██ ███████ ██   ██ ██     ██       ██   ██ ██\033[0m\n'
+printf '\n'
+printf ' \033[0;37m*~*~────────────────────────:══:────────────────────────~*~*\033[0m\n'
+printf '\n'
+printf ' \033[1;31m  ██████ \033[1;37m ██ ███████ ████████\033[0m\n'
+printf ' \033[1;31m ██      \033[1;37m ██ ██         ██\033[0m\n'
+printf ' \033[1;31m ██   ███\033[1;37m ██ ███████    ██\033[0m\n'
+printf ' \033[1;31m ██    ██\033[1;37m ██      ██    ██\033[0m\n'
+printf ' \033[1;31m  ██████ \033[1;37m ██ ███████    ██\033[0m\n'
+printf '\n'
+printf ' \033[0;37m Welcome to GIST Dream AI Lab.\033[0m\n'
+printf ' \033[0;37m Gwangju Institute of Science and Technology.\033[0m\n'
+printf '\n'
+# --- DemoClaw Status ---
+printf ' \033[1;36m ____                         ____ _\033[0m\n'
+printf ' \033[1;36m|  _ \\  ___ _ __ ___   ___   / ___| | __ ___      __\033[0m\n'
+printf ' \033[1;36m| | | |/ _ \\ '"'"'_ ` _ \\ / _ \\ | |   | |/ _` \\ \\ /\\ / /\033[0m\n'
+printf ' \033[1;36m| |_| |  __/ | | | | | (_) || |___| | (_| |\\ V  V /\033[0m\n'
+printf ' \033[1;36m|____/ \\___|_| |_| |_|\\___/  \\____|_|\\__,_| \\_/\\_/\033[0m\n'
+printf '\n'
+printf ' \033[1;32m >>> All systems operational <<<\033[0m\n'
+printf '\n'
+printf ' \033[0;37m──────────────────────────────────────────────────────────\033[0m\n'
+printf '  \033[1;33mServices\033[0m\n'
+printf '    LLM API  : %s\n' "${LLM_API_URL}"
+printf '    Engine   : llama.cpp (CUDA)\n'
+printf '    Model    : %s (%s)\n' "${MODEL_NAME}" "${MODEL_REPO}"
+printf '    Context  : %s tokens\n' "${CTX_SIZE}"
+printf '    Runtime  : %s\n' "${RUNTIME}"
+printf '\n'
+printf '  \033[1;33mDashboard\033[0m\n'
+printf '    %s\n' "${DASHBOARD_URL}"
+printf '\n'
+printf '  \033[0;90mFirst connect: click "Connect" in the browser.\033[0m\n'
+printf '  \033[0;90mStop: ./scripts/stop.sh\033[0m\n'
+printf ' \033[0;37m──────────────────────────────────────────────────────────\033[0m\n'
+printf '\n'
