@@ -1,8 +1,0 @@
-#!/bin/sh
-# Launch Playwright's bundled Chromium as a normal browser
-PW_CHROME=$(find "${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}" -name chrome -type f 2>/dev/null | head -1)
-if [ -z "${PW_CHROME}" ]; then
-    echo "ERROR: Chromium not found in Playwright browsers path" >&2
-    exit 1
-fi
-exec "${PW_CHROME}" --no-sandbox --disable-gpu --disable-dev-shm-usage "$@"

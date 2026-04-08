@@ -1,10 +1,10 @@
 # =============================================================================
-# OpenClaw Container — Ubuntu 24.04 + Node.js + OpenClaw + GUI (VNC/noVNC)
+# OpenClaw Container — Ubuntu 24.04 + Node.js + OpenClaw (Headless)
 # Configured to use llama.cpp as its LLM provider via OpenAI-compatible endpoint
 #
-# GUI stack: Xvfb + openbox + x11vnc + noVNC + Playwright MCP
+# HEADLESS CONFIGURATION — no GUI, no VNC, no browser automation
 # Process supervision: s6-overlay
-# Access: noVNC web client at http://<host>:6080
+# Developer tools: Python 3.13 (uv), npm, sudo, on-demand Homebrew
 #
 # Build arguments (all overridable via --build-arg):
 #   NODE_MAJOR           — Node.js major version to install (default: 22)
@@ -45,9 +45,9 @@ ARG S6_OVERLAY_VERSION
 ARG TARGETARCH
 
 LABEL maintainer="democlaw"
-LABEL description="OpenClaw AI assistant with GUI desktop (VNC/noVNC) and llama.cpp backend"
+LABEL description="OpenClaw AI headless assistant with llama.cpp backend"
 LABEL org.opencontainers.image.title="democlaw-openclaw"
-LABEL org.opencontainers.image.description="OpenClaw AI assistant with GUI desktop and llama.cpp backend"
+LABEL org.opencontainers.image.description="OpenClaw AI headless assistant with llama.cpp backend"
 LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.revision="${GIT_COMMIT}"
@@ -61,7 +61,7 @@ LABEL democlaw.llamacpp-url="${LLAMACPP_BASE_URL}"
 ENV DEBIAN_FRONTEND=noninteractive
 
 # ---------------------------------------------------------------------------
-# Install system dependencies + Node.js + GUI packages
+# Install system dependencies + Node.js (headless — no GUI packages)
 # ---------------------------------------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -70,19 +70,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gnupg \
         jq \
         xz-utils \
-        xvfb \
-        xfce4 \
-        xfce4-terminal \
-        mousepad \
-        thunar \
-        at-spi2-core \
-        x11vnc \
-        x11-utils \
-        novnc \
-        websockify \
-        fonts-liberation \
-        fonts-noto-color-emoji \
-        dbus-x11 \
+        sudo \
+        build-essential \
+        procps \
     && mkdir -p /etc/apt/keyrings \
     && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
         | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
@@ -119,14 +109,6 @@ RUN npm install -g --no-fund --no-audit "openclaw@${OPENCLAW_NPM_VERSION}" super
     && npm cache clean --force
 
 # ---------------------------------------------------------------------------
-# Install Playwright MCP server + Chromium (as root for --with-deps)
-# ---------------------------------------------------------------------------
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-RUN npm install -g --no-fund --no-audit @playwright/mcp@latest \
-    && npx playwright install chromium --with-deps 2>/dev/null || true \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# ---------------------------------------------------------------------------
 # Create non-root user for running the application
 # ---------------------------------------------------------------------------
 RUN if id -u openclaw >/dev/null 2>&1; then \
@@ -139,6 +121,48 @@ RUN if id -u openclaw >/dev/null 2>&1; then \
         groupadd -g 1000 openclaw && \
         useradd -u 1000 -g openclaw -m -s /bin/bash openclaw; \
     fi
+
+# ---------------------------------------------------------------------------
+# Passwordless sudo for openclaw user
+# ---------------------------------------------------------------------------
+RUN echo "openclaw ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/openclaw \
+    && chmod 0440 /etc/sudoers.d/openclaw
+
+# ---------------------------------------------------------------------------
+# Install uv + Python 3.13 (accessible to all users via /opt/python)
+# ---------------------------------------------------------------------------
+ENV UV_PYTHON_INSTALL_DIR=/opt/python
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/bin" sh \
+    && /usr/local/bin/uv python install 3.13 \
+    && PYTHON3="$(/usr/local/bin/uv python find 3.13)" \
+    && ln -sf "${PYTHON3}" /usr/local/bin/python3 \
+    && rm -f "$(dirname "${PYTHON3}")/../lib/python3.13/EXTERNALLY-MANAGED" \
+    && curl -sSL https://bootstrap.pypa.io/get-pip.py | "${PYTHON3}" \
+    && ln -sf "$(dirname "${PYTHON3}")/pip3" /usr/local/bin/pip3 \
+    && ln -sf /usr/local/bin/pip3 /usr/local/bin/pip \
+    && chmod -R a+rX /opt/python
+
+# ---------------------------------------------------------------------------
+# On-demand Homebrew install script (run `install-brew` inside container)
+# ---------------------------------------------------------------------------
+COPY <<'BREWSCRIPT' /usr/local/bin/install-brew
+#!/bin/bash
+set -e
+if command -v brew &>/dev/null; then echo "Homebrew already installed"; exit 0; fi
+NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+echo "Homebrew installed. Run: brew install <package>"
+BREWSCRIPT
+RUN chmod +x /usr/local/bin/install-brew
+
+# ---------------------------------------------------------------------------
+# Configure Claude Code bypassPermissions (auto-approve all tool calls)
+# ---------------------------------------------------------------------------
+RUN mkdir -p /home/openclaw/.claude \
+    && printf '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  }\n}\n' \
+       > /home/openclaw/.claude/settings.json \
+    && chown -R openclaw:openclaw /home/openclaw/.claude
 
 # ---------------------------------------------------------------------------
 # Application configuration
@@ -154,11 +178,10 @@ RUN chmod +x /app/healthcheck.sh \
 # Copy s6-overlay service definitions
 COPY rootfs/ /
 
-# Ensure all s6 scripts and browser launcher are executable
+# Ensure all s6 scripts are executable
 RUN chmod +x /etc/s6-overlay/scripts/* \
     && find /etc/s6-overlay/s6-rc.d -name 'run' -exec chmod +x {} \; \
-    && find /etc/s6-overlay/s6-rc.d -name 'up' -exec chmod +x {} \; \
-    && chmod +x /usr/local/bin/chromium-browser
+    && find /etc/s6-overlay/s6-rc.d -name 'up' -exec chmod +x {} \;
 
 # ---------------------------------------------------------------------------
 # Environment variables
@@ -182,9 +205,6 @@ ENV NODE_ENV="production" \
     OPENCLAW_LLM_MODEL="gemma-4-E4B-it" \
     OPENCLAW_LLM_MAX_TOKENS=4096 \
     OPENCLAW_LLM_TEMPERATURE=0.7 \
-    DISPLAY=":99" \
-    NOVNC_PORT=6080 \
-    PLAYWRIGHT_MCP_PORT=8931 \
     S6_KEEP_ENV=1 \
     S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
     S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0
@@ -194,10 +214,10 @@ ENV NODE_ENV="production" \
 # ---------------------------------------------------------------------------
 USER openclaw
 
-# Expose ports: OpenClaw dashboard + noVNC + VNC + Playwright MCP
-EXPOSE 18789 6080 5900 8931
+# Expose port: OpenClaw dashboard
+EXPOSE 18789
 
-# Healthcheck — verify the dashboard and noVNC are responding
+# Healthcheck — verify the dashboard is responding
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD ["/app/healthcheck.sh"]
 

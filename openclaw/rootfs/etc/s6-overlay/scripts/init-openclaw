@@ -63,7 +63,7 @@ echo "[init-openclaw]   Port     : ${OPENCLAW_PORT}"
 #
 # Exports in a oneshot script die with the process. Write to
 # /run/s6/container_environment/ so s6-overlay injects them into
-# all long-running services (gateway, playwright-mcp, etc.).
+# all long-running services (gateway, etc.).
 # ---------------------------------------------------------------------------
 S6_ENV_DIR="/run/s6/container_environment"
 mkdir -p "${S6_ENV_DIR}"

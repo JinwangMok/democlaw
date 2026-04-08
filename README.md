@@ -29,9 +29,7 @@ Container orchestration for running [OpenClaw](https://github.com/openclaw) AI a
 | Container | Purpose | Host Port |
 |-----------|---------|-----------|
 | **llama.cpp** | Gemma 4 E4B GGUF via OpenAI-compatible API (CUDA) | `localhost:8000` |
-| **OpenClaw** | AI assistant web dashboard | `localhost:18789` |
-| **OpenClaw** | noVNC web desktop | `localhost:6080` |
-| **OpenClaw** | Playwright MCP endpoint | `localhost:8931` |
+| **OpenClaw** | AI assistant web dashboard (headless) | `localhost:18789` |
 | *MCP sidecars* | Optional tool servers (e.g., MarkItDown) | user-defined |
 
 ## Minimum Requirements
@@ -221,32 +219,20 @@ Or run directly inside the container:
 docker exec democlaw-openclaw openclaw pairing approve discord <CODE>
 ```
 
-## GUI Desktop (noVNC + Playwright MCP)
+## Developer Tools
 
-The OpenClaw container includes a full desktop environment accessible from a browser or VNC client, supervised by s6-overlay.
+The OpenClaw container is a headless environment with developer tools pre-installed:
 
-> **Security note:** VNC and Playwright MCP are exposed without authentication.
-> This is intentional for local demo/development use. Do not expose ports 5900,
-> 6080, or 8931 to untrusted networks.
+| Tool | Status | Notes |
+|------|--------|-------|
+| **Python 3.13** | Pre-installed (via uv) | `pip` and `python3` available immediately |
+| **npm** | Pre-installed (Node.js 22) | Available immediately |
+| **Homebrew** | On-demand | Run `install-brew` to install, then `brew install <package>` |
+| **sudo** | NOPASSWD | `sudo` works without password prompts |
 
-| Interface | Address | Description |
-|-----------|---------|-------------|
-| **noVNC web client** | `http://localhost:6080/vnc.html` | Browser-based desktop (no client install required) |
-| **VNC direct** | `localhost:5900` | Native VNC client connection |
-| **Playwright MCP** | `localhost:8931` | Browser automation MCP endpoint |
+### Agent Permissions
 
-### Process supervision
-
-All GUI services (Xvfb, Openbox, noVNC, Playwright MCP) run under [s6-overlay](https://github.com/just-containers/s6-overlay). If any service crashes it is automatically restarted.
-
-### Port configuration
-
-Override the default ports via environment variables in your `.env` file:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NOVNC_PORT` | `6080` | Host port for the noVNC web client |
-| `PLAYWRIGHT_MCP_PORT` | `8931` | Host port for the Playwright MCP server |
+The OpenClaw agent runs in `bypassPermissions` mode (configured via `~/.claude/settings.json`), meaning all tool calls are auto-approved without user confirmation. This is designed for autonomous container operation.
 
 ## Vision (Gemma 4 Multimodal)
 
@@ -517,8 +503,6 @@ Key settings:
 | `MMPROJ_FILE` | `mmproj-BF16.gguf` | Multimodal projector filename |
 | `IMAGE_TOKENS` | `256` | Token budget per image |
 | `UBATCH_SIZE` | `512` | Micro-batch size for inference |
-| `NOVNC_PORT` | `6080` | Host port for noVNC web client |
-| `PLAYWRIGHT_MCP_PORT` | `8931` | Host port for Playwright MCP server |
 
 See `.env.example` for the full list.
 

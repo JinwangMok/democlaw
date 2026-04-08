@@ -1,7 +1,0 @@
-#!/bin/sh
-export DISPLAY=:99
-# Wait for Xvfb to be ready (max 30s)
-n=0; while ! xdpyinfo -display :99 >/dev/null 2>&1; do
-  n=$((n+1)); [ "$n" -ge 60 ] && { echo "svc-x11vnc: Xvfb not ready after 30s" >&2; exit 1; }; sleep 0.5
-done
-exec x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -xkb

@@ -59,8 +59,6 @@ if not defined CTX_SIZE set "CTX_SIZE=131072"
 if not defined N_GPU_LAYERS set "N_GPU_LAYERS=99"
 if not defined FLASH_ATTN set "FLASH_ATTN=1"
 if not defined CACHE_TYPE_K set "CACHE_TYPE_K=q4_0"
-if not defined NOVNC_PORT set "NOVNC_PORT=6080"
-if not defined PLAYWRIGHT_MCP_PORT set "PLAYWRIGHT_MCP_PORT=8931"
 if not defined CACHE_TYPE_V set "CACHE_TYPE_V=q4_0"
 
 :: Ports
@@ -333,8 +331,6 @@ if defined OPENCLAW_WORKSPACE_DIR (
     --restart unless-stopped ^
     -p %OPENCLAW_PORT%:%OPENCLAW_PORT% ^
     -p 18791:18791 ^
-    -p %NOVNC_PORT%:6080 ^
-    -p %PLAYWRIGHT_MCP_PORT%:8931 ^
     %MCPORTER_MOUNT% ^
     %DATA_MOUNT% ^
     %WORKSPACE_MOUNT% ^
