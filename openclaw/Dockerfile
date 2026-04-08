@@ -71,7 +71,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         jq \
         xz-utils \
         xvfb \
-        openbox \
+        xfce4 \
+        xfce4-terminal \
+        mousepad \
+        thunar \
+        at-spi2-core \
         x11vnc \
         x11-utils \
         novnc \
@@ -150,10 +154,11 @@ RUN chmod +x /app/healthcheck.sh \
 # Copy s6-overlay service definitions
 COPY rootfs/ /
 
-# Ensure all s6 scripts are executable
+# Ensure all s6 scripts and browser launcher are executable
 RUN chmod +x /etc/s6-overlay/scripts/* \
     && find /etc/s6-overlay/s6-rc.d -name 'run' -exec chmod +x {} \; \
-    && find /etc/s6-overlay/s6-rc.d -name 'up' -exec chmod +x {} \;
+    && find /etc/s6-overlay/s6-rc.d -name 'up' -exec chmod +x {} \; \
+    && chmod +x /usr/local/bin/chromium-browser
 
 # ---------------------------------------------------------------------------
 # Environment variables
