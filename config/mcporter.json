@@ -1,3 +1,10 @@
 {
-  "servers": {}
+  "servers": {
+    "dicoclerk": {
+      "transport": "sse",
+      "url": "http://dicoclerk:3000/sse",
+      "description": "Discord voice meeting clerk - real-time STT, recording, meeting minutes",
+      "healthcheck": "http://dicoclerk:3000/health"
+    }
+  }
 }
