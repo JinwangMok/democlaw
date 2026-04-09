@@ -143,10 +143,12 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/
     && chmod -R a+rX /opt/python
 
 # ---------------------------------------------------------------------------
-# Install Homebrew (Linuxbrew) — available to all users via /home/linuxbrew
+# Install Homebrew (Linuxbrew) — must run as non-root user
 # ---------------------------------------------------------------------------
-RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
-    && echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /etc/profile.d/homebrew.sh \
+USER openclaw
+RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+USER root
+RUN echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /etc/profile.d/homebrew.sh \
     && chmod +r /etc/profile.d/homebrew.sh
 
 # ---------------------------------------------------------------------------
