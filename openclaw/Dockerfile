@@ -21,7 +21,7 @@
 # Build-time arguments — all have safe defaults for direct docker/podman build
 # ---------------------------------------------------------------------------
 ARG NODE_MAJOR=22
-ARG OPENCLAW_NPM_VERSION=2026.4.5
+ARG OPENCLAW_NPM_VERSION=2026.4.9
 ARG LLAMACPP_BASE_URL=http://llamacpp:8000/v1
 ARG LLAMACPP_MODEL_NAME=gemma-4-E4B-it
 ARG OPENCLAW_PORT=18789
