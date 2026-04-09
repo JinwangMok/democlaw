@@ -30,6 +30,7 @@ Container orchestration for running [OpenClaw](https://github.com/openclaw) AI a
 |-----------|---------|-----------|
 | **llama.cpp** | Gemma 4 E4B GGUF via OpenAI-compatible API (CUDA) | `localhost:8000` |
 | **OpenClaw** | AI assistant web dashboard (headless) | `localhost:18789` |
+| **OpenClaw** | Supergateway SSE endpoint | `localhost:18791` |
 | *MCP sidecars* | Optional tool servers (e.g., MarkItDown) | user-defined |
 
 ## Minimum Requirements
@@ -112,6 +113,34 @@ curl http://localhost:8000/v1/models
 # Windows
 scripts\stop.bat
 ```
+
+### Makefile Shortcuts
+
+셸 스크립트를 직접 실행하는 것이 기본이지만, `make`가 설치되어 있다면 짧은 명령으로도 동일한 작업을 수행할 수 있습니다.
+
+Shell scripts are the primary interface, but if `make` is available you can use shorthand commands instead:
+
+| make | Shell equivalent | Description |
+|------|-----------------|-------------|
+| `make start` | `./scripts/start.sh` | 전체 스택 시작 |
+| `make stop` | `./scripts/stop.sh` | 전체 스택 중지 |
+| `make restart` | stop → start | 스택 재시작 |
+| `make build` | — | 컨테이너 이미지 빌드 (llama.cpp + OpenClaw) |
+| `make build NO_CACHE=1` | — | 캐시 없이 클린 빌드 |
+| `make status` | — | 컨테이너 상태 확인 |
+| `make logs` | — | 최근 50줄 로그 출력 (`SERVICE=llamacpp\|openclaw`) |
+| `make shell SERVICE=openclaw` | — | 컨테이너 셸 접속 |
+| `make benchmark` | `./scripts/benchmark-tps.sh` | LLM 처리량 벤치마크 |
+| `make validate` | `./scripts/validate-e2e.sh` | E2E 검증 파이프라인 |
+| `make clean` | — | 컨테이너 + 이미지 제거 (모델 캐시 보존) |
+| `make help` | — | 전체 타겟 목록 출력 |
+
+```bash
+# 예시: podman 사용 시
+make start CONTAINER_RUNTIME=podman
+```
+
+> **Note:** `make`가 없어도 `scripts/` 디렉토리의 셸 스크립트로 동일하게 사용할 수 있습니다. Makefile은 편의용 래퍼입니다.
 
 ## Use Cases
 
@@ -227,7 +256,7 @@ The OpenClaw container is a headless environment with developer tools pre-instal
 |------|--------|-------|
 | **Python 3.13** | Pre-installed (via uv) | `pip` and `python3` available immediately |
 | **npm** | Pre-installed (Node.js 22) | Available immediately |
-| **Homebrew** | On-demand | Run `install-brew` to install, then `brew install <package>` |
+| **Homebrew** | Pre-installed | `brew install <package>` available immediately |
 | **sudo** | NOPASSWD | `sudo` works without password prompts |
 
 ### Agent Permissions
@@ -528,7 +557,7 @@ democlaw/
 ├── examples/skills/    # Custom OpenClaw skill templates
 ├── docs/               # API and config reference
 ├── .env.example        # Environment configuration template
-└── Makefile            # Container lifecycle targets
+└── Makefile            # make 숏컷 (start/stop/build/logs 등 → scripts/ 래퍼)
 ```
 
 ## License

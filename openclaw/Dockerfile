@@ -4,7 +4,7 @@
 #
 # HEADLESS CONFIGURATION — no GUI, no VNC, no browser automation
 # Process supervision: s6-overlay
-# Developer tools: Python 3.13 (uv), npm, sudo, on-demand Homebrew
+# Developer tools: Python 3.13 (uv), npm, sudo, Homebrew
 #
 # Build arguments (all overridable via --build-arg):
 #   NODE_MAJOR           — Node.js major version to install (default: 22)
@@ -143,18 +143,11 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="/usr/local/
     && chmod -R a+rX /opt/python
 
 # ---------------------------------------------------------------------------
-# On-demand Homebrew install script (run `install-brew` inside container)
+# Install Homebrew (Linuxbrew) — available to all users via /home/linuxbrew
 # ---------------------------------------------------------------------------
-COPY <<'BREWSCRIPT' /usr/local/bin/install-brew
-#!/bin/bash
-set -e
-if command -v brew &>/dev/null; then echo "Homebrew already installed"; exit 0; fi
-NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-echo "Homebrew installed. Run: brew install <package>"
-BREWSCRIPT
-RUN chmod +x /usr/local/bin/install-brew
+RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+    && echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /etc/profile.d/homebrew.sh \
+    && chmod +r /etc/profile.d/homebrew.sh
 
 # ---------------------------------------------------------------------------
 # Configure Claude Code bypassPermissions (auto-approve all tool calls)
