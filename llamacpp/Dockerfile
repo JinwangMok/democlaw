@@ -16,9 +16,9 @@
 #   - nvidia-container-toolkit (for Docker)
 #
 # Build arguments (all overridable via --build-arg):
-#   CUDA_VERSION        — CUDA toolkit version tag       (default: 12.6.3)
+#   CUDA_VERSION        — CUDA toolkit version tag       (default: 12.8.1)
 #   LLAMA_CPP_TAG       — llama.cpp git tag/branch       (default: master)
-#   CUDA_ARCHITECTURES  — SM arch for the target GPU     (default: 86)
+#   CUDA_ARCHITECTURES  — SM archs for target GPUs       (default: 86;89;120)
 #   VERSION             — image version label            (default: dev)
 #   BUILD_DATE          — ISO-8601 build timestamp       (default: unknown)
 #   GIT_COMMIT          — short git SHA                  (default: unknown)
@@ -27,9 +27,9 @@
 # ---------------------------------------------------------------------------
 # Build-time arguments
 # ---------------------------------------------------------------------------
-ARG CUDA_VERSION=12.6.3
+ARG CUDA_VERSION=12.8.1
 ARG LLAMA_CPP_TAG=master
-ARG CUDA_ARCHITECTURES=86
+ARG CUDA_ARCHITECTURES="86;89;120"
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
 ARG GIT_COMMIT=unknown
