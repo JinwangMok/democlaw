@@ -124,16 +124,15 @@ jobs:
           gh pr merge --auto --squash "${PR_URL}"
 
   # -------------------------------------------------------------------------
-  # Job 3: Build multi-arch images and push to Docker Hub
-  #         Triggered on push to master (after auto-merge or manual merge)
+  # Job 3a: Build and push OpenClaw image to Docker Hub
   # -------------------------------------------------------------------------
-  docker-push:
+  docker-push-openclaw:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # full history for git describe
+          fetch-depth: 0
 
       - name: Compute image tags
         id: tags
@@ -162,6 +161,35 @@ jobs:
             jinwangmok/democlaw-openclaw:${{ steps.tags.outputs.semver }}
             jinwangmok/democlaw-openclaw:oc-${{ steps.tags.outputs.oc_version }}
             jinwangmok/democlaw-openclaw:latest
+
+  # -------------------------------------------------------------------------
+  # Job 3b: Build and push llama.cpp image to Docker Hub
+  #         Separate job to avoid sharing the 6-hour limit with OpenClaw.
+  #         CUDA_ARCHITECTURES are auto-detected per platform in the Dockerfile:
+  #           amd64 → sm_86;89 (Ampere + Ada)
+  #           arm64 → sm_120 (Blackwell / DGX Spark)
+  # -------------------------------------------------------------------------
+  docker-push-llamacpp:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          SEMVER=$(git describe --tags --abbrev=0 2>/dev/null || echo "v2.0.0")
+          echo "semver=${SEMVER}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push llama.cpp image
         uses: docker/build-push-action@v6

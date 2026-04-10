@@ -18,7 +18,7 @@
 # Build arguments (all overridable via --build-arg):
 #   CUDA_VERSION        — CUDA toolkit version tag       (default: 12.8.1)
 #   LLAMA_CPP_TAG       — llama.cpp git tag/branch       (default: master)
-#   CUDA_ARCHITECTURES  — SM archs for target GPUs       (default: 86;89;120)
+#   CUDA_ARCHITECTURES  — SM archs for target GPUs       (auto-detected per platform)
 #   VERSION             — image version label            (default: dev)
 #   BUILD_DATE          — ISO-8601 build timestamp       (default: unknown)
 #   GIT_COMMIT          — short git SHA                  (default: unknown)
@@ -29,7 +29,6 @@
 # ---------------------------------------------------------------------------
 ARG CUDA_VERSION=12.8.1
 ARG LLAMA_CPP_TAG=master
-ARG CUDA_ARCHITECTURES="86;89;120"
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
 ARG GIT_COMMIT=unknown
@@ -40,7 +39,7 @@ ARG GIT_COMMIT=unknown
 FROM docker.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS builder
 
 ARG LLAMA_CPP_TAG
-ARG CUDA_ARCHITECTURES
+ARG TARGETARCH
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         cmake git build-essential libcurl4-openssl-dev pkg-config \
@@ -54,12 +53,17 @@ WORKDIR /build
 # injected via nvidia-container-toolkit.
 ENV LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
 
-RUN git clone --depth 1 --branch "${LLAMA_CPP_TAG}" \
+# Select CUDA SM architectures per CPU platform:
+#   amd64 → sm_86 (Ampere) + sm_89 (Ada Lovelace) — consumer GPUs
+#   arm64 → sm_120 (Blackwell) — DGX Spark GB10
+RUN CUDA_ARCHS="86;89"; \
+    if [ "${TARGETARCH}" = "arm64" ]; then CUDA_ARCHS="120"; fi \
+    && git clone --depth 1 --branch "${LLAMA_CPP_TAG}" \
         https://github.com/ggerganov/llama.cpp.git . \
     && cmake -B build \
         -DGGML_CUDA=ON \
         -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHITECTURES}" \
+        -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
         -DCMAKE_EXE_LINKER_FLAGS="-Wl,--allow-shlib-undefined" \
     && cmake --build build --config Release -j"$(nproc)" --target llama-server
 
