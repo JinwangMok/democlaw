@@ -122,10 +122,16 @@ _run "curl -s --max-time 3 http://localhost:8000/v1/models | head -c 400 ; echo"
     env_present=$([ -f "${REPO_ROOT}/.env" ] && echo "yes" || echo "no")
     echo "repo  : ${git_branch}@${git_head}  .env=${env_present}"
 
-    # toolkit
+    # toolkit — try docker then sudo docker, fall back to podman
     toolkit=$(command -v nvidia-ctk >/dev/null 2>&1 && echo present || echo missing)
     runtimes=$(docker info 2>/dev/null | awk -F': ' '/Runtimes:/ {print $2; exit}')
-    echo "toolkit: nvidia-ctk=${toolkit}  docker.Runtimes=${runtimes:-unknown}"
+    if [ -z "${runtimes}" ] && command -v sudo >/dev/null 2>&1; then
+        runtimes=$(sudo -n docker info 2>/dev/null | awk -F': ' '/Runtimes:/ {print $2; exit}')
+    fi
+    if [ -z "${runtimes}" ] && command -v podman >/dev/null 2>&1; then
+        runtimes="podman:$(podman info --format '{{.Host.OCIRuntime.Name}}' 2>/dev/null || echo unknown)"
+    fi
+    echo "toolkit: nvidia-ctk=${toolkit}  runtime=${runtimes:-unknown}"
 
     # vllm container
     c_status=$(docker inspect democlaw-vllm --format '{{.State.Status}}' 2>/dev/null || echo "absent")
@@ -158,9 +164,49 @@ _run "curl -s --max-time 3 http://localhost:8000/v1/models | head -c 400 ; echo"
     models=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:8000/v1/models 2>/dev/null)
     echo "http  : /health=${health:-000}  /v1/models=${models:-000}"
 
-    # NVMe presence
+    # NVMe presence (raw list from /proc/mounts, for visibility)
     nvme=$(awk '$1 ~ /^\/dev\/nvme/ {print $2}' /proc/mounts 2>/dev/null | paste -sd',' -)
     echo "nvme  : ${nvme:-none}"
+
+    # Recommended MODEL_DIR — mirror apply-profile.sh's picker so the user
+    # can see exactly what the next ./scripts/start.sh run will choose.
+    pick=""
+    if [ -r /proc/mounts ]; then
+        while read -r src tgt rest; do
+            case "${src}" in /dev/nvme*) ;; *) continue ;; esac
+            case "${tgt}" in /tmp|/tmp/*|/etc|/etc/*|/dev|/dev/*|/var|/var/*|/run|/run/*|/proc|/proc/*|/sys|/sys/*|/boot|/boot/*|/efi|/efi/*) continue ;; esac
+            [ -d "${tgt}" ] || continue
+            [ -w "${tgt}" ] || continue
+            # preference ordering
+            for pref in /data /mnt/nvme /mnt/data /scratch /fast /workspace /home/user /home; do
+                if [ "${tgt}" = "${pref}" ] || [ "${tgt#${pref}/}" != "${tgt}" ]; then
+                    pick="${tgt}"; break 2
+                fi
+            done
+            [ -z "${pick}" ] && pick="${tgt}"
+        done < /proc/mounts
+    fi
+    if [ -z "${pick}" ]; then
+        for pref in /data /mnt/nvme /mnt/data /scratch /fast /workspace /home/user; do
+            if [ -d "${pref}" ] && [ -w "${pref}" ]; then pick="${pref}"; break; fi
+        done
+    fi
+    if [ -n "${pick}" ]; then
+        free=$(df -h --output=avail "${pick}" 2>/dev/null | tail -1 | tr -d ' ')
+        echo "recommend: ${pick%/}/democlaw/models  (avail=${free:-?})"
+    else
+        echo "recommend: <none>  .env or DEMOCLAW_MODEL_DIR override required"
+    fi
+
+    # Free space on common candidates (single line, comma-separated)
+    spaces=""
+    for p in /data /home/user /home /mnt /scratch /workspace /root; do
+        if [ -d "${p}" ]; then
+            avail=$(df -h --output=avail "${p}" 2>/dev/null | tail -1 | tr -d ' ')
+            [ -n "${avail}" ] && spaces="${spaces}${spaces:+, }${p}=${avail}"
+        fi
+    done
+    echo "space : ${spaces:-unknown}"
 
     echo "report: ${REPORT}"
     echo "=============================================="

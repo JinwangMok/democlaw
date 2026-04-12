@@ -170,26 +170,81 @@ _resolve_dgx_spark_model_dir() {
         _profile_log "Found existing cache at ${parent} but it is not writable; skipping."
     fi
 
-    # 2. First writable NVMe mount point (DGX Spark typical NVMe layout).
-    if [ -r /proc/mounts ]; then
-        local nvme_mount
-        nvme_mount=$(awk '$1 ~ /^\/dev\/nvme/ && $2 !~ /^\/(boot|efi)/ {print $2; exit}' /proc/mounts 2>/dev/null)
-        if [ -n "${nvme_mount}" ] && [ -w "${nvme_mount}" ]; then
-            MODEL_DIR="${nvme_mount}/democlaw/models"
-            _profile_log "MODEL_DIR auto-detected on NVMe mount: ${MODEL_DIR}"
-            return 0
-        fi
-    fi
+    # 2. First *usable* writable NVMe-backed mount from /proc/mounts.
+    #
+    # On bare-metal DGX OS this surfaces /data or /mnt/nvmeX. Inside a
+    # Kubernetes pod it often surfaces a mix of /tmp, /home/user, /etc/*,
+    # /var/lib/containers, etc. — we must filter the obviously-wrong ones
+    # before grabbing the first survivor, otherwise a 50+ GB model would
+    # land on tmpfs-like paths and thrash the node.
+    #
+    # Rejection rules:
+    #   - single-file bind mounts (not directories) — e.g. /etc/hosts
+    #   - ephemeral or system paths — /tmp, /etc, /dev, /var, /run, /proc,
+    #     /sys, /boot, /efi
+    #   - read-only filesystems
+    #
+    # After filtering, prefer a handful of well-known prefixes if available.
+    _resolve_dgx_spark_model_dir_pick_nvme() {
+        local src tgt rest
+        local -a candidates=()
+        local bad_re='^/(tmp|etc|dev|var|run|proc|sys|boot|efi)(/|$)'
 
-    # 3. /data/models if /data exists and is writable (DGX OS convention).
-    if [ -d /data ] && [ -w /data ]; then
-        MODEL_DIR="/data/models"
-        _profile_log "MODEL_DIR set to /data/models (DGX OS default)"
+        [ -r /proc/mounts ] || return 1
+
+        while read -r src tgt rest; do
+            case "${src}" in
+                /dev/nvme*) ;;
+                *) continue ;;
+            esac
+            [[ "${tgt}" =~ ${bad_re} ]] && continue
+            [ -d "${tgt}" ] || continue
+            [ -w "${tgt}" ] || continue
+            candidates+=("${tgt}")
+        done < /proc/mounts
+
+        [ "${#candidates[@]}" -eq 0 ] && return 1
+
+        # Preference order: explicit data/nvme/scratch first, then anything.
+        local prefer
+        for prefer in /data /mnt/nvme /mnt/data /scratch /fast /workspace /home/user /home; do
+            local c
+            for c in "${candidates[@]}"; do
+                if [ "${c}" = "${prefer}" ] || [[ "${c}" == "${prefer}/"* ]]; then
+                    printf '%s\n' "${c}"
+                    return 0
+                fi
+            done
+        done
+
+        # No preferred match — return the first survivor.
+        printf '%s\n' "${candidates[0]}"
+        return 0
+    }
+
+    local nvme_mount
+    nvme_mount=$(_resolve_dgx_spark_model_dir_pick_nvme || true)
+    if [ -n "${nvme_mount}" ]; then
+        MODEL_DIR="${nvme_mount%/}/democlaw/models"
+        _profile_log "MODEL_DIR auto-selected on NVMe mount: ${MODEL_DIR}"
+        unset -f _resolve_dgx_spark_model_dir_pick_nvme
         return 0
     fi
+    unset -f _resolve_dgx_spark_model_dir_pick_nvme
+
+    # 3. Well-known prefixes even without NVMe evidence (k8s pods may not
+    #    expose /dev/nvme* in /proc/mounts when using CSI-backed PVCs).
+    local prefer_dir
+    for prefer_dir in /data /mnt/nvme /mnt/data /scratch /fast /workspace /home/user; do
+        if [ -d "${prefer_dir}" ] && [ -w "${prefer_dir}" ]; then
+            MODEL_DIR="${prefer_dir%/}/democlaw/models"
+            _profile_log "MODEL_DIR auto-selected by preferred prefix: ${MODEL_DIR}"
+            return 0
+        fi
+    done
 
     # 4. Last resort: let start.sh fall back to ${HOME}/.cache/democlaw/models.
-    _profile_log "MODEL_DIR auto-detection found no NVMe/shared cache."
+    _profile_log "MODEL_DIR auto-detection found no fast-storage candidate."
     _profile_log "Will fall back to \${HOME}/.cache/democlaw/models in start.sh."
     return 0
 }
