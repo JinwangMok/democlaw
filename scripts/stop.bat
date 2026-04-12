@@ -37,7 +37,7 @@ if not defined RUNTIME (
 echo [stop] Runtime: %RUNTIME%
 
 :: Remove containers (openclaw first, then llamacpp)
-for %%c in (democlaw-openclaw democlaw-llamacpp markitdown) do (
+for %%c in (democlaw-openclaw democlaw-llamacpp democlaw-vllm markitdown) do (
     %RUNTIME% container inspect "%%c" >nul 2>&1
     if !errorlevel! equ 0 (
         echo [stop] Removing container '%%c' ...

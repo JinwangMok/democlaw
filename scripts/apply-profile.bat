@@ -96,6 +96,7 @@ if "!HARDWARE_PROFILE!"=="dgx_spark" (
 :apply_consumer_gpu
 echo [apply-profile] Applying profile: Gemma 4 E4B ^(consumer GPU / 8GB VRAM^)
 
+if not defined LLM_ENGINE             set "LLM_ENGINE=llamacpp"
 if not defined MODEL_REPO              set "MODEL_REPO=unsloth/gemma-4-E4B-it-GGUF"
 if not defined MODEL_FILE              set "MODEL_FILE=gemma-4-E4B-it-Q4_K_M.gguf"
 if not defined MODEL_NAME              set "MODEL_NAME=gemma-4-E4B-it"
@@ -117,20 +118,29 @@ goto :print_summary
 :apply_dgx_spark
 echo [apply-profile] Applying profile: Gemma 4 26B A4B MoE ^(DGX Spark / 128GB^)
 
+if not defined LLM_ENGINE             set "LLM_ENGINE=vllm"
+if not defined VLLM_IMAGE             set "VLLM_IMAGE=vllm/vllm-openai:gemma4-cu130"
+if not defined VLLM_MODEL_ID          set "VLLM_MODEL_ID=google/gemma-4-26B-A4B-it"
+if not defined VLLM_PORT              set "VLLM_PORT=8000"
+if not defined VLLM_GPU_MEM_UTIL      set "VLLM_GPU_MEM_UTIL=0.70"
+if not defined VLLM_QUANTIZATION      set "VLLM_QUANTIZATION=fp8"
+if not defined VLLM_EXTRA_ARGS        set "VLLM_EXTRA_ARGS=--kv-cache-dtype fp8 --load-format safetensors --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-prefix-caching --enable-chunked-prefill --max-num-seqs 4 --max-num-batched-tokens 8192"
+if not defined VLLM_MAX_MODEL_LEN     set "VLLM_MAX_MODEL_LEN=262144"
+if not defined VLLM_HEALTH_TIMEOUT    set "VLLM_HEALTH_TIMEOUT=3600"
+if not defined MODEL_NAME              set "MODEL_NAME=gemma-4-26B-A4B-it"
+if not defined MIN_VRAM_MIB            set "MIN_VRAM_MIB=16000"
+if not defined MIN_DRIVER_VERSION      set "MIN_DRIVER_VERSION=550.0"
+if not defined LLAMACPP_MODEL_NAME     set "LLAMACPP_MODEL_NAME=gemma-4-26B-A4B-it"
+if not defined LLAMACPP_MAX_TOKENS     set "LLAMACPP_MAX_TOKENS=8192"
+if not defined LLAMACPP_TEMPERATURE    set "LLAMACPP_TEMPERATURE=0.7"
 if not defined MODEL_REPO              set "MODEL_REPO=unsloth/gemma-4-26B-A4B-it-GGUF"
 if not defined MODEL_FILE              set "MODEL_FILE=gemma-4-26B-A4B-it-Q8_0.gguf"
-if not defined MODEL_NAME              set "MODEL_NAME=gemma-4-26B-A4B-it"
 if not defined CTX_SIZE                set "CTX_SIZE=262144"
 if not defined N_GPU_LAYERS            set "N_GPU_LAYERS=99"
 if not defined FLASH_ATTN              set "FLASH_ATTN=1"
 if not defined CACHE_TYPE_K            set "CACHE_TYPE_K=q8_0"
 if not defined CACHE_TYPE_V            set "CACHE_TYPE_V=q8_0"
-if not defined MIN_VRAM_MIB            set "MIN_VRAM_MIB=16000"
-if not defined MIN_DRIVER_VERSION      set "MIN_DRIVER_VERSION=550.0"
-if not defined LLAMACPP_MODEL_NAME     set "LLAMACPP_MODEL_NAME=gemma-4-26B-A4B-it"
-if not defined LLAMACPP_MAX_TOKENS     set "LLAMACPP_MAX_TOKENS=8192"
 if not defined LLAMACPP_HEALTH_TIMEOUT set "LLAMACPP_HEALTH_TIMEOUT=1800"
-if not defined LLAMACPP_TEMPERATURE    set "LLAMACPP_TEMPERATURE=0.7"
 
 goto :print_summary
 
@@ -138,9 +148,16 @@ goto :print_summary
 :: Print summary
 :: ---------------------------------------------------------------------------
 :print_summary
-echo [apply-profile]   Model     : !MODEL_REPO!/!MODEL_FILE!
-echo [apply-profile]   Context   : !CTX_SIZE! tokens
-echo [apply-profile]   KV cache  : K=!CACHE_TYPE_K!, V=!CACHE_TYPE_V!
+if "!LLM_ENGINE!"=="vllm" (
+    echo [apply-profile]   Engine    : vLLM ^(FP8 online quantization^)
+    echo [apply-profile]   Image     : !VLLM_IMAGE!
+    echo [apply-profile]   Model     : !VLLM_MODEL_ID!
+    echo [apply-profile]   Context   : !VLLM_MAX_MODEL_LEN! tokens
+) else (
+    echo [apply-profile]   Model     : !MODEL_REPO!/!MODEL_FILE!
+    echo [apply-profile]   Context   : !CTX_SIZE! tokens
+    echo [apply-profile]   KV cache  : K=!CACHE_TYPE_K!, V=!CACHE_TYPE_V!
+)
 echo [apply-profile]   Min VRAM  : !MIN_VRAM_MIB! MiB
 echo [apply-profile] ========================================
 
@@ -149,6 +166,15 @@ echo [apply-profile] ========================================
 :: ---------------------------------------------------------------------------
 endlocal & (
     set "HARDWARE_PROFILE=%HARDWARE_PROFILE%"
+    set "LLM_ENGINE=%LLM_ENGINE%"
+    set "VLLM_IMAGE=%VLLM_IMAGE%"
+    set "VLLM_MODEL_ID=%VLLM_MODEL_ID%"
+    set "VLLM_PORT=%VLLM_PORT%"
+    set "VLLM_GPU_MEM_UTIL=%VLLM_GPU_MEM_UTIL%"
+    set "VLLM_QUANTIZATION=%VLLM_QUANTIZATION%"
+    set "VLLM_EXTRA_ARGS=%VLLM_EXTRA_ARGS%"
+    set "VLLM_MAX_MODEL_LEN=%VLLM_MAX_MODEL_LEN%"
+    set "VLLM_HEALTH_TIMEOUT=%VLLM_HEALTH_TIMEOUT%"
     set "MODEL_REPO=%MODEL_REPO%"
     set "MODEL_FILE=%MODEL_FILE%"
     set "MODEL_NAME=%MODEL_NAME%"

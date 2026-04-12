@@ -34,7 +34,7 @@ log "Runtime: ${RUNTIME}"
 # ---------------------------------------------------------------------------
 # Remove containers (order: openclaw first, then llamacpp)
 # ---------------------------------------------------------------------------
-for cname in democlaw-openclaw democlaw-llamacpp markitdown; do
+for cname in democlaw-openclaw democlaw-llamacpp democlaw-vllm markitdown; do
     if "${RUNTIME}" container inspect "${cname}" >/dev/null 2>&1; then
         log "Removing container '${cname}' ..."
         "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true

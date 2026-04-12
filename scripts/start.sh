@@ -52,6 +52,21 @@ OPENCLAW_IMAGE="${DEMOCLAW_OPENCLAW_IMAGE:-docker.io/jinwangmok/democlaw-opencla
 NETWORK="democlaw-net"
 LLAMACPP_CONTAINER="democlaw-llamacpp"
 OPENCLAW_CONTAINER="democlaw-openclaw"
+VLLM_CONTAINER="democlaw-vllm"
+
+# LLM engine selection — set by apply-profile.sh based on hardware detection.
+# vllm = vLLM (DGX Spark), llamacpp = llama.cpp (consumer GPU)
+LLM_ENGINE="${LLM_ENGINE:-llamacpp}"
+
+# vLLM config — defaults set by apply-profile.sh for DGX Spark.
+VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:gemma4-cu130}"
+VLLM_MODEL_ID="${VLLM_MODEL_ID:-google/gemma-4-26B-A4B-it}"
+VLLM_PORT="${VLLM_PORT:-8000}"
+VLLM_GPU_MEM_UTIL="${VLLM_GPU_MEM_UTIL:-0.70}"
+VLLM_QUANTIZATION="${VLLM_QUANTIZATION:-fp8}"
+VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:---kv-cache-dtype fp8 --load-format safetensors --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-prefix-caching --enable-chunked-prefill --max-num-seqs 4 --max-num-batched-tokens 8192}"
+VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-262144}"
+VLLM_HEALTH_TIMEOUT="${VLLM_HEALTH_TIMEOUT:-3600}"
 
 # Model config — defaults now set by apply-profile.sh based on hardware detection.
 # These fallbacks are only reached if apply-profile.sh was not sourced.
@@ -66,7 +81,8 @@ FLASH_ATTN="${FLASH_ATTN:-1}"
 CACHE_TYPE_K="${CACHE_TYPE_K:-q4_0}"
 CACHE_TYPE_V="${CACHE_TYPE_V:-q4_0}"
 
-# Ports
+# Ports — LLM port is 8000 for both engines
+LLM_PORT="8000"
 LLAMACPP_PORT="8000"
 OPENCLAW_PORT="18789"
 
@@ -116,8 +132,13 @@ log "========================================================"
 log "  DemoClaw Stack -- Full E2E Startup"
 log "========================================================"
 log "Runtime: ${RUNTIME}"
-log "Engine : llama.cpp (CUDA backend)"
-log "Model  : ${MODEL_NAME} (GGUF Q4_K_M)"
+if [ "${LLM_ENGINE}" = "vllm" ]; then
+    log "Engine : vLLM (FP8 quantization)"
+    log "Model  : ${VLLM_MODEL_ID}"
+else
+    log "Engine : llama.cpp (CUDA backend)"
+    log "Model  : ${MODEL_NAME} (GGUF)"
+fi
 
 # ---------------------------------------------------------------------------
 # Validate NVIDIA GPU
@@ -133,7 +154,7 @@ log "NVIDIA GPU OK."
 log ""
 log "--- Phase 0: Cleanup ---"
 
-for cname in "${OPENCLAW_CONTAINER}" "${LLAMACPP_CONTAINER}"; do
+for cname in "${OPENCLAW_CONTAINER}" "${LLAMACPP_CONTAINER}" "${VLLM_CONTAINER}"; do
     if "${RUNTIME}" container inspect "${cname}" >/dev/null 2>&1; then
         log "Removing old container '${cname}' ..."
         "${RUNTIME}" rm -f "${cname}" >/dev/null 2>&1 || true
@@ -157,89 +178,147 @@ _img_warn()  { log "WARNING: $*"; }
 _img_error() { error "$@"; }
 source "${SCRIPT_DIR}/reference/image.sh"
 
-ensure_image "${LLAMACPP_IMAGE}" "${PROJECT_ROOT}/llamacpp"
+if [ "${LLM_ENGINE}" = "vllm" ]; then
+    log "Pulling vLLM image '${VLLM_IMAGE}' ..."
+    "${RUNTIME}" pull "${VLLM_IMAGE}" || error "Failed to pull vLLM image: ${VLLM_IMAGE}"
+else
+    ensure_image "${LLAMACPP_IMAGE}" "${PROJECT_ROOT}/llamacpp"
+fi
 ensure_image "${OPENCLAW_IMAGE}" "${PROJECT_ROOT}/openclaw"
 
 log "Images ready."
 
 # ===========================================================================
-# Phase 2: Create network + start llama.cpp
+# Phase 2: Create network + start LLM engine
 # ===========================================================================
 log ""
-log "--- Phase 2: Start llama.cpp ---"
+log "--- Phase 2: Start LLM engine (${LLM_ENGINE}) ---"
 
 log "Creating network '${NETWORK}' ..."
 "${RUNTIME}" network create "${NETWORK}" || error "Failed to create network."
 
 mkdir -p "${MODEL_DIR}"
 
-log "Starting llama.cpp container ..."
-log "  Model      : ${MODEL_REPO}/${MODEL_FILE}"
-log "  Context    : ${CTX_SIZE} tokens"
-log "  GPU layers : ${N_GPU_LAYERS}"
-log "  Flash attn : ${FLASH_ATTN}"
-log "  KV cache   : K=${CACHE_TYPE_K}, V=${CACHE_TYPE_V}"
-log "  Model dir  : ${MODEL_DIR}"
+# --- Container name and network alias depend on engine ---
+if [ "${LLM_ENGINE}" = "vllm" ]; then
+    LLM_CONTAINER="${VLLM_CONTAINER}"
+    LLM_ALIAS="vllm"
+    LLM_HEALTH_TIMEOUT="${VLLM_HEALTH_TIMEOUT}"
+else
+    LLM_CONTAINER="${LLAMACPP_CONTAINER}"
+    LLM_ALIAS="llamacpp"
+    LLM_HEALTH_TIMEOUT="${LLAMACPP_HEALTH_TIMEOUT}"
+fi
 
-MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
-    --name "${LLAMACPP_CONTAINER}" \
-    --network "${NETWORK}" \
-    "${HOSTNAME_LLM[@]}" \
-    --network-alias llamacpp \
-    "${GPU_FLAGS[@]}" \
-    --restart unless-stopped \
-    "${SHM_FLAGS[@]}" \
-    -p "${LLAMACPP_PORT}:${LLAMACPP_PORT}" \
-    -v "${MODEL_DIR}:/models:rw" \
-    -e "MODEL_PATH=/models/${MODEL_FILE}" \
-    -e "MODEL_REPO=${MODEL_REPO}" \
-    -e "MODEL_FILE=${MODEL_FILE}" \
-    -e "MODEL_ALIAS=${MODEL_NAME}" \
-    -e "LLAMA_HOST=0.0.0.0" \
-    -e "LLAMA_PORT=${LLAMACPP_PORT}" \
-    -e "CTX_SIZE=${CTX_SIZE}" \
-    -e "N_GPU_LAYERS=${N_GPU_LAYERS}" \
-    -e "FLASH_ATTN=${FLASH_ATTN}" \
-    -e "CACHE_TYPE_K=${CACHE_TYPE_K}" \
-    -e "CACHE_TYPE_V=${CACHE_TYPE_V}" \
-    -e "AUTO_DETECT_MODEL=0" \
-    "${LLAMACPP_IMAGE}" || error "Failed to start llama.cpp container."
+if [ "${LLM_ENGINE}" = "vllm" ]; then
+    # -----------------------------------------------------------------------
+    # vLLM engine (DGX Spark)
+    # -----------------------------------------------------------------------
+    log "Starting vLLM container ..."
+    log "  Model      : ${VLLM_MODEL_ID}"
+    log "  Quant      : ${VLLM_QUANTIZATION}"
+    log "  GPU mem    : ${VLLM_GPU_MEM_UTIL}"
+    log "  Context    : ${VLLM_MAX_MODEL_LEN} tokens"
+    log "  Model dir  : ${MODEL_DIR}"
 
-log "llama.cpp container started. Waiting for health ..."
+    # Disable glob expansion for safe VLLM_EXTRA_ARGS word splitting
+    set -f
+    MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
+        --name "${VLLM_CONTAINER}" \
+        --network "${NETWORK}" \
+        --network-alias vllm \
+        "${GPU_FLAGS[@]}" \
+        --restart unless-stopped \
+        --ipc host \
+        -p "${VLLM_PORT}:${VLLM_PORT}" \
+        -v "${MODEL_DIR}:/data/models:rw" \
+        -e "HF_HOME=/data/models" \
+        -e "HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}" \
+        "${VLLM_IMAGE}" \
+        --model "${VLLM_MODEL_ID}" \
+        --port "${VLLM_PORT}" \
+        --host 0.0.0.0 \
+        --gpu-memory-utilization "${VLLM_GPU_MEM_UTIL}" \
+        --dtype auto \
+        --quantization "${VLLM_QUANTIZATION}" \
+        --max-model-len "${VLLM_MAX_MODEL_LEN}" \
+        ${VLLM_EXTRA_ARGS} \
+        || error "Failed to start vLLM container."
+    set +f
+
+    log "vLLM container started. Waiting for health ..."
+else
+    # -----------------------------------------------------------------------
+    # llama.cpp engine (consumer GPU)
+    # -----------------------------------------------------------------------
+    log "Starting llama.cpp container ..."
+    log "  Model      : ${MODEL_REPO}/${MODEL_FILE}"
+    log "  Context    : ${CTX_SIZE} tokens"
+    log "  GPU layers : ${N_GPU_LAYERS}"
+    log "  Flash attn : ${FLASH_ATTN}"
+    log "  KV cache   : K=${CACHE_TYPE_K}, V=${CACHE_TYPE_V}"
+    log "  Model dir  : ${MODEL_DIR}"
+
+    MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
+        --name "${LLAMACPP_CONTAINER}" \
+        --network "${NETWORK}" \
+        "${HOSTNAME_LLM[@]}" \
+        --network-alias llamacpp \
+        "${GPU_FLAGS[@]}" \
+        --restart unless-stopped \
+        "${SHM_FLAGS[@]}" \
+        -p "${LLAMACPP_PORT}:${LLAMACPP_PORT}" \
+        -v "${MODEL_DIR}:/models:rw" \
+        -e "MODEL_PATH=/models/${MODEL_FILE}" \
+        -e "MODEL_REPO=${MODEL_REPO}" \
+        -e "MODEL_FILE=${MODEL_FILE}" \
+        -e "MODEL_ALIAS=${MODEL_NAME}" \
+        -e "LLAMA_HOST=0.0.0.0" \
+        -e "LLAMA_PORT=${LLAMACPP_PORT}" \
+        -e "CTX_SIZE=${CTX_SIZE}" \
+        -e "N_GPU_LAYERS=${N_GPU_LAYERS}" \
+        -e "FLASH_ATTN=${FLASH_ATTN}" \
+        -e "CACHE_TYPE_K=${CACHE_TYPE_K}" \
+        -e "CACHE_TYPE_V=${CACHE_TYPE_V}" \
+        -e "AUTO_DETECT_MODEL=0" \
+        "${LLAMACPP_IMAGE}" || error "Failed to start llama.cpp container."
+
+    log "llama.cpp container started. Waiting for health ..."
+fi
 
 # ---------------------------------------------------------------------------
-# Wait for llama.cpp /health
+# Wait for LLM engine /health
 # ---------------------------------------------------------------------------
 elapsed=0
-while [ "${elapsed}" -lt "${LLAMACPP_HEALTH_TIMEOUT}" ]; do
-    state=$("${RUNTIME}" container inspect --format '{{.State.Status}}' "${LLAMACPP_CONTAINER}" 2>/dev/null || echo "unknown")
+while [ "${elapsed}" -lt "${LLM_HEALTH_TIMEOUT}" ]; do
+    state=$("${RUNTIME}" container inspect --format '{{.State.Status}}' "${LLM_CONTAINER}" 2>/dev/null || echo "unknown")
     if [ "${state}" = "exited" ] || [ "${state}" = "dead" ]; then
-        log "ERROR: llama.cpp container exited unexpectedly."
-        "${RUNTIME}" logs --tail 30 "${LLAMACPP_CONTAINER}" 2>&1 || true
+        log "ERROR: ${LLM_ENGINE} container exited unexpectedly."
+        "${RUNTIME}" logs --tail 30 "${LLM_CONTAINER}" 2>&1 || true
         exit 1
     fi
 
-    if curl -sf "http://localhost:${LLAMACPP_PORT}/health" >/dev/null 2>&1; then
-        log "llama.cpp /health OK."
+    if curl -sf "http://localhost:${LLM_PORT}/health" >/dev/null 2>&1; then
+        log "${LLM_ENGINE} /health OK."
         break
     fi
 
     sleep 5
     elapsed=$((elapsed + 5))
     if [ $((elapsed % 30)) -eq 0 ]; then
-        log "  ... llama.cpp loading (${elapsed}/${LLAMACPP_HEALTH_TIMEOUT}s)"
+        log "  ... ${LLM_ENGINE} loading (${elapsed}/${LLM_HEALTH_TIMEOUT}s)"
     fi
 done
 
-if [ "${elapsed}" -ge "${LLAMACPP_HEALTH_TIMEOUT}" ]; then
-    error "llama.cpp did not become healthy within ${LLAMACPP_HEALTH_TIMEOUT}s. Check logs: ${RUNTIME} logs ${LLAMACPP_CONTAINER}"
+if [ "${elapsed}" -ge "${LLM_HEALTH_TIMEOUT}" ]; then
+    error "${LLM_ENGINE} did not become healthy within ${LLM_HEALTH_TIMEOUT}s. Check logs: ${RUNTIME} logs ${LLM_CONTAINER}"
 fi
 
 # ---------------------------------------------------------------------------
 # Verify /v1/models returns HTTP 200 with the expected model loaded
 # ---------------------------------------------------------------------------
 log "Checking /v1/models for model '${MODEL_NAME}' ..."
-MODELS_URL="http://localhost:${LLAMACPP_PORT}/v1/models"
+MODELS_URL="http://localhost:${LLM_PORT}/v1/models"
 MODELS_TIMEOUT=60
 models_elapsed=0
 models_verified=false
@@ -268,7 +347,7 @@ except Exception:
         case "${model_check}" in
             found:*)
                 models_listed="${model_check#found:}"
-                log "llama.cpp /v1/models returned HTTP 200."
+                log "${LLM_ENGINE} /v1/models returned HTTP 200."
                 log "  Available models: ${models_listed}"
                 models_verified=true
                 break
@@ -289,7 +368,7 @@ if [ "${models_verified}" != "true" ]; then
     log "WARNING: /v1/models did not confirm model readiness within ${MODELS_TIMEOUT}s."
     log "  Last HTTP status: ${http_code:-000}"
     log "  The model may still be loading. Check: curl ${MODELS_URL}"
-    log "  Container logs: ${RUNTIME} logs -f ${LLAMACPP_CONTAINER}"
+    log "  Container logs: ${RUNTIME} logs -f ${LLM_CONTAINER}"
 fi
 
 # ===========================================================================
@@ -299,6 +378,13 @@ log ""
 log "--- Phase 3: Start OpenClaw ---"
 
 log "Starting OpenClaw container ..."
+
+# Context size passed to OpenClaw depends on engine
+if [ "${LLM_ENGINE}" = "vllm" ]; then
+    OC_CTX_SIZE="${VLLM_MAX_MODEL_LEN}"
+else
+    OC_CTX_SIZE="${CTX_SIZE}"
+fi
 
 # mcporter configuration — mount from host if it exists
 MCPORTER_MOUNT=()
@@ -341,11 +427,11 @@ MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
     "${MCPORTER_MOUNT[@]}" \
     "${DATA_MOUNT[@]}" \
     "${WORKSPACE_MOUNT[@]}" \
-    -e "LLAMACPP_BASE_URL=http://llamacpp:8000/v1" \
+    -e "LLAMACPP_BASE_URL=http://${LLM_ALIAS}:${LLM_PORT}/v1" \
     -e "LLAMACPP_API_KEY=EMPTY" \
     -e "LLAMACPP_MODEL_NAME=${MODEL_NAME}" \
     -e "OPENCLAW_PORT=${OPENCLAW_PORT}" \
-    -e "CTX_SIZE=${CTX_SIZE}" \
+    -e "CTX_SIZE=${OC_CTX_SIZE}" \
     "${OPENCLAW_IMAGE}" || error "Failed to start OpenClaw container."
 
 log "OpenClaw container started. Waiting for dashboard ..."
@@ -432,7 +518,7 @@ if [ -z "${DASHBOARD_URL}" ]; then
     log "  Try manually: ${RUNTIME} exec ${OPENCLAW_CONTAINER} openclaw dashboard --no-open"
 fi
 
-LLM_API_URL="http://localhost:${LLAMACPP_PORT}/v1"
+LLM_API_URL="http://localhost:${LLM_PORT}/v1"
 
 # --- GIST Dream AI Lab Banner ---
 printf '\n'
@@ -465,9 +551,15 @@ printf '\n'
 printf ' \033[0;37m──────────────────────────────────────────────────────────\033[0m\n'
 printf '  \033[1;33mServices\033[0m\n'
 printf '    LLM API  : %s\n' "${LLM_API_URL}"
-printf '    Engine   : llama.cpp (CUDA)\n'
-printf '    Model    : %s (%s)\n' "${MODEL_NAME}" "${MODEL_REPO}"
-printf '    Context  : %s tokens\n' "${CTX_SIZE}"
+if [ "${LLM_ENGINE}" = "vllm" ]; then
+    printf '    Engine   : vLLM (FP8)\n'
+    printf '    Model    : %s\n' "${VLLM_MODEL_ID}"
+    printf '    Context  : %s tokens\n' "${VLLM_MAX_MODEL_LEN}"
+else
+    printf '    Engine   : llama.cpp (CUDA)\n'
+    printf '    Model    : %s (%s)\n' "${MODEL_NAME}" "${MODEL_REPO}"
+    printf '    Context  : %s tokens\n' "${CTX_SIZE}"
+fi
 printf '    Runtime  : %s\n' "${RUNTIME}"
 printf '\n'
 printf '  \033[1;33mDashboard\033[0m\n'

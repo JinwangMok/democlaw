@@ -61,6 +61,20 @@ if not defined FLASH_ATTN set "FLASH_ATTN=1"
 if not defined CACHE_TYPE_K set "CACHE_TYPE_K=q4_0"
 if not defined CACHE_TYPE_V set "CACHE_TYPE_V=q4_0"
 
+:: LLM engine selection
+if not defined LLM_ENGINE set "LLM_ENGINE=llamacpp"
+:: vLLM config
+if not defined VLLM_IMAGE set "VLLM_IMAGE=vllm/vllm-openai:gemma4-cu130"
+if not defined VLLM_MODEL_ID set "VLLM_MODEL_ID=google/gemma-4-26B-A4B-it"
+if not defined VLLM_PORT set "VLLM_PORT=8000"
+if not defined VLLM_GPU_MEM_UTIL set "VLLM_GPU_MEM_UTIL=0.70"
+if not defined VLLM_QUANTIZATION set "VLLM_QUANTIZATION=fp8"
+if not defined VLLM_EXTRA_ARGS set "VLLM_EXTRA_ARGS=--kv-cache-dtype fp8 --load-format safetensors --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-prefix-caching --enable-chunked-prefill --max-num-seqs 4 --max-num-batched-tokens 8192"
+if not defined VLLM_MAX_MODEL_LEN set "VLLM_MAX_MODEL_LEN=262144"
+if not defined VLLM_HEALTH_TIMEOUT set "VLLM_HEALTH_TIMEOUT=3600"
+set "VLLM_CONTAINER=democlaw-vllm"
+set "LLM_PORT=8000"
+
 :: Ports
 set "LLAMACPP_PORT=8000"
 set "OPENCLAW_PORT=18789"
@@ -117,8 +131,13 @@ echo [start] ========================================================
 echo [start]   DemoClaw Stack -- Full E2E Startup
 echo [start] ========================================================
 echo [start] Runtime : %RUNTIME%
-echo [start] Engine  : llama.cpp (CUDA backend)
-echo [start] Model   : %MODEL_NAME% (GGUF Q4_K_M)
+if "!LLM_ENGINE!"=="vllm" (
+    echo [start] Engine  : vLLM ^(FP8 online quantization^)
+    echo [start] Model   : %VLLM_MODEL_ID%
+) else (
+    echo [start] Engine  : llama.cpp ^(CUDA backend^)
+    echo [start] Model   : %MODEL_NAME% ^(GGUF Q4_K_M^)
+)
 
 :: ---------------------------------------------------------------------------
 :: Validate NVIDIA GPU
@@ -142,7 +161,7 @@ echo [start] NVIDIA GPU OK.
 echo.
 echo [start] --- Phase 0: Cleanup ---
 
-for %%c in (%OPENCLAW_CONTAINER% %LLAMACPP_CONTAINER%) do (
+for %%c in (%OPENCLAW_CONTAINER% %LLAMACPP_CONTAINER% %VLLM_CONTAINER%) do (
     %RUNTIME% container inspect "%%c" >nul 2>&1
     if !errorlevel! equ 0 (
         echo [start] Removing old container '%%c' ...
@@ -162,8 +181,17 @@ if !errorlevel! equ 0 (
 echo.
 echo [start] --- Phase 1: Acquire images ---
 
-call :ensure_image "%LLAMACPP_IMAGE%" "%PROJECT_ROOT%\llamacpp"
-if !errorlevel! neq 0 exit /b 1
+if "!LLM_ENGINE!"=="vllm" (
+    echo [start] Pulling vLLM image '%VLLM_IMAGE%' ...
+    %RUNTIME% pull %VLLM_IMAGE%
+    if !errorlevel! neq 0 (
+        echo [start] ERROR: Failed to pull vLLM image '%VLLM_IMAGE%'. >&2
+        exit /b 1
+    )
+) else (
+    call :ensure_image "%LLAMACPP_IMAGE%" "%PROJECT_ROOT%\llamacpp"
+    if !errorlevel! neq 0 exit /b 1
+)
 
 call :ensure_image "%OPENCLAW_IMAGE%" "%PROJECT_ROOT%\openclaw"
 if !errorlevel! neq 0 exit /b 1
@@ -171,10 +199,10 @@ if !errorlevel! neq 0 exit /b 1
 echo [start] Images ready.
 
 :: ===========================================================================
-:: Phase 2: Create network + start llama.cpp
+:: Phase 2: Create network + start LLM engine
 :: ===========================================================================
 echo.
-echo [start] --- Phase 2: Start llama.cpp ---
+echo [start] --- Phase 2: Start LLM engine ---
 
 echo [start] Creating network '%NETWORK%' ...
 %RUNTIME% network create %NETWORK%
@@ -183,98 +211,146 @@ if !errorlevel! neq 0 (
     exit /b 1
 )
 
-:: Ensure model directory exists
-if not exist "%MODEL_DIR%" mkdir "%MODEL_DIR%"
+if "!LLM_ENGINE!"=="vllm" (
+    set "LLM_CONTAINER=%VLLM_CONTAINER%"
+    set "LLM_ALIAS=vllm"
+    set "LLM_HEALTH_TIMEOUT=%VLLM_HEALTH_TIMEOUT%"
 
-echo [start] Starting llama.cpp container ...
-echo [start]   Model      : %MODEL_REPO%/%MODEL_FILE%
-echo [start]   Context    : %CTX_SIZE% tokens
-echo [start]   GPU layers : %N_GPU_LAYERS%
-echo [start]   Flash attn : %FLASH_ATTN%
-echo [start]   KV cache   : K=%CACHE_TYPE_K%, V=%CACHE_TYPE_V%
-echo [start]   Model dir  : %MODEL_DIR%
+    :: Ensure model directory exists (used as HF cache)
+    if not exist "%MODEL_DIR%" mkdir "%MODEL_DIR%"
 
-%RUNTIME% run -d ^
-    --name %LLAMACPP_CONTAINER% ^
-    --network %NETWORK% ^
-    --network-alias llamacpp ^
-    %GPU_FLAGS% ^
-    --restart unless-stopped ^
-    %SHM_FLAGS% ^
-    -p %LLAMACPP_PORT%:%LLAMACPP_PORT% ^
-    -v "%MODEL_DIR%:/models:rw" ^
-    -e "MODEL_PATH=/models/%MODEL_FILE%" ^
-    -e "MODEL_REPO=%MODEL_REPO%" ^
-    -e "MODEL_FILE=%MODEL_FILE%" ^
-    -e "MODEL_ALIAS=%MODEL_NAME%" ^
-    -e "LLAMA_HOST=0.0.0.0" ^
-    -e "LLAMA_PORT=%LLAMACPP_PORT%" ^
-    -e "CTX_SIZE=%CTX_SIZE%" ^
-    -e "N_GPU_LAYERS=%N_GPU_LAYERS%" ^
-    -e "FLASH_ATTN=%FLASH_ATTN%" ^
-    -e "CACHE_TYPE_K=%CACHE_TYPE_K%" ^
-    -e "CACHE_TYPE_V=%CACHE_TYPE_V%" ^
-    -e "AUTO_DETECT_MODEL=0" ^
-    %LLAMACPP_IMAGE%
+    echo [start] Starting vLLM container ...
+    echo [start]   Image      : %VLLM_IMAGE%
+    echo [start]   Model      : %VLLM_MODEL_ID%
+    echo [start]   Context    : %VLLM_MAX_MODEL_LEN% tokens
+    echo [start]   GPU mem    : %VLLM_GPU_MEM_UTIL%
+    echo [start]   Model dir  : %MODEL_DIR%
 
-if !errorlevel! neq 0 (
-    echo [start] ERROR: Failed to start llama.cpp container. >&2
-    exit /b 1
+    %RUNTIME% run -d ^
+        --name %VLLM_CONTAINER% ^
+        --network %NETWORK% ^
+        --network-alias vllm ^
+        %GPU_FLAGS% ^
+        --restart unless-stopped ^
+        --ipc host ^
+        -p %VLLM_PORT%:%VLLM_PORT% ^
+        -v "%MODEL_DIR%:/data/models:rw" ^
+        -e "HF_HOME=/data/models" ^
+        -e "HUGGING_FACE_HUB_TOKEN=%HF_TOKEN%" ^
+        %VLLM_IMAGE% ^
+        --model %VLLM_MODEL_ID% ^
+        --port %VLLM_PORT% ^
+        --host 0.0.0.0 ^
+        --gpu-memory-utilization %VLLM_GPU_MEM_UTIL% ^
+        --dtype auto ^
+        --quantization %VLLM_QUANTIZATION% ^
+        --max-model-len %VLLM_MAX_MODEL_LEN% ^
+        %VLLM_EXTRA_ARGS%
+
+    if !errorlevel! neq 0 (
+        echo [start] ERROR: Failed to start vLLM container. >&2
+        exit /b 1
+    )
+
+    echo [start] vLLM container started. Waiting for health ...
+) else (
+    set "LLM_CONTAINER=%LLAMACPP_CONTAINER%"
+    set "LLM_ALIAS=llamacpp"
+    set "LLM_HEALTH_TIMEOUT=%LLAMACPP_HEALTH_TIMEOUT%"
+
+    :: Ensure model directory exists
+    if not exist "%MODEL_DIR%" mkdir "%MODEL_DIR%"
+
+    echo [start] Starting llama.cpp container ...
+    echo [start]   Model      : %MODEL_REPO%/%MODEL_FILE%
+    echo [start]   Context    : %CTX_SIZE% tokens
+    echo [start]   GPU layers : %N_GPU_LAYERS%
+    echo [start]   Flash attn : %FLASH_ATTN%
+    echo [start]   KV cache   : K=%CACHE_TYPE_K%, V=%CACHE_TYPE_V%
+    echo [start]   Model dir  : %MODEL_DIR%
+
+    %RUNTIME% run -d ^
+        --name %LLAMACPP_CONTAINER% ^
+        --network %NETWORK% ^
+        --network-alias llamacpp ^
+        %GPU_FLAGS% ^
+        --restart unless-stopped ^
+        %SHM_FLAGS% ^
+        -p %LLAMACPP_PORT%:%LLAMACPP_PORT% ^
+        -v "%MODEL_DIR%:/models:rw" ^
+        -e "MODEL_PATH=/models/%MODEL_FILE%" ^
+        -e "MODEL_REPO=%MODEL_REPO%" ^
+        -e "MODEL_FILE=%MODEL_FILE%" ^
+        -e "MODEL_ALIAS=%MODEL_NAME%" ^
+        -e "LLAMA_HOST=0.0.0.0" ^
+        -e "LLAMA_PORT=%LLAMACPP_PORT%" ^
+        -e "CTX_SIZE=%CTX_SIZE%" ^
+        -e "N_GPU_LAYERS=%N_GPU_LAYERS%" ^
+        -e "FLASH_ATTN=%FLASH_ATTN%" ^
+        -e "CACHE_TYPE_K=%CACHE_TYPE_K%" ^
+        -e "CACHE_TYPE_V=%CACHE_TYPE_V%" ^
+        -e "AUTO_DETECT_MODEL=0" ^
+        %LLAMACPP_IMAGE%
+
+    if !errorlevel! neq 0 (
+        echo [start] ERROR: Failed to start llama.cpp container. >&2
+        exit /b 1
+    )
+
+    echo [start] llama.cpp container started. Waiting for health ...
 )
 
-echo [start] llama.cpp container started. Waiting for health ...
-
 :: ---------------------------------------------------------------------------
-:: Wait for llama.cpp /health
+:: Wait for LLM engine /health
 :: ---------------------------------------------------------------------------
 set "ELAPSED=0"
 
-:llamacpp_health_loop
-if %ELAPSED% geq %LLAMACPP_HEALTH_TIMEOUT% (
-    echo [start] ERROR: llama.cpp did not become healthy within %LLAMACPP_HEALTH_TIMEOUT%s. >&2
-    echo [start] Check logs: %RUNTIME% logs %LLAMACPP_CONTAINER% >&2
+:llm_health_loop
+if %ELAPSED% geq %LLM_HEALTH_TIMEOUT% (
+    echo [start] ERROR: LLM engine did not become healthy within %LLM_HEALTH_TIMEOUT%s. >&2
+    echo [start] Check logs: %RUNTIME% logs %LLM_CONTAINER% >&2
     exit /b 1
 )
 
 :: Check if container died
-%RUNTIME% ps -a --filter "name=%LLAMACPP_CONTAINER%" 2>nul | findstr /i "Exited Dead" >nul 2>&1
-if !errorlevel! equ 0 goto llamacpp_died
+%RUNTIME% ps -a --filter "name=%LLM_CONTAINER%" 2>nul | findstr /i "Exited Dead" >nul 2>&1
+if !errorlevel! equ 0 goto llm_died
 
-curl -sf "http://localhost:%LLAMACPP_PORT%/health" >nul 2>&1
+curl -sf "http://localhost:%LLM_PORT%/health" >nul 2>&1
 if !errorlevel! equ 0 (
-    echo [start] llama.cpp /health OK.
-    goto llamacpp_models_check
+    echo [start] LLM engine /health OK.
+    goto llm_models_check
 )
 
 powershell -c "Start-Sleep -Seconds 5"
 set /a "ELAPSED+=5"
 set /a "MOD30=ELAPSED %% 30"
-if !MOD30! equ 0 echo [start]   ... llama.cpp loading ^(!ELAPSED!/%LLAMACPP_HEALTH_TIMEOUT%s^)
-goto llamacpp_health_loop
+if !MOD30! equ 0 echo [start]   ... LLM engine loading ^(!ELAPSED!/%LLM_HEALTH_TIMEOUT%s^)
+goto llm_health_loop
 
-:llamacpp_died
-echo [start] ERROR: llama.cpp container exited unexpectedly. >&2
-%RUNTIME% logs --tail 30 %LLAMACPP_CONTAINER% 2>&1
+:llm_died
+echo [start] ERROR: LLM engine container exited unexpectedly. >&2
+%RUNTIME% logs --tail 30 %LLM_CONTAINER% 2>&1
 exit /b 1
 
 :: ---------------------------------------------------------------------------
 :: Verify /v1/models
 :: ---------------------------------------------------------------------------
-:llamacpp_models_check
-echo [start] Checking /v1/models for model '%MODEL_NAME%' ...
+:llm_models_check
+echo [start] Checking /v1/models ...
 set "MODELS_ELAPSED=0"
 set "MODELS_TIMEOUT=60"
 
 :models_loop
 if %MODELS_ELAPSED% geq %MODELS_TIMEOUT% (
     echo [start] WARNING: /v1/models did not confirm model within %MODELS_TIMEOUT%s.
-    echo [start]   Check: curl http://localhost:%LLAMACPP_PORT%/v1/models
+    echo [start]   Check: curl http://localhost:%LLM_PORT%/v1/models
     goto start_openclaw_container
 )
 
-curl -sf "http://localhost:%LLAMACPP_PORT%/v1/models" >nul 2>&1
+curl -sf "http://localhost:%LLM_PORT%/v1/models" >nul 2>&1
 if !errorlevel! equ 0 (
-    echo [start] llama.cpp /v1/models OK.
+    echo [start] LLM engine /v1/models OK.
     goto start_openclaw_container
 )
 
@@ -292,6 +368,13 @@ echo.
 echo [start] --- Phase 3: Start OpenClaw ---
 
 echo [start] Starting OpenClaw container ...
+
+:: Context size passed to OpenClaw depends on engine
+if "!LLM_ENGINE!"=="vllm" (
+    set "OC_CTX_SIZE=!VLLM_MAX_MODEL_LEN!"
+) else (
+    set "OC_CTX_SIZE=!CTX_SIZE!"
+)
 
 :: mcporter configuration — mount from host if it exists
 set "MCPORTER_MOUNT="
@@ -334,11 +417,11 @@ if defined OPENCLAW_WORKSPACE_DIR (
     %MCPORTER_MOUNT% ^
     %DATA_MOUNT% ^
     %WORKSPACE_MOUNT% ^
-    -e "LLAMACPP_BASE_URL=http://llamacpp:8000/v1" ^
+    -e "LLAMACPP_BASE_URL=http://%LLM_ALIAS%:%LLM_PORT%/v1" ^
     -e "LLAMACPP_API_KEY=EMPTY" ^
     -e "LLAMACPP_MODEL_NAME=%MODEL_NAME%" ^
     -e "OPENCLAW_PORT=%OPENCLAW_PORT%" ^
-    -e "CTX_SIZE=%CTX_SIZE%" ^
+    -e "CTX_SIZE=!OC_CTX_SIZE!" ^
     %OPENCLAW_IMAGE%
 
 if !errorlevel! neq 0 (
@@ -453,10 +536,16 @@ echo  ^>^>^> All systems operational ^<^<^<
 echo.
 echo  ----------------------------------------------------------
 echo   Services
-echo     LLM API  : http://localhost:%LLAMACPP_PORT%/v1
-echo     Engine   : llama.cpp (CUDA)
-echo     Model    : %MODEL_NAME% (%MODEL_REPO%)
-echo     Context  : %CTX_SIZE% tokens
+echo     LLM API  : http://localhost:%LLM_PORT%/v1
+if "!LLM_ENGINE!"=="vllm" (
+    echo     Engine   : vLLM ^(FP8 online quantization^)
+    echo     Model    : %VLLM_MODEL_ID%
+    echo     Context  : %VLLM_MAX_MODEL_LEN% tokens
+) else (
+    echo     Engine   : llama.cpp ^(CUDA^)
+    echo     Model    : %MODEL_NAME% ^(%MODEL_REPO%^)
+    echo     Context  : %CTX_SIZE% tokens
+)
 echo     Runtime  : %RUNTIME%
 echo.
 echo   Dashboard

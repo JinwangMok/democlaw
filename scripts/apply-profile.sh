@@ -90,6 +90,7 @@ _default() {
 _apply_consumer_gpu_profile() {
     _profile_log "Applying profile: Gemma 4 E4B (consumer GPU / 8GB VRAM)"
 
+    _default LLM_ENGINE                "llamacpp"
     _default MODEL_REPO                "unsloth/gemma-4-E4B-it-GGUF"
     _default MODEL_FILE                "gemma-4-E4B-it-Q4_K_M.gguf"
     _default MODEL_NAME                "gemma-4-E4B-it"
@@ -115,24 +116,49 @@ _apply_consumer_gpu_profile() {
 _apply_dgx_spark_profile() {
     _profile_log "Applying profile: Gemma 4 26B A4B MoE (DGX Spark / 128GB)"
 
+    # --- LLM Engine selection: vLLM for DGX Spark ---
+    _default LLM_ENGINE                "vllm"
+
+    # --- vLLM configuration (used when LLM_ENGINE=vllm) ---
+    _default VLLM_IMAGE                "vllm/vllm-openai:gemma4-cu130"
+    _default VLLM_MODEL_ID             "google/gemma-4-26B-A4B-it"
+    _default VLLM_PORT                 "8000"
+    _default VLLM_GPU_MEM_UTIL         "0.70"
+    _default VLLM_QUANTIZATION         "fp8"
+    _default VLLM_EXTRA_ARGS           "--kv-cache-dtype fp8 --load-format safetensors --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-prefix-caching --enable-chunked-prefill --max-num-seqs 4 --max-num-batched-tokens 8192"
+    _default VLLM_MAX_MODEL_LEN        "262144"
+    _default VLLM_HEALTH_TIMEOUT       "3600"
+
+    # --- Common settings (used by OpenClaw regardless of engine) ---
+    _default MODEL_NAME                "gemma-4-26B-A4B-it"
+    _default MIN_VRAM_MIB              "16000"
+    _default MIN_DRIVER_VERSION        "550.0"
+    _default LLAMACPP_MODEL_NAME       "gemma-4-26B-A4B-it"
+    _default LLAMACPP_MAX_TOKENS       "8192"
+    _default LLAMACPP_TEMPERATURE      "0.7"
+
+    # --- llama.cpp fallback settings (used when LLM_ENGINE=llamacpp) ---
     _default MODEL_REPO                "unsloth/gemma-4-26B-A4B-it-GGUF"
     _default MODEL_FILE                "gemma-4-26B-A4B-it-Q8_0.gguf"
-    _default MODEL_NAME                "gemma-4-26B-A4B-it"
     _default CTX_SIZE                  "262144"
     _default N_GPU_LAYERS              "99"
     _default FLASH_ATTN                "1"
     _default CACHE_TYPE_K              "q8_0"
     _default CACHE_TYPE_V              "q8_0"
-    _default MIN_VRAM_MIB              "16000"
-    _default MIN_DRIVER_VERSION        "550.0"
-    _default LLAMACPP_MODEL_NAME       "gemma-4-26B-A4B-it"
-    _default LLAMACPP_MAX_TOKENS       "8192"
     _default LLAMACPP_HEALTH_TIMEOUT   "1800"
-    _default LLAMACPP_TEMPERATURE      "0.7"
 
-    _profile_log "  Model     : ${MODEL_REPO}/${MODEL_FILE}"
-    _profile_log "  Context   : ${CTX_SIZE} tokens"
-    _profile_log "  KV cache  : K=${CACHE_TYPE_K}, V=${CACHE_TYPE_V}"
+    if [ "${LLM_ENGINE}" = "vllm" ]; then
+        _profile_log "  Engine    : vLLM (FP8 online quantization)"
+        _profile_log "  Image     : ${VLLM_IMAGE}"
+        _profile_log "  Model     : ${VLLM_MODEL_ID}"
+        _profile_log "  GPU mem   : ${VLLM_GPU_MEM_UTIL} (of 128GB unified)"
+        _profile_log "  Context   : ${VLLM_MAX_MODEL_LEN} tokens"
+    else
+        _profile_log "  Engine    : llama.cpp (GGUF)"
+        _profile_log "  Model     : ${MODEL_REPO}/${MODEL_FILE}"
+        _profile_log "  Context   : ${CTX_SIZE} tokens"
+        _profile_log "  KV cache  : K=${CACHE_TYPE_K}, V=${CACHE_TYPE_V}"
+    fi
     _profile_log "  Min VRAM  : ${MIN_VRAM_MIB} MiB"
 }
 
