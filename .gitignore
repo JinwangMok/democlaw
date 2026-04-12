@@ -1,6 +1,9 @@
 # Environment
 .env
 
+# Project-local model cache (populated by scripts/start.sh)
+.data/
+
 # OS
 .DS_Store
 Thumbs.db

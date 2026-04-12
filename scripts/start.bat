@@ -63,13 +63,17 @@ if not defined CACHE_TYPE_V set "CACHE_TYPE_V=q4_0"
 
 :: LLM engine selection
 if not defined LLM_ENGINE set "LLM_ENGINE=llamacpp"
-:: vLLM config
-if not defined VLLM_IMAGE set "VLLM_IMAGE=vllm/vllm-openai:gemma4-cu130"
-if not defined VLLM_MODEL_ID set "VLLM_MODEL_ID=google/gemma-4-26B-A4B-it"
+:: vLLM config (DGX Spark NVFP4A16 path; Windows never reaches this branch,
+:: but defaults are kept in lockstep with start.sh)
+if not defined VLLM_IMAGE set "VLLM_IMAGE=docker.io/jinwangmok/democlaw-spark-gemma4:latest"
+if not defined VLLM_HF_REPO set "VLLM_HF_REPO=bg-digitalservices/Gemma-4-26B-A4B-it-NVFP4A16"
+if not defined VLLM_HF_LOCAL_DIR set "VLLM_HF_LOCAL_DIR=Gemma-4-26B-A4B-it-NVFP4A16"
+if not defined VLLM_PATCHED_PY_NAME set "VLLM_PATCHED_PY_NAME=gemma4_patched.py"
+if not defined VLLM_CONTAINER_MODEL_PATH set "VLLM_CONTAINER_MODEL_PATH=/models/gemma-4"
 if not defined VLLM_PORT set "VLLM_PORT=8000"
-if not defined VLLM_GPU_MEM_UTIL set "VLLM_GPU_MEM_UTIL=0.70"
-if not defined VLLM_QUANTIZATION set "VLLM_QUANTIZATION=fp8"
-if not defined VLLM_EXTRA_ARGS set "VLLM_EXTRA_ARGS=--kv-cache-dtype fp8 --load-format safetensors --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-prefix-caching --enable-chunked-prefill --max-num-seqs 4 --max-num-batched-tokens 8192"
+if not defined VLLM_GPU_MEM_UTIL set "VLLM_GPU_MEM_UTIL=0.40"
+if not defined VLLM_QUANTIZATION set "VLLM_QUANTIZATION=modelopt"
+if not defined VLLM_EXTRA_ARGS set "VLLM_EXTRA_ARGS=--kv-cache-dtype fp8 --moe-backend marlin --enable-auto-tool-choice --tool-call-parser gemma4 --trust-remote-code"
 if not defined VLLM_MAX_MODEL_LEN set "VLLM_MAX_MODEL_LEN=262144"
 if not defined VLLM_HEALTH_TIMEOUT set "VLLM_HEALTH_TIMEOUT=3600"
 set "VLLM_CONTAINER=democlaw-vllm"
@@ -84,7 +88,9 @@ if not defined LLAMACPP_HEALTH_TIMEOUT set "LLAMACPP_HEALTH_TIMEOUT=600"
 set "OPENCLAW_HEALTH_TIMEOUT=300"
 
 :: Model directory (host path mounted into container)
-if not defined MODEL_DIR set "MODEL_DIR=%USERPROFILE%\.cache\democlaw\models"
+:: Unified project-local cache under democlaw\.data for all engines.
+if not defined MODEL_DIR set "MODEL_DIR=%PROJECT_ROOT%\.data"
+if not exist "%MODEL_DIR%" mkdir "%MODEL_DIR%"
 
 :: (PROJECT_ROOT already set during .env loading above)
 

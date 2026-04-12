@@ -32,6 +32,17 @@ if [ -f "${ENV_FILE}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Unified model cache: ${PROJECT_ROOT}/.data
+#
+# All engines (llama.cpp GGUF + vLLM NVFP4A16) cache weights under this single
+# project-local directory. Set before sourcing apply-profile.sh so the DGX
+# Spark NVMe auto-detection short-circuits (user explicit > auto-detect).
+# ---------------------------------------------------------------------------
+MODEL_DIR="${MODEL_DIR:-${PROJECT_ROOT}/.data}"
+export MODEL_DIR
+mkdir -p "${MODEL_DIR}"
+
+# ---------------------------------------------------------------------------
 # Hardware-aware model/config selection
 # ---------------------------------------------------------------------------
 # apply-profile.sh detects hardware (or uses HARDWARE_PROFILE from .env),
@@ -59,12 +70,20 @@ VLLM_CONTAINER="democlaw-vllm"
 LLM_ENGINE="${LLM_ENGINE:-llamacpp}"
 
 # vLLM config — defaults set by apply-profile.sh for DGX Spark.
-VLLM_IMAGE="${VLLM_IMAGE:-vllm/vllm-openai:gemma4-cu130}"
-VLLM_MODEL_ID="${VLLM_MODEL_ID:-google/gemma-4-26B-A4B-it}"
+# The DGX Spark path runs a custom NVFP4A16-quantized Gemma 4 26B A4B MoE
+# via jinwangmok/democlaw-spark-gemma4 (Reddit community workaround for GB10
+# sm_121). The model weights + gemma4_patched.py are cloned from HuggingFace
+# into ${MODEL_DIR}/${VLLM_HF_LOCAL_DIR}/ during pre-download.
+VLLM_IMAGE="${VLLM_IMAGE:-docker.io/jinwangmok/democlaw-spark-gemma4:latest}"
+VLLM_HF_REPO="${VLLM_HF_REPO:-bg-digitalservices/Gemma-4-26B-A4B-it-NVFP4A16}"
+VLLM_HF_LOCAL_DIR="${VLLM_HF_LOCAL_DIR:-Gemma-4-26B-A4B-it-NVFP4A16}"
+VLLM_PATCHED_PY_NAME="${VLLM_PATCHED_PY_NAME:-gemma4_patched.py}"
+VLLM_CONTAINER_PATCHED_PY="${VLLM_CONTAINER_PATCHED_PY:-/usr/local/lib/python3.12/dist-packages/vllm/model_executor/models/gemma4.py}"
+VLLM_CONTAINER_MODEL_PATH="${VLLM_CONTAINER_MODEL_PATH:-/models/gemma-4}"
 VLLM_PORT="${VLLM_PORT:-8000}"
-VLLM_GPU_MEM_UTIL="${VLLM_GPU_MEM_UTIL:-0.70}"
-VLLM_QUANTIZATION="${VLLM_QUANTIZATION:-fp8}"
-VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:---kv-cache-dtype fp8 --load-format safetensors --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-prefix-caching --enable-chunked-prefill --max-num-seqs 4 --max-num-batched-tokens 8192}"
+VLLM_GPU_MEM_UTIL="${VLLM_GPU_MEM_UTIL:-0.40}"
+VLLM_QUANTIZATION="${VLLM_QUANTIZATION:-modelopt}"
+VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:---kv-cache-dtype fp8 --moe-backend marlin --enable-auto-tool-choice --tool-call-parser gemma4 --trust-remote-code}"
 VLLM_MAX_MODEL_LEN="${VLLM_MAX_MODEL_LEN:-262144}"
 VLLM_HEALTH_TIMEOUT="${VLLM_HEALTH_TIMEOUT:-3600}"
 
@@ -91,7 +110,7 @@ LLAMACPP_HEALTH_TIMEOUT="${LLAMACPP_HEALTH_TIMEOUT:-1800}"
 OPENCLAW_HEALTH_TIMEOUT=300   # longer: gateway init (onboard + plugin load) can take time
 
 # Model directory (host path mounted into the container)
-MODEL_DIR="${MODEL_DIR:-${HOME}/.cache/democlaw/models}"
+# Already set above to ${PROJECT_ROOT}/.data (pre-apply-profile).
 
 # ---------------------------------------------------------------------------
 # Detect container runtime
@@ -133,8 +152,8 @@ log "  DemoClaw Stack -- Full E2E Startup"
 log "========================================================"
 log "Runtime: ${RUNTIME}"
 if [ "${LLM_ENGINE}" = "vllm" ]; then
-    log "Engine : vLLM (FP8 quantization)"
-    log "Model  : ${VLLM_MODEL_ID}"
+    log "Engine : vLLM (NVFP4A16 + modelopt)"
+    log "Model  : ${MODEL_NAME} (${VLLM_HF_REPO})"
 else
     log "Engine : llama.cpp (CUDA backend)"
     log "Model  : ${MODEL_NAME} (GGUF)"
@@ -164,6 +183,64 @@ done
 if "${RUNTIME}" network inspect "${NETWORK}" >/dev/null 2>&1; then
     log "Removing old network '${NETWORK}' ..."
     "${RUNTIME}" network rm "${NETWORK}" >/dev/null 2>&1 || true
+fi
+
+# ===========================================================================
+# Phase 0.5: Pre-download model weights into ${MODEL_DIR}
+#
+# Ensures weights are cached on the host BEFORE the LLM container starts so
+# container entrypoints never block on a first-run download. Cache hits on
+# subsequent runs skip the network entirely.
+# ===========================================================================
+log ""
+log "--- Phase 0.5: Pre-download model weights (${MODEL_DIR}) ---"
+
+if [ "${LLM_ENGINE}" = "vllm" ]; then
+    # DGX Spark: clone the NVFP4A16 HF repo (weights + gemma4_patched.py).
+    VLLM_LOCAL_MODEL_DIR="${MODEL_DIR}/${VLLM_HF_LOCAL_DIR}"
+    VLLM_PATCHED_PY_HOST="${VLLM_LOCAL_MODEL_DIR}/${VLLM_PATCHED_PY_NAME}"
+
+    if [ -f "${VLLM_PATCHED_PY_HOST}" ] && \
+       ls "${VLLM_LOCAL_MODEL_DIR}"/*.safetensors >/dev/null 2>&1; then
+        log "vLLM model cache already present at ${VLLM_LOCAL_MODEL_DIR} — skipping clone."
+    else
+        log "Cloning HF repo '${VLLM_HF_REPO}' -> ${VLLM_LOCAL_MODEL_DIR}"
+        command -v git >/dev/null 2>&1 || error "git not found — install git + git-lfs to fetch vLLM weights."
+        if ! command -v git-lfs >/dev/null 2>&1; then
+            log "WARNING: git-lfs not detected. Large weight files may be stubs."
+            log "  Install git-lfs and re-run: https://git-lfs.github.com/"
+        else
+            git lfs install --skip-repo >/dev/null 2>&1 || true
+        fi
+
+        if [ -d "${VLLM_LOCAL_MODEL_DIR}/.git" ]; then
+            log "Existing clone detected — resuming via 'git lfs pull'."
+            ( cd "${VLLM_LOCAL_MODEL_DIR}" && git lfs pull ) \
+                || error "git lfs pull failed in ${VLLM_LOCAL_MODEL_DIR}"
+        else
+            rm -rf "${VLLM_LOCAL_MODEL_DIR}"
+            HF_CLONE_URL="${VLLM_HF_CLONE_URL:-https://huggingface.co/${VLLM_HF_REPO}}"
+            git clone "${HF_CLONE_URL}" "${VLLM_LOCAL_MODEL_DIR}" \
+                || error "git clone failed: ${HF_CLONE_URL}"
+        fi
+    fi
+
+    if [ ! -f "${VLLM_PATCHED_PY_HOST}" ]; then
+        error "Patched model file missing: ${VLLM_PATCHED_PY_HOST}"
+    fi
+    log "vLLM weights ready: ${VLLM_LOCAL_MODEL_DIR}"
+else
+    # llama.cpp: pre-download GGUF (+ mmproj) via download-model.sh.
+    if [ -x "${SCRIPT_DIR}/download-model.sh" ]; then
+        MODEL_DIR="${MODEL_DIR}" \
+        MODEL_REPO="${MODEL_REPO}" \
+        MODEL_FILE="${MODEL_FILE}" \
+        HF_TOKEN="${HF_TOKEN:-}" \
+            "${SCRIPT_DIR}/download-model.sh" --model-dir "${MODEL_DIR}" \
+            || error "Pre-download of GGUF model failed."
+    else
+        log "WARNING: download-model.sh not executable — relying on container entrypoint to fetch model."
+    fi
 fi
 
 # ===========================================================================
@@ -228,14 +305,22 @@ fi
 
 if [ "${LLM_ENGINE}" = "vllm" ]; then
     # -----------------------------------------------------------------------
-    # vLLM engine (DGX Spark)
+    # vLLM engine (DGX Spark) — NVFP4A16 Gemma 4 26B A4B MoE
+    #
+    # Interface parity with llama.cpp path: same port (${LLM_PORT}=8000),
+    # same network (democlaw-net), same network-alias (vllm), served-model
+    # name == ${MODEL_NAME} so OpenClaw's LLAMACPP_MODEL_NAME reaches both
+    # engines identically. Only the image, the local model path, and the
+    # python model patch differ.
     # -----------------------------------------------------------------------
     log "Starting vLLM container ..."
-    log "  Model      : ${VLLM_MODEL_ID}"
+    log "  Image      : ${VLLM_IMAGE}"
+    log "  Served as  : ${MODEL_NAME}"
+    log "  Model dir  : ${VLLM_LOCAL_MODEL_DIR}"
+    log "  Patched py : ${VLLM_PATCHED_PY_HOST}"
     log "  Quant      : ${VLLM_QUANTIZATION}"
     log "  GPU mem    : ${VLLM_GPU_MEM_UTIL}"
     log "  Context    : ${VLLM_MAX_MODEL_LEN} tokens"
-    log "  Model dir  : ${MODEL_DIR}"
 
     # Disable glob expansion for safe VLLM_EXTRA_ARGS word splitting
     set -f
@@ -253,13 +338,17 @@ if [ "${LLM_ENGINE}" = "vllm" ]; then
         --restart unless-stopped \
         --ipc host \
         -p "${VLLM_PORT}:${VLLM_PORT}" \
-        -v "${MODEL_DIR}:/data/models:rw" \
+        -e "VLLM_NVFP4_GEMM_BACKEND=marlin" \
         -e "HF_HOME=/data/models" \
         -e "HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}" \
+        -v "${MODEL_DIR}:/data/models:rw" \
+        -v "${VLLM_LOCAL_MODEL_DIR}:${VLLM_CONTAINER_MODEL_PATH}:ro" \
+        -v "${VLLM_PATCHED_PY_HOST}:${VLLM_CONTAINER_PATCHED_PY}:ro" \
         "${VLLM_IMAGE}" \
-        --model "${VLLM_MODEL_ID}" \
-        --port "${VLLM_PORT}" \
+        vllm serve "${VLLM_CONTAINER_MODEL_PATH}" \
+        --served-model-name "${MODEL_NAME}" \
         --host 0.0.0.0 \
+        --port "${VLLM_PORT}" \
         --gpu-memory-utilization "${VLLM_GPU_MEM_UTIL}" \
         --dtype auto \
         --quantization "${VLLM_QUANTIZATION}" \
@@ -574,8 +663,8 @@ printf ' \033[0;37m────────────────────�
 printf '  \033[1;33mServices\033[0m\n'
 printf '    LLM API  : %s\n' "${LLM_API_URL}"
 if [ "${LLM_ENGINE}" = "vllm" ]; then
-    printf '    Engine   : vLLM (FP8)\n'
-    printf '    Model    : %s\n' "${VLLM_MODEL_ID}"
+    printf '    Engine   : vLLM (NVFP4A16)\n'
+    printf '    Model    : %s (%s)\n' "${MODEL_NAME}" "${VLLM_HF_REPO}"
     printf '    Context  : %s tokens\n' "${VLLM_MAX_MODEL_LEN}"
 else
     printf '    Engine   : llama.cpp (CUDA)\n'

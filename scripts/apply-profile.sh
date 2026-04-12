@@ -281,12 +281,19 @@ _apply_dgx_spark_profile() {
     _default LLM_ENGINE                "vllm"
 
     # --- vLLM configuration (used when LLM_ENGINE=vllm) ---
-    _default VLLM_IMAGE                "vllm/vllm-openai:gemma4-cu130"
-    _default VLLM_MODEL_ID             "google/gemma-4-26B-A4B-it"
+    # DGX Spark GB10 (sm_121) runs a custom NVFP4A16-quantized Gemma 4 26B
+    # A4B MoE via jinwangmok/democlaw-spark-gemma4. Weights and the
+    # gemma4_patched.py model patch are cloned from HuggingFace into
+    # ${MODEL_DIR}/${VLLM_HF_LOCAL_DIR} by start.sh at Phase 0.5.
+    _default VLLM_IMAGE                "docker.io/jinwangmok/democlaw-spark-gemma4:latest"
+    _default VLLM_HF_REPO              "bg-digitalservices/Gemma-4-26B-A4B-it-NVFP4A16"
+    _default VLLM_HF_LOCAL_DIR         "Gemma-4-26B-A4B-it-NVFP4A16"
+    _default VLLM_PATCHED_PY_NAME      "gemma4_patched.py"
+    _default VLLM_CONTAINER_MODEL_PATH "/models/gemma-4"
     _default VLLM_PORT                 "8000"
-    _default VLLM_GPU_MEM_UTIL         "0.70"
-    _default VLLM_QUANTIZATION         "fp8"
-    _default VLLM_EXTRA_ARGS           "--kv-cache-dtype fp8 --load-format safetensors --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --enable-prefix-caching --enable-chunked-prefill --max-num-seqs 4 --max-num-batched-tokens 8192"
+    _default VLLM_GPU_MEM_UTIL         "0.40"
+    _default VLLM_QUANTIZATION         "modelopt"
+    _default VLLM_EXTRA_ARGS           "--kv-cache-dtype fp8 --moe-backend marlin --enable-auto-tool-choice --tool-call-parser gemma4 --trust-remote-code"
     _default VLLM_MAX_MODEL_LEN        "262144"
     _default VLLM_HEALTH_TIMEOUT       "3600"
 
@@ -309,9 +316,9 @@ _apply_dgx_spark_profile() {
     _default LLAMACPP_HEALTH_TIMEOUT   "1800"
 
     if [ "${LLM_ENGINE}" = "vllm" ]; then
-        _profile_log "  Engine    : vLLM (FP8 online quantization)"
+        _profile_log "  Engine    : vLLM (NVFP4A16 + modelopt)"
         _profile_log "  Image     : ${VLLM_IMAGE}"
-        _profile_log "  Model     : ${VLLM_MODEL_ID}"
+        _profile_log "  HF repo   : ${VLLM_HF_REPO}"
         _profile_log "  GPU mem   : ${VLLM_GPU_MEM_UTIL} (of 128GB unified)"
         _profile_log "  Context   : ${VLLM_MAX_MODEL_LEN} tokens"
     else

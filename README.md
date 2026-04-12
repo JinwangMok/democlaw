@@ -72,7 +72,10 @@ cp .env.example .env
 # (Optional) Pre-download the model to see progress (~5.7 GB, first run only)
 ./scripts/download-model.sh
 
-# Start the full stack (downloads model automatically if not pre-cached)
+# Start the full stack. Weights are cached under ./.data on first run and
+# reused on every subsequent run (no re-download).
+#   - Windows / RTX: llama.cpp Gemma 4 E4B GGUF
+#   - DGX Spark:     vLLM NVFP4A16 Gemma 4 26B A4B MoE (jinwangmok/democlaw-spark-gemma4)
 ./scripts/start.sh
 
 # Open the dashboard URL printed at the end
@@ -525,7 +528,9 @@ Key settings:
 | `CTX_SIZE` | `131072` | Context length (tokens) |
 | `LLAMACPP_PORT` | `8000` | llama.cpp API port |
 | `OPENCLAW_PORT` | `18789` | OpenClaw dashboard port |
-| `MODEL_DIR` | `~/.cache/democlaw/models` | Host model cache directory |
+| `MODEL_DIR` | `./.data` | Host model cache directory (project-local, persistent across `start.sh` runs) |
+| `VLLM_IMAGE` | `docker.io/jinwangmok/democlaw-spark-gemma4:latest` | vLLM container image (DGX Spark NVFP4A16) |
+| `VLLM_HF_REPO` | `bg-digitalservices/Gemma-4-26B-A4B-it-NVFP4A16` | HuggingFace repo cloned into `.data/` on DGX Spark |
 | `OPENCLAW_DATA_DIR` | *(unset)* | Host directory to persist OpenClaw settings/pairings |
 | `OPENCLAW_WORKSPACE_DIR` | *(unset)* | Host directory to mount into OpenClaw |
 | `ENABLE_VISION` | `1` | Set to `0` to disable multimodal vision and skip mmproj download |
