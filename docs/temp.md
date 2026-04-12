@@ -61,16 +61,22 @@ docker run --rm --device nvidia.com/gpu=all --ipc host --shm-size 16g \
   `Uvicorn running on http://0.0.0.0:8000`까지 도달.
 - 여전히 멈춤: 다른 백엔드 env 시도 (`FLASHINFER`, `XFORMERS`, `FLASH_ATTN`).
 
-### 테스트 B — 테스트 A 성공 시 Gemma 4 26B 실전
+### 테스트 B — Gemma 4 26B 실전 (v0 + XFORMERS)
+
+`--shm-size`는 podman + `--ipc host`에서 충돌하므로 제외.
+TORCH_SDPA로 opt-125m은 올라갔지만 26B에선 여전히 TRITON_ATTN 멈춤이 재현됨
+→ v1 엔진의 EngineCore 서브프로세스가 env를 제대로 못 받는 것이 유력.
+v1을 끄고 attention 백엔드도 XFORMERS로 강제.
 
 ```bash
 docker rm -f vllm 2>/dev/null
 docker run -d --rm --name vllm \
-  --device nvidia.com/gpu=all --ipc host --shm-size 16g \
+  --device nvidia.com/gpu=all --ipc host \
   -p 8000:8000 \
   -v /home/user/models:/data/models \
   -e HF_HOME=/data/models \
-  -e VLLM_ATTENTION_BACKEND=TORCH_SDPA \
+  -e VLLM_USE_V1=0 \
+  -e VLLM_ATTENTION_BACKEND=XFORMERS \
   vllm/vllm-openai:gemma4-cu130 \
   --model google/gemma-4-26B-A4B-it \
   --host 0.0.0.0 --port 8000 \
@@ -85,8 +91,16 @@ docker run -d --rm --name vllm \
   --enforce-eager
 ```
 
-Triton 우회 + v0 엔진 고려 시 `-e VLLM_USE_V1=0`, 강제 spawn 시
-`-e VLLM_WORKER_MULTIPROC_METHOD=spawn`도 함께 시도.
+1분 대기 후 **실제로 어떤 백엔드가 선택됐는지** 확인:
+
+```bash
+docker logs vllm 2>&1 | grep -iE 'backend|attention' | head -20
+```
+
+- `XFORMERS` / `xformers` → env 먹음. 로딩 계속 대기.
+- 여전히 `TRITON_ATTN` → XFORMERS 미설치. env 값을 차례로
+  `FLASH_ATTN`, `FLASHINFER`, `TORCH_SDPA`로 바꿔 재시도.
+- `ImportError` / `not supported` → 해당 백엔드 미설치, 다음 후보로.
 
 ### 진행 상황 모니터링 (새 쉘)
 
