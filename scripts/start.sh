@@ -223,9 +223,15 @@ if [ "${LLM_ENGINE}" = "vllm" ]; then
 
     # Disable glob expansion for safe VLLM_EXTRA_ARGS word splitting
     set -f
+    # Mirror HOSTNAME_LLM behavior for vLLM: docker sets --hostname vllm, podman inherits host UTS
+    HOSTNAME_VLLM=(--hostname vllm)
+    if [ "${_is_podman}" = "true" ]; then
+        HOSTNAME_VLLM=()
+    fi
     MSYS_NO_PATHCONV=1 "${RUNTIME}" run -d \
         --name "${VLLM_CONTAINER}" \
         --network "${NETWORK}" \
+        "${HOSTNAME_VLLM[@]}" \
         --network-alias vllm \
         "${GPU_FLAGS[@]}" \
         --restart unless-stopped \
