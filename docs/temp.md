@@ -1,144 +1,151 @@
-# DGX Spark vLLM troubleshooting scratchpad
+# DGX Spark vLLM troubleshooting — actionable one-shot
 
-임시 디버그 노트. 원격 노드(k8s pod, GB10, 580.82.07 driver, compute_cap 12.1,
-/home/user on 3.4T NVMe)에서 vLLM 부팅이 `TRITON_ATTN backend` 직후 멈추는
-문제를 추적 중. 문제 해결되면 파일 삭제.
+모든 커맨드는 이 파일에서 직접 복사하세요. 원격지에서
+`cat docs/temp.md` / `less docs/temp.md`로 읽으면 됩니다.
 
-## 확정된 사실
-
-- **이미지**: `vllm/vllm-openai:gemma4-cu130` digest `sha256:0d15...fea833`.
-  reference(`dgx-spark-ai-cluster`)의 dgx-vllm이 이전에 같은 노드에서 정상 서빙한
-  적 있음(`"pong! 🏓"` 확인). 즉 이미지 자체는 이 하드웨어에서 동작 가능.
-- **런타임**: podman-like, cgroup 격리 제한(`docker top`/`docker stats` 불가).
-  `docker --gpus all` 경로가 막혀 CDI `--device nvidia.com/gpu=all`로 전환됨.
-- **MODEL_DIR**: 현재 `/home/user/models` (3.4T 여유). apply-profile이
-  auto-select 하도록 패치됨.
-- **PyTorch arch_list 검증**:
-  ```
-  cuda_avail True
-  dev_cap (12, 1)
-  arch_list ['sm_80', 'sm_90', 'sm_100', 'sm_110', 'sm_120', 'compute_120']
-  matmul_sum 1073741824.0
-  ```
-  **`sm_121`이 arch_list에 없음**. 단순 matmul은 cuBLAS + driver가 compute_120
-  PTX를 sm_121로 JIT 폴백해서 성공.
-
-## 현재 가설 (근거 있음)
-
-vLLM이 `AttentionBackendEnum.TRITON_ATTN`을 고른 뒤 Triton이 자체 JIT 커널을
-sm_121용으로 컴파일하려다 막힘. Triton은 PyTorch와 달리 자체 backend DB를
-갖고 있어서 sm_121 프로파일이 없으면 autotune/compile 루프에 빠질 수 있음.
-
-FlashAttention이 이 이미지의 Blackwell 빌드에 없거나 xformers 미포함이라
-Triton으로 폴백한 것이 2차 원인.
-
-## 이번 세션의 미해결 증상
-
-- `Using AttentionBackendEnum.TRITON_ATTN backend` 출력 후 stdout 정지
-- 네트워크 I/O 없음 (`du` 동일, `.incomplete` 없음)
-- 컨테이너 살아있지만 다운로드 진입조차 못 함
-- Ctrl+C 시 노드 프리즈 경험 있음 (통합 메모리 + 스크립트 detached 컨테이너
-  조합). 반드시 새 쉘에서 `docker rm -f <name>`으로 중단할 것.
-
-## 다음 단계: Triton 우회 + 최소 모델로 증명
-
-### 테스트 A — TORCH_SDPA로 Triton 경로 우회 (최소 모델)
+## TL;DR — 한 줄만 실행
 
 ```bash
-docker run --rm --device nvidia.com/gpu=all --ipc host --shm-size 16g \
-  -p 8000:8000 \
-  -e VLLM_ATTENTION_BACKEND=TORCH_SDPA \
-  vllm/vllm-openai:gemma4-cu130 \
-  --model facebook/opt-125m \
-  --host 0.0.0.0 --port 8000 \
-  --gpu-memory-utilization 0.30 \
-  --enforce-eager \
-  --max-model-len 2048 \
-  --max-num-seqs 1
+cd democlaw && git pull origin master && ./scripts/vllm-manual.sh
 ```
 
-- 성공 기준: 로그에 `Using AttentionBackendEnum.TORCH_SDPA backend`가 찍히고
-  `Uvicorn running on http://0.0.0.0:8000`까지 도달.
-- 여전히 멈춤: 다른 백엔드 env 시도 (`FLASHINFER`, `XFORMERS`, `FLASH_ATTN`).
+이 한 줄이 전부입니다. 내부에서 자동으로:
 
-### 테스트 B — Gemma 4 26B 실전 (v0 + XFORMERS)
+1. podman / docker 자동 감지 (podman 우선)
+2. 알려진 good digest(`sha256:0d152595...fea833`)로 이미지 **고정**
+   (기본값 `--pin`. 며칠 전 동작했던 증거가 있는 그 digest로 강제)
+3. 컨테이너 GPU 스모크 테스트 — CDI `--device nvidia.com/gpu=all` 우선,
+   실패 시 legacy `--gpus all` 자동 폴백
+4. `/home/user/models` 마운트
+5. dgx-spark-ai-cluster reference verbatim serve 플래그 그대로
+6. **sm_121 우회 env**: `TORCH_CUDA_ARCH_LIST=12.0` 외 NCCL/IPC 안전값
+7. `VLLM_LOGGING_LEVEL=DEBUG` + `NCCL_DEBUG=INFO`로 스톨 시 마지막 줄이 원인 단서
+8. 포그라운드 실행 + `tee /tmp/vllm-debug.log`. Ctrl+C 시 컨테이너 자동 정리
+   (INT/TERM/EXIT 트랩). 노드 프리즈 예방.
 
-`--shm-size`는 podman + `--ipc host`에서 충돌하므로 제외.
-TORCH_SDPA로 opt-125m은 올라갔지만 26B에선 여전히 TRITON_ATTN 멈춤이 재현됨
-→ v1 엔진의 EngineCore 서브프로세스가 env를 제대로 못 받는 것이 유력.
-v1을 끄고 attention 백엔드도 XFORMERS로 강제.
+## 왜 지금까지 안 됐는가 (조사 결과)
+
+### 증거 1: `vllm/vllm-openai:gemma4-cu130` 태그가 rewrite됨
+
+- 베어메탈에서 성공한 dgx-vllm이 썼던 digest: `sha256:0d152595...fea833`
+- 현재 Docker Hub 최신 digest: `sha256:b154b0cb...` (다른 값)
+- mutable tag라 `docker pull`이 며칠 전과 다른 이미지를 가져옴 =
+  **"며칠 전엔 됐는데 지금은 안 됨" regression의 가장 유력한 원인.**
+
+### 증거 2: vLLM 이슈 #28589 — Blackwell GB10 sm_121a 버그
+
+```
+triton.runtime.errors.PTXASError:
+ptxas fatal : Value 'sm_121a' is not defined for option 'gpu-name'
+```
+
+```
+ValueError: Selected backend AttentionBackendEnum.XFORMERS is not valid.
+Reason: ['sink setting not supported']
+```
+
+- 새 이미지(PyTorch/Triton 업데이트 포함)에서 ptxas가 `sm_121a`를 모름 →
+  Triton이 attention 커널 PTX 생성에서 에러 루프.
+- 다른 백엔드(XFORMERS/FLASH_ATTN/FLASHINFER)는 Gemma 4의 **attention sinks**를
+  지원 안 해서 거부 → v1 엔진이 폴백할 선택지가 없어 Triton으로 떨어지고
+  거기서 멈춤. **우리 증상과 정확히 일치.**
+
+### 증거 3: 환경이 분할됨
+
+- **성공한 환경** = 베어메탈 DGX Spark + docker
+- **실패한 환경** = 같은 물리 장비 위 nested custom container (k8s pod 형태) +
+  **podman**. cgroup 격리 제한, `--shm-size` + `--ipc host` 공존 불가,
+  `docker top`/`docker stats`가 "cannot create cgroup" 에러.
+- dgx-spark-ai-cluster의 setup-single.sh / docker-compose는 nested podman을
+  전혀 대비하지 않음 (순수 docker 전제).
+
+### 증거 4: 작은 모델(opt-125m)은 우회로 성공
+
+- `VLLM_ATTENTION_BACKEND=TORCH_SDPA --enforce-eager --max-model-len 2048`로
+  opt-125m은 `Uvicorn running`까지 도달.
+- 같은 env로 gemma-4-26B는 실패 → Gemma 4 MoE의 sink 요구 + 큰 kernel surface
+  조합에서만 재현. "작은 모델 된다고 큰 모델 된다"는 공식은 거짓.
+
+### 증거 5: "safety" 변형이 오히려 깨뜨림
+
+이 디버그 과정에서 제가 시도한 `--enforce-eager`, `VLLM_USE_V1=0`,
+`gpu_memory_utilization=0.60`, `max_model_len=32768`, 백엔드 override —
+**전부 reference와 다른 코드 경로**. reference가 성공했을 때 하나도 안 썼음.
+`vllm-manual.sh`은 이 모든 변형을 기본값에서 제거했고, 필요 시 `--backend`
+`--v0` 플래그로 **수동** 재활성만 가능.
+
+## 시나리오별 다음 수
+
+### (a) 성공 — `Uvicorn running on http://0.0.0.0:8000` 로그 보임
+
+끝. 검증:
+```bash
+curl -sf http://localhost:8000/v1/models | head
+curl -s http://localhost:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"google/gemma-4-26B-A4B-it","messages":[{"role":"user","content":"ping"}],"max_tokens":8}'
+```
+
+### (b) 스톨 — 60초 이상 새 로그 없음
+
+Ctrl+C로 빠져나오고(포그라운드 + 트랩 덕에 안전), `/tmp/vllm-debug.log`의
+**마지막 40줄만** 복사해서 저에게 전달:
+```bash
+tail -40 /tmp/vllm-debug.log
+```
+
+그 40줄이 원인 레이어를 찍어줍니다:
+- `NCCL INFO Bootstrap ...` 뒤 정지 → NCCL 초기화 (env로 방어 시도됨)
+- `HfHub ... retrying ...` → HF 접근 (HF_TOKEN 필요)
+- `Starting to load model ...` 뒤 정지 → 로더 워커 spawn (podman 격리 이슈)
+- `compiling ...` / `ptxas ... sm_121a` → Triton sm_121a 버그 확정
+- `cuda.py:274` 뒤 정말 아무것도 없음 → OS syscall deadlock (재부팅 필요)
+
+### (c) 에러 종료
 
 ```bash
-docker rm -f vllm 2>/dev/null
-docker run -d --rm --name vllm \
-  --device nvidia.com/gpu=all --ipc host \
-  -p 8000:8000 \
-  -v /home/user/models:/data/models \
-  -e HF_HOME=/data/models \
-  -e VLLM_USE_V1=0 \
-  -e VLLM_ATTENTION_BACKEND=XFORMERS \
-  vllm/vllm-openai:gemma4-cu130 \
-  --model google/gemma-4-26B-A4B-it \
-  --host 0.0.0.0 --port 8000 \
-  --gpu-memory-utilization 0.60 \
-  --dtype auto \
-  --quantization fp8 \
-  --kv-cache-dtype fp8 \
-  --load-format safetensors \
-  --max-model-len 32768 \
-  --max-num-seqs 1 \
-  --max-num-batched-tokens 4096 \
-  --enforce-eager
+tail -40 /tmp/vllm-debug.log
 ```
 
-1분 대기 후 **실제로 어떤 백엔드가 선택됐는지** 확인:
+### 디지스트 확인만 먼저 하고 싶을 때
 
 ```bash
-docker logs vllm 2>&1 | grep -iE 'backend|attention' | head -20
+./scripts/vllm-manual.sh --probe
 ```
 
-- `XFORMERS` / `xformers` → env 먹음. 로딩 계속 대기.
-- 여전히 `TRITON_ATTN` → XFORMERS 미설치. env 값을 차례로
-  `FLASH_ATTN`, `FLASHINFER`, `TORCH_SDPA`로 바꿔 재시도.
-- `ImportError` / `not supported` → 해당 백엔드 미설치, 다음 후보로.
+GPU 스모크만 돌리고 종료. 현재 pull된 digest가 known-good과 같은지 한 줄 비교.
 
-### 진행 상황 모니터링 (새 쉘)
+### 이미지 고정을 원치 않을 때 (현재 태그로 실험)
 
 ```bash
-docker logs -f vllm
-# 다른 창에서:
-watch -n 10 'du -sh /home/user/models; find /home/user/models -name "*.safetensors*" -exec ls -lh {} \;'
+./scripts/vllm-manual.sh --no-pin
 ```
 
-중단 필요 시 (Ctrl+C 금지):
+### 백엔드 override / v0 엔진 강제
+
 ```bash
-docker rm -f vllm
+./scripts/vllm-manual.sh --backend TORCH_SDPA
+./scripts/vllm-manual.sh --v0
+./scripts/vllm-manual.sh --backend FLASH_ATTN --v0
 ```
 
-## 테스트 결과 기록용 템플릿
+## 안전 수칙 (다시 강조)
 
-다음 시도 결과를 여기 한 줄씩 적으면서 이분탐색:
+- **절대 `-d` 백그라운드로 vLLM을 띄우지 말 것**. 스톨 시 Ctrl+C가 안 먹고
+  컨테이너가 통합 메모리를 쥔 채 남아 노드가 프리즈합니다. `vllm-manual.sh`은
+  포그라운드 강제.
+- **Ctrl+C가 이상하면** 새 쉘에서 `podman rm -f vllm` (또는 `docker rm -f vllm`).
+- 로드 중 `podman stats`/`podman top` 금지 (cgroup 에러로 실패).
+- 5분 넘어가는데 새 로그가 안 찍히면 즉시 중단 — 메모리 압박이 누적되기 전.
 
-- [ ] A-SDPA opt-125m:
-- [ ] A-FLASHINFER opt-125m:
-- [ ] A-XFORMERS opt-125m:
-- [ ] A-FLASH_ATTN opt-125m:
-- [ ] B-SDPA gemma-4-26B:
-- [ ] C-gemma-2-2b (원 테스트 3, gated 주의):
+## 커밋 이력 (이번 세션 관련)
 
-## democlaw 레포 관련 (현 상태)
-
-최근 커밋:
-- `0be6208` fix(dgx-spark): guard Gemma 4 cache scan against pipefail abort
-- `4714268` fix(dgx-spark): bound Gemma 4 cache scan with timeout + prune
-- `d4feb91` fix(dgx-spark): filter ephemeral mounts in MODEL_DIR picker + doctor upgrades
-- `bdb0bd8` fix(dgx-spark): auto-resolve MODEL_DIR + add doctor.sh diagnostic
-- `3f7ff3d` fix(dgx-spark): pin MODEL_DIR to /data/models (초기 시도, 효과 없음)
 - `65ec180` fix(dgx-spark): preflight container GPU access before starting vLLM
-
-이번 디버그 결과에 따라 start.sh에 추가될 가능성 있는 것들:
-1. `VLLM_ATTENTION_BACKEND` env 기본값 (Triton 회피)
-2. SIGINT trap → `docker rm -f democlaw-vllm`
-3. Shard progress watchdog → 무진행 시 조기 종료
-4. `--enforce-eager` 기본값 (DGX Spark 프로파일 한정)
-5. `VLLM_USE_V1=0` 기본값 (DGX Spark + v1 instability 확인 시)
+- `3f7ff3d` fix(dgx-spark): pin MODEL_DIR to /data/models (초기 시도, 효과 없음)
+- `bdb0bd8` fix(dgx-spark): auto-resolve MODEL_DIR + add doctor.sh diagnostic
+- `d4feb91` fix(dgx-spark): filter ephemeral mounts in MODEL_DIR picker + doctor upgrades
+- `4714268` fix(dgx-spark): bound Gemma 4 cache scan with timeout + prune
+- `0be6208` fix(dgx-spark): guard Gemma 4 cache scan against pipefail abort
+- `67221fe` docs(dgx-spark): temp.md troubleshooting scratchpad
+- `876e915` docs(dgx-spark): update temp.md test B to v0+XFORMERS
+- (다음 커밋) fix(dgx-spark): add vllm-manual.sh — single-command reference-verbatim launcher with sm_121 workarounds and known-good digest pin
