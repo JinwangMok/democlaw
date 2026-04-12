@@ -188,6 +188,22 @@ ensure_image "${OPENCLAW_IMAGE}" "${PROJECT_ROOT}/openclaw"
 
 log "Images ready."
 
+# ---------------------------------------------------------------------------
+# Container GPU preflight
+#
+# Host `nvidia-smi` passing is not enough: vLLM / llama.cpp need the NVIDIA
+# Container Toolkit to inject libcuda.so.1 into the container. Without it,
+# vLLM dies at engine init with "Failed to infer device type" / "Failed core
+# proc(s): {}". We run a smoke test against the just-pulled LLM image and,
+# if it fails, print a fix and optionally auto-install the toolkit.
+# ---------------------------------------------------------------------------
+source "${SCRIPT_DIR}/reference/gpu-preflight.sh"
+if [ "${LLM_ENGINE}" = "vllm" ]; then
+    gpu_preflight_require "${VLLM_IMAGE}"
+else
+    gpu_preflight_require "${LLAMACPP_IMAGE}"
+fi
+
 # ===========================================================================
 # Phase 2: Create network + start LLM engine
 # ===========================================================================
