@@ -156,13 +156,18 @@ _resolve_dgx_spark_model_dir() {
 
         if [ "${#existing_roots[@]}" -gt 0 ]; then
             if command -v timeout >/dev/null 2>&1; then
-                found=$(timeout 3 find "${existing_roots[@]}" \
+                # `|| true` protects against:
+                #   - timeout 124 when the scan is killed at the 3s mark
+                #   - SIGPIPE 141 when `head -1` closes the pipe early
+                # Without it, `set -euo pipefail` in start.sh exits silently
+                # right after "Applying profile" with no error message.
+                found=$( { timeout 3 find "${existing_roots[@]}" \
                     -xdev -maxdepth 5 \
                     \( -name proc -o -name sys -o -name .git -o -name node_modules \
                        -o -name overlay -o -name overlay2 -o -name containers \
                        -o -name docker -o -name .snapshots \) -prune -o \
                     -type d -name 'models--google--gemma-4-26B*' -print 2>/dev/null \
-                    | head -1)
+                    || true; } | head -1 || true)
             else
                 # Without `timeout`, skip the scan rather than risk hanging.
                 _profile_log "'timeout' not available; skipping Gemma 4 cache scan."
