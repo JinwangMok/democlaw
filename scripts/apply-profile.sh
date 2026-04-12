@@ -112,9 +112,95 @@ _apply_consumer_gpu_profile() {
     _profile_log "  Min VRAM  : ${MIN_VRAM_MIB} MiB"
 }
 
+# ---------------------------------------------------------------------------
+# DGX Spark MODEL_DIR auto-resolution
+#
+# start.sh falls back to ${HOME}/.cache/democlaw/models when MODEL_DIR is
+# unset, which lands on the root disk (often eMMC on DGX Spark) and cannot
+# share a warm cache with sibling toolchains. Pick a sensible path without
+# requiring the user to hand-edit .env:
+#
+#   1. Respect an existing MODEL_DIR (from .env / shell)
+#   2. Reuse any existing Gemma 4 HF snapshot found on mounted filesystems
+#      — this transparently shares the cache with e.g. dgx-spark-ai-cluster
+#   3. First writable NVMe mount from /proc/mounts
+#   4. /data/models if /data exists and is writable (DGX OS convention)
+#   5. ${HOME}/.cache/democlaw/models (last resort, same as start.sh fallback)
+#
+# Only the _default() helper touches MODEL_DIR, so precedence is preserved:
+# whatever the user sets explicitly wins over auto-detection.
+# ---------------------------------------------------------------------------
+_resolve_dgx_spark_model_dir() {
+    if [ -n "${MODEL_DIR:-}" ]; then
+        _profile_log "MODEL_DIR respected from environment: ${MODEL_DIR}"
+        return 0
+    fi
+
+    # 1. Search for an existing Gemma 4 snapshot on common mount points.
+    #    HF layout: <MODEL_DIR>/hub/models--google--gemma-4-26B-A4B-it/
+    local search_roots=(/data /mnt /srv /opt /workspace /var/lib /root /home)
+    local -a existing_roots=()
+    local r
+    for r in "${search_roots[@]}"; do
+        if [ -d "${r}" ]; then
+            existing_roots+=("${r}")
+        fi
+    done
+
+    local found=""
+    if [ "${#existing_roots[@]}" -gt 0 ]; then
+        # -maxdepth 6 keeps the scan bounded; -prune skips noisy trees.
+        found=$(find "${existing_roots[@]}" \
+            -xdev -maxdepth 6 \
+            \( -name proc -o -name sys -o -name .git -o -name node_modules \) -prune -o \
+            -type d -name 'models--google--gemma-4-26B*' -print 2>/dev/null \
+            | head -1)
+    fi
+
+    if [ -n "${found}" ]; then
+        # hub/ is one level up from models--google--...; MODEL_DIR is its parent.
+        local hub_dir parent
+        hub_dir="$(dirname "${found}")"
+        parent="$(dirname "${hub_dir}")"
+        if [ -w "${parent}" ]; then
+            MODEL_DIR="${parent}"
+            _profile_log "MODEL_DIR auto-detected from existing Gemma 4 cache: ${MODEL_DIR}"
+            return 0
+        fi
+        _profile_log "Found existing cache at ${parent} but it is not writable; skipping."
+    fi
+
+    # 2. First writable NVMe mount point (DGX Spark typical NVMe layout).
+    if [ -r /proc/mounts ]; then
+        local nvme_mount
+        nvme_mount=$(awk '$1 ~ /^\/dev\/nvme/ && $2 !~ /^\/(boot|efi)/ {print $2; exit}' /proc/mounts 2>/dev/null)
+        if [ -n "${nvme_mount}" ] && [ -w "${nvme_mount}" ]; then
+            MODEL_DIR="${nvme_mount}/democlaw/models"
+            _profile_log "MODEL_DIR auto-detected on NVMe mount: ${MODEL_DIR}"
+            return 0
+        fi
+    fi
+
+    # 3. /data/models if /data exists and is writable (DGX OS convention).
+    if [ -d /data ] && [ -w /data ]; then
+        MODEL_DIR="/data/models"
+        _profile_log "MODEL_DIR set to /data/models (DGX OS default)"
+        return 0
+    fi
+
+    # 4. Last resort: let start.sh fall back to ${HOME}/.cache/democlaw/models.
+    _profile_log "MODEL_DIR auto-detection found no NVMe/shared cache."
+    _profile_log "Will fall back to \${HOME}/.cache/democlaw/models in start.sh."
+    return 0
+}
+
 # --- Gemma 4 26B A4B MoE (DGX Spark, 128GB unified memory) ----------------
 _apply_dgx_spark_profile() {
     _profile_log "Applying profile: Gemma 4 26B A4B MoE (DGX Spark / 128GB)"
+
+    # --- MODEL_DIR auto-resolution (must run before other defaults so later
+    #     code can inspect the chosen path, e.g. for preflight size checks) ---
+    _resolve_dgx_spark_model_dir
 
     # --- LLM Engine selection: vLLM for DGX Spark ---
     _default LLM_ENGINE                "vllm"
