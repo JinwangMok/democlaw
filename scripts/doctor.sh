@@ -69,9 +69,11 @@ _run "ls -ld /data /data/models /mnt /srv /opt /home 2>/dev/null"
 
 # ---- existing Gemma 4 caches anywhere --------------------------------------
 _section "Gemma 4 cache discovery"
-_run "find /data /mnt /srv /opt /workspace /var/lib /root /home -xdev -maxdepth 6 \
-        \( -name proc -o -name sys -o -name .git -o -name node_modules \) -prune -o \
-        -type d -name 'models--google--gemma-4*' -print 2>/dev/null"
+_run "timeout 5 find /data /mnt /srv /opt /workspace /scratch /fast /root /home -xdev -maxdepth 5 \
+        \( -name proc -o -name sys -o -name .git -o -name node_modules \
+           -o -name overlay -o -name overlay2 -o -name containers \
+           -o -name docker -o -name .snapshots \) -prune -o \
+        -type d -name 'models--google--gemma-4*' -print 2>/dev/null || echo '(scan skipped/timeout)'"
 
 # ---- democlaw containers ---------------------------------------------------
 _section "democlaw containers"
@@ -146,9 +148,13 @@ _run "curl -s --max-time 3 http://localhost:8000/v1/models | head -c 400 ; echo"
         echo "cache : size=${bind_size:-0}  safetensors=${shard_count:-0}"
     fi
 
-    # Gemma 4 cache hits elsewhere (comma-joined, truncated)
-    other=$(find /data /mnt /srv /opt /workspace /var/lib /root /home -xdev -maxdepth 6 \
-        \( -name proc -o -name sys -o -name .git -o -name node_modules \) -prune -o \
+    # Gemma 4 cache hits elsewhere (comma-joined, truncated).
+    # Bounded with `timeout` + prune list so a multi-TB /home or overlayfs
+    # container store cannot stall the doctor run.
+    other=$(timeout 5 find /data /mnt /srv /opt /workspace /scratch /fast /root /home -xdev -maxdepth 5 \
+        \( -name proc -o -name sys -o -name .git -o -name node_modules \
+           -o -name overlay -o -name overlay2 -o -name containers \
+           -o -name docker -o -name .snapshots \) -prune -o \
         -type d -name 'models--google--gemma-4*' -print 2>/dev/null \
         | grep -v -F "${c_bind:-__nope__}" | head -3 | paste -sd',' -)
     echo "other : ${other:-none}"

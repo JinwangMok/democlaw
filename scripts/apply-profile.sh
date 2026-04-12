@@ -138,23 +138,38 @@ _resolve_dgx_spark_model_dir() {
 
     # 1. Search for an existing Gemma 4 snapshot on common mount points.
     #    HF layout: <MODEL_DIR>/hub/models--google--gemma-4-26B-A4B-it/
-    local search_roots=(/data /mnt /srv /opt /workspace /var/lib /root /home)
-    local -a existing_roots=()
-    local r
-    for r in "${search_roots[@]}"; do
-        if [ -d "${r}" ]; then
-            existing_roots+=("${r}")
-        fi
-    done
-
+    #
+    # WARNING: On a k8s pod with a multi-TB /home/user or /var/lib/containers
+    # backed by overlayfs, an unbounded find can stall for minutes. We:
+    #   - prune known noisy trees (overlay, container storage, vcs, node_modules)
+    #   - cap with `timeout` so a pathological filesystem can't hang startup
+    #   - skip entirely when DEMOCLAW_SKIP_CACHE_SCAN=1 (escape hatch)
+    #   - skip /var/lib (k8s / podman store) — never a useful cache location
     local found=""
-    if [ "${#existing_roots[@]}" -gt 0 ]; then
-        # -maxdepth 6 keeps the scan bounded; -prune skips noisy trees.
-        found=$(find "${existing_roots[@]}" \
-            -xdev -maxdepth 6 \
-            \( -name proc -o -name sys -o -name .git -o -name node_modules \) -prune -o \
-            -type d -name 'models--google--gemma-4-26B*' -print 2>/dev/null \
-            | head -1)
+    if [ "${DEMOCLAW_SKIP_CACHE_SCAN:-0}" != "1" ]; then
+        local search_roots=(/data /mnt /srv /opt /workspace /scratch /fast /root /home)
+        local -a existing_roots=()
+        local r
+        for r in "${search_roots[@]}"; do
+            [ -d "${r}" ] && existing_roots+=("${r}")
+        done
+
+        if [ "${#existing_roots[@]}" -gt 0 ]; then
+            if command -v timeout >/dev/null 2>&1; then
+                found=$(timeout 3 find "${existing_roots[@]}" \
+                    -xdev -maxdepth 5 \
+                    \( -name proc -o -name sys -o -name .git -o -name node_modules \
+                       -o -name overlay -o -name overlay2 -o -name containers \
+                       -o -name docker -o -name .snapshots \) -prune -o \
+                    -type d -name 'models--google--gemma-4-26B*' -print 2>/dev/null \
+                    | head -1)
+            else
+                # Without `timeout`, skip the scan rather than risk hanging.
+                _profile_log "'timeout' not available; skipping Gemma 4 cache scan."
+            fi
+        fi
+    else
+        _profile_log "Gemma 4 cache scan disabled via DEMOCLAW_SKIP_CACHE_SCAN=1."
     fi
 
     if [ -n "${found}" ]; then
