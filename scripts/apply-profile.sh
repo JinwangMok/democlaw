@@ -105,6 +105,7 @@ _apply_consumer_gpu_profile() {
     _default LLAMACPP_MAX_TOKENS       "4096"
     _default LLAMACPP_HEALTH_TIMEOUT   "600"
     _default LLAMACPP_TEMPERATURE      "0.7"
+    _default EXPECTED_SIZE_MIN         "2500000000"
 
     _profile_log "  Model     : ${MODEL_REPO}/${MODEL_FILE}"
     _profile_log "  Context   : ${CTX_SIZE} tokens"
@@ -314,6 +315,7 @@ _apply_dgx_spark_profile() {
     _default CACHE_TYPE_K              "q8_0"
     _default CACHE_TYPE_V              "q8_0"
     _default LLAMACPP_HEALTH_TIMEOUT   "1800"
+    _default EXPECTED_SIZE_MIN         "15000000000"
 
     if [ "${LLM_ENGINE}" = "vllm" ]; then
         _profile_log "  Engine    : vLLM (NVFP4A16 + modelopt)"

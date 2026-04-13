@@ -73,7 +73,7 @@ mkdir -p "${MODEL_DIR}"
 # ---------------------------------------------------------------------------
 # Check if model already exists and is valid
 # ---------------------------------------------------------------------------
-EXPECTED_SIZE_MIN=5000000000  # ~5 GB minimum for Q4_K_M 9B
+EXPECTED_SIZE_MIN="${EXPECTED_SIZE_MIN:-2500000000}"  # default: ~2.5 GB (Gemma 4 E4B Q4_K_M ≈ 3 GB). Overridden per-profile by apply-profile.sh.
 
 if [ -f "${MODEL_PATH}" ]; then
     file_size=$(stat -c%s "${MODEL_PATH}" 2>/dev/null || stat -f%z "${MODEL_PATH}" 2>/dev/null || echo "0")

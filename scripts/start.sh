@@ -235,6 +235,7 @@ else
         MODEL_DIR="${MODEL_DIR}" \
         MODEL_REPO="${MODEL_REPO}" \
         MODEL_FILE="${MODEL_FILE}" \
+        EXPECTED_SIZE_MIN="${EXPECTED_SIZE_MIN:-2500000000}" \
         HF_TOKEN="${HF_TOKEN:-}" \
             "${SCRIPT_DIR}/download-model.sh" --model-dir "${MODEL_DIR}" \
             || error "Pre-download of GGUF model failed."
